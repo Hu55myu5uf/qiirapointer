@@ -3,9 +3,9 @@ import Constants from 'expo-constants';
 import { auth } from '../config/firebase';
 
 // ============================================================
-// PRODUCTION API URL — Update this once your backend is deployed
+// PRODUCTION API URL — Connected to live Render backend
 // ============================================================
-const PRODUCTION_API_URL = 'https://qiira-api.onrender.com/api'; // ← Replace with your Render URL
+const PRODUCTION_API_URL = 'https://qiirapointer.onrender.com/api';
 
 // Auto-detect server IP from Expo packager connection
 const getApiUrl = () => {
