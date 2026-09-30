@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Build outputs
+dist/
+*/dist/
+web-build/
+*/web-build/
+expo-env.d.ts
+*/expo-env.d.ts
+
+# Expo & Mobile
+.expo/
+*/.expo/
+.kotlin/
+*/.kotlin/
+/client/ios/
+/client/android/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Environment & Secrets
+.env
+.env*
+*/.env
+*/.env*
+*.pem
+*firebase*.json
+*serviceAccount*.json
+firebase-service-account.json
+*/firebase-service-account.json
+serviceAccountKey.json
+*/serviceAccountKey.json
+client/src/config/firebaseconf.txt
+
+# Logs & Debug
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.metro-health-check*
+
+# System & IDE
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
