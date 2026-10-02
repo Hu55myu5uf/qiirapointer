@@ -35,6 +35,16 @@
   - Full platform statistics & revenue overview
 - ✅ **Golden Verified Badge (`#B28A45`)**:
   - Displayed uniformly on: Home vendor cards, Discover feed, Vendor & Client profiles, Favorites list, Chat inbox, Chat headers, Incoming call modal, Voice/Video call screens, Cart item rows, Post comments, and Review items.
+- ✅ **Universal Camera & File Attachments**:
+  - Direct camera snapping (photo/video) & document/file attachments supported across post creation, chat, and profile avatars/banners.
+- ✅ **Instant Reviews Anywhere**:
+  - Accessible via Vendor Details header, action row, about section, and directly inside active chat conversations.
+- ✅ **WhatsApp-Style Swipe-to-Reply**:
+  - Smooth gesture swiping on chat bubbles with docked reply preview banner.
+- ✅ **Showcase Branding**:
+  - Seamlessly migrated all "Reels" references to "Showcase" across client tabs, feeds, uploads, and backend routes.
+- ✅ **Share Posts to DM**:
+  - Direct sharing of feed and showcase posts into active conversation DMs with rich interactive preview cards.
 
 ---
 
