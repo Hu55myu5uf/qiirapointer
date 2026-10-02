@@ -12,16 +12,23 @@ import {
     Platform,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { WebView } from 'react-native-webview';
+import { Audio } from 'expo-av';
 import { useCallStore } from '../store/callStore';
+import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
-import { callAPI, authAPI, vendorAPI } from '../services/api';
+import { callAPI, authAPI, vendorAPI, API_URL } from '../services/api';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 
 const { width, height } = Dimensions.get('window');
 
 export default function CallScreen({ route, navigation }: any) {
     const { colors } = useTheme();
+    const { user: authUser } = useAuthStore();
+    const currentUserId = authUser?.uid || 'user_' + Date.now();
+    const currentUserName = authUser?.displayName || 'Caller';
+
     const {
         callId,
         callType: initialCallType = 'voice',
@@ -34,6 +41,7 @@ export default function CallScreen({ route, navigation }: any) {
 
     const [isVerified, setIsVerified] = useState(Boolean(initialIsVerified));
     const [isAdmin, setIsAdmin] = useState(Boolean(initialIsAdmin));
+    const webViewRef = useRef<any>(null);
 
     useEffect(() => {
         if (otherUserId && !isVerified) {
@@ -128,6 +136,32 @@ export default function CallScreen({ route, navigation }: any) {
         }
     }, [callStatus, isMuted]);
 
+    // Audio routing and permissions
+    useEffect(() => {
+        (async () => {
+            try {
+                await Audio.requestPermissionsAsync();
+                await Audio.setAudioModeAsync({
+                    allowsRecordingIOS: true,
+                    playsInSilentModeIOS: true,
+                    staysActiveInBackground: true,
+                    playThroughEarpieceAndroid: !isSpeaker,
+                });
+            } catch (e) {
+                console.warn('Audio setup note:', e);
+            }
+        })();
+    }, []);
+
+    useEffect(() => {
+        Audio.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+            staysActiveInBackground: true,
+            playThroughEarpieceAndroid: !isSpeaker,
+        }).catch(() => {});
+    }, [isSpeaker]);
+
     // Duration timer interval
     useEffect(() => {
         let timer: any = null;
@@ -169,7 +203,29 @@ export default function CallScreen({ route, navigation }: any) {
         return () => clearInterval(interval);
     }, [callId, callStatus]);
 
+    const handleToggleMute = () => {
+        toggleMute();
+        webViewRef.current?.postMessage(JSON.stringify({ action: 'TOGGLE_MUTE' }));
+    };
+
+    const handleToggleVideo = () => {
+        if (callType === 'voice') {
+            setCallType('video');
+        } else {
+            toggleVideo();
+            webViewRef.current?.postMessage(JSON.stringify({ action: 'TOGGLE_VIDEO' }));
+        }
+    };
+
+    const handleFlipCamera = () => {
+        toggleCamera();
+        webViewRef.current?.postMessage(JSON.stringify({ action: 'SWITCH_CAMERA' }));
+    };
+
     const handleEndCall = async () => {
+        try {
+            webViewRef.current?.postMessage(JSON.stringify({ action: 'END_CALL' }));
+        } catch (_) {}
         setCallStatus('ended');
         await endCurrentCall();
         setTimeout(() => {
@@ -184,9 +240,37 @@ export default function CallScreen({ route, navigation }: any) {
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
 
+    const roomUrl = `${API_URL}/calls/room/${callId}?userId=${encodeURIComponent(currentUserId)}&userName=${encodeURIComponent(currentUserName)}&type=${callType}&targetId=${encodeURIComponent(otherUserId || '')}`;
+
     return (
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor="#0D0E12" />
+
+            {/* Live WebRTC Stream (Hidden for voice, full screen for video) */}
+            {callId ? (
+                <WebView
+                    ref={webViewRef}
+                    source={{ uri: roomUrl }}
+                    style={callType === 'video' && isVideoEnabled ? styles.videoWebView : styles.hiddenWebView}
+                    allowsInlineMediaPlayback={true}
+                    mediaPlaybackRequiresUserAction={false}
+                    mediaCapturePermissionGrantType="grant"
+                    javaScriptEnabled={true}
+                    domStorageEnabled={true}
+                    originWhitelist={['*']}
+                    userAgent="Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Mobile Safari/537.36"
+                    onMessage={(event) => {
+                        try {
+                            const data = JSON.parse(event.nativeEvent.data);
+                            if (data.type === 'PEER_CONNECTED' || data.type === 'REMOTE_CONNECTED') {
+                                if (callStatus !== 'connected') {
+                                    setCallStatus('connected');
+                                }
+                            }
+                        } catch (_) {}
+                    }}
+                />
+            ) : null}
 
             {/* Top Bar */}
             <View style={styles.topBar}>
@@ -209,44 +293,15 @@ export default function CallScreen({ route, navigation }: any) {
 
             {/* Main Content Area */}
             {callType === 'video' && isVideoEnabled ? (
-                /* Video Call View */
-                <View style={styles.videoContainer}>
-                    {/* Remote Video Stream Simulation */}
-                    <View style={styles.remoteVideo}>
-                        <Image
-                            source={otherUserAvatar ? { uri: otherUserAvatar } : PLACEHOLDER_AVATARS.client}
-                            style={styles.remoteVideoBg}
-                            blurRadius={Platform.OS === 'web' ? 10 : 15}
-                        />
-                        <View style={styles.videoOverlayInfo}>
-                            <View style={{ position: 'relative' }}>
-                                <Image
-                                    source={otherUserAvatar ? { uri: otherUserAvatar } : PLACEHOLDER_AVATARS.client}
-                                    style={styles.videoAvatar}
-                                />
-                                <AvatarVerificationBadge isVerified={isVerified} isAdmin={isAdmin} size={18} />
-                            </View>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-                                <Text style={styles.videoName}>{otherUserName}</Text>
-                                <VerificationBadgeInline isVerified={isVerified} isAdmin={isAdmin} size={18} />
-                            </View>
-                            <Text style={styles.videoStatus}>
-                                {callStatus === 'connected' ? formatDuration(callDuration) : 'Connecting HD Video...'}
-                            </Text>
-                        </View>
+                /* Video Call Overlay Header */
+                <View style={styles.videoOverlayHeader}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={styles.videoName}>{otherUserName}</Text>
+                        <VerificationBadgeInline isVerified={isVerified} isAdmin={isAdmin} size={18} />
                     </View>
-
-                    {/* Local PIP Video Preview */}
-                    <View style={styles.pipContainer}>
-                        <View style={styles.pipVideo}>
-                            <Ionicons
-                                name={isFrontCamera ? 'person-circle-outline' : 'videocam-outline'}
-                                size={32}
-                                color="#B28A45"
-                            />
-                            <Text style={styles.pipLabel}>{isFrontCamera ? 'Front Camera' : 'Back Camera'}</Text>
-                        </View>
-                    </View>
+                    <Text style={styles.videoStatus}>
+                        {callStatus === 'connected' ? formatDuration(callDuration) : 'Connecting HD Stream...'}
+                    </Text>
                 </View>
             ) : (
                 /* Voice Call View */
@@ -306,7 +361,7 @@ export default function CallScreen({ route, navigation }: any) {
                     {/* Mute Toggle */}
                     <TouchableOpacity
                         style={[styles.controlBtn, isMuted && styles.controlBtnActive]}
-                        onPress={toggleMute}
+                        onPress={handleToggleMute}
                         activeOpacity={0.7}
                     >
                         <Ionicons
@@ -320,13 +375,7 @@ export default function CallScreen({ route, navigation }: any) {
                     {/* Video Toggle */}
                     <TouchableOpacity
                         style={[styles.controlBtn, !isVideoEnabled && styles.controlBtnActive]}
-                        onPress={() => {
-                            if (callType === 'voice') {
-                                setCallType('video');
-                            } else {
-                                toggleVideo();
-                            }
-                        }}
+                        onPress={handleToggleVideo}
                         activeOpacity={0.7}
                     >
                         <Ionicons
@@ -355,7 +404,7 @@ export default function CallScreen({ route, navigation }: any) {
                     {callType === 'video' && (
                         <TouchableOpacity
                             style={styles.controlBtn}
-                            onPress={toggleCamera}
+                            onPress={handleFlipCamera}
                             activeOpacity={0.7}
                         >
                             <Ionicons name="camera-reverse-outline" size={22} color="#FFFFFF" />
@@ -398,6 +447,32 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#0A0C10',
     },
+    videoWebView: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 1,
+        backgroundColor: '#0D0E12',
+    },
+    hiddenWebView: {
+        position: 'absolute',
+        width: 1,
+        height: 1,
+        opacity: 0.01,
+        zIndex: -1,
+    },
+    videoOverlayHeader: {
+        position: 'absolute',
+        top: 80,
+        left: 0,
+        right: 0,
+        alignItems: 'center',
+        zIndex: 10,
+        backgroundColor: 'rgba(10, 12, 16, 0.4)',
+        paddingVertical: 10,
+    },
     topBar: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -405,6 +480,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
         paddingTop: Platform.OS === 'android' ? 20 : 10,
         height: 60,
+        zIndex: 10,
     },
     minimizeBtn: {
         flexDirection: 'row',
@@ -491,39 +567,6 @@ const styles = StyleSheet.create({
         borderRadius: 3,
         backgroundColor: '#B28A45',
     },
-    // Video Call
-    videoContainer: {
-        flex: 1,
-        position: 'relative',
-    },
-    remoteVideo: {
-        flex: 1,
-        backgroundColor: '#111827',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    remoteVideoBg: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        width: '100%',
-        height: '100%',
-        resizeMode: 'cover',
-        opacity: 0.4,
-    },
-    videoOverlayInfo: {
-        alignItems: 'center',
-    },
-    videoAvatar: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        borderWidth: 2,
-        borderColor: '#B28A45',
-        marginBottom: 12,
-    },
     videoName: {
         color: '#FFFFFF',
         fontSize: 22,
@@ -534,39 +577,11 @@ const styles = StyleSheet.create({
         fontSize: 14,
         marginTop: 4,
     },
-    pipContainer: {
-        position: 'absolute',
-        top: 20,
-        right: 20,
-        width: 110,
-        height: 150,
-        borderRadius: 16,
-        backgroundColor: '#1F2937',
-        borderWidth: 1.5,
-        borderColor: '#B28A45',
-        overflow: 'hidden',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.4,
-        shadowRadius: 8,
-        elevation: 8,
-    },
-    pipVideo: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: '#111827',
-    },
-    pipLabel: {
-        color: '#B28A45',
-        fontSize: 9,
-        fontWeight: 'bold',
-        marginTop: 4,
-    },
     // Floating Dock
     controlDockContainer: {
         paddingHorizontal: 16,
         paddingBottom: Platform.OS === 'ios' ? 24 : 20,
+        zIndex: 10,
     },
     controlDock: {
         flexDirection: 'row',

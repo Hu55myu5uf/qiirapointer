@@ -251,6 +251,7 @@ function ClientTabs() {
 
   return (
     <Tab.Navigator
+      initialRouteName="Explore"
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
@@ -527,6 +528,7 @@ function VendorTabs() {
 
   return (
     <Tab.Navigator
+      initialRouteName="Explore"
       screenOptions={({ route }) => ({
         headerShown: true,
         headerStyle: { backgroundColor: colors.primary },
@@ -761,7 +763,14 @@ function MainApp() {
 
           const role = dbUser?.role || 'client';
           setRealRole(role);
-          setUser(firebaseUser);
+          const resolvedPhoto = dbUser?.profileImage || dbUser?.profile_image || dbUser?.businessImage || firebaseUser.photoURL || '';
+          const resolvedName = dbUser?.fullName || dbUser?.full_name || dbUser?.businessName || firebaseUser.displayName || '';
+          const enrichedUser = {
+            ...firebaseUser,
+            displayName: resolvedName || firebaseUser.displayName,
+            photoURL: resolvedPhoto || firebaseUser.photoURL,
+          };
+          setUser(enrichedUser as any);
 
           // Register for push notifications and save token
           const pushToken = await registerForPushNotifications();

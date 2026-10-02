@@ -19,6 +19,7 @@ import { authAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { auth } from '../config/firebase';
+import { updateProfile } from 'firebase/auth';
 import * as ImagePicker from 'expo-image-picker';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { useTheme } from '../context/ThemeContext';
@@ -157,11 +158,25 @@ export default function ClientProfileScreen() {
                 profileImage: uploadedImageUrl,
             });
 
+            if (auth.currentUser) {
+                try {
+                    await updateProfile(auth.currentUser, {
+                        displayName: fullName,
+                        photoURL: uploadedImageUrl || undefined,
+                    });
+                } catch (_) {}
+            }
+
             if (response?.data?.user) {
                 const u = response.data.user;
                 setFullName(u.fullName || u.full_name || fullName);
                 setPhoneNumber(u.phoneNumber || u.phone_number || phoneNumber);
                 setProfileImage(u.profileImage || u.profile_image || profileImage);
+                useAuthStore.getState().setUser({
+                    ...(user as any),
+                    displayName: u.fullName || fullName,
+                    photoURL: u.profileImage || uploadedImageUrl,
+                } as any);
             }
 
             Alert.alert('Success', 'Profile updated successfully');

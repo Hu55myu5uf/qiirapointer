@@ -20,6 +20,7 @@ import {
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
+import { PLACEHOLDER_AVATARS } from '../assets';
 import { postAPI } from '../services/api';
 import { sharePost, shareVendorProfile } from '../services/shareService';
 import VerificationBadge, { AvatarVerificationBadge, VerificationBadgeInline } from '../components/VerificationBadge';
@@ -248,11 +249,14 @@ export default function ExploreScreen({ navigation }: any) {
 
         setSubmittingComment(true);
         try {
-            const userName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'User';
+            const authUser = auth.currentUser;
+            const storeUser = useAuthStore.getState().user;
+            const userName = authUser?.displayName || (storeUser as any)?.displayName || authUser?.email?.split('@')[0] || 'User';
+            const userAvatar = authUser?.photoURL || (storeUser as any)?.photoURL || (storeUser as any)?.profileImage || (storeUser as any)?.avatar || '';
             const response = await postAPI.addComment(activePost.id, {
                 userId: currentUserId,
                 userName,
-                userAvatar: auth.currentUser?.photoURL || '',
+                userAvatar,
                 text: newCommentText.trim(),
             });
 
@@ -674,9 +678,7 @@ export default function ExploreScreen({ navigation }: any) {
                                     <View style={styles.commentItem}>
                                         <View style={{ position: 'relative' }}>
                                             <Image
-                                                source={{
-                                                    uri: item.userAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
-                                                }}
+                                                source={item.userAvatar ? { uri: item.userAvatar } : PLACEHOLDER_AVATARS.client}
                                                 style={styles.commentAvatar}
                                             />
                                             <AvatarVerificationBadge

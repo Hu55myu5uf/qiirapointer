@@ -363,14 +363,46 @@ export default function HomeScreen({ navigation }: any) {
         }
     };
 
+function matchesCategory(vendorCategory: string | undefined, selected: string): boolean {
+    if (!selected || selected === 'All') return true;
+    const cat = (vendorCategory || '').toLowerCase();
+    const sel = selected.toLowerCase();
+    if (cat === sel) return true;
+    if (cat.includes(sel) || sel.includes(cat)) return true;
+
+    if (sel.includes('restaurant') || sel.includes('food') || sel.includes('cafe')) {
+        return cat.includes('restaurant') || cat.includes('cafe') || cat.includes('food') || cat.includes('dining');
+    }
+    if (sel.includes('retail') || sel.includes('shop') || sel.includes('fashion')) {
+        return cat.includes('retail') || cat.includes('shop') || cat.includes('fashion') || cat.includes('apparel') || cat.includes('grocery') || cat.includes('supermarket');
+    }
+    if (sel.includes('service')) {
+        return cat.includes('service') || cat.includes('repair') || cat.includes('auto') || cat.includes('clean') || cat.includes('beauty') || cat.includes('spa');
+    }
+    if (sel.includes('health') || sel.includes('wellness')) {
+        return cat.includes('health') || cat.includes('wellness') || cat.includes('medic') || cat.includes('clinic') || cat.includes('pharm') || cat.includes('gym') || cat.includes('fit');
+    }
+    if (sel.includes('beauty') || sel.includes('spa')) {
+        return cat.includes('beauty') || cat.includes('spa') || cat.includes('saloon') || cat.includes('hair');
+    }
+    if (sel.includes('education') || sel.includes('train')) {
+        return cat.includes('educat') || cat.includes('train') || cat.includes('school') || cat.includes('academ');
+    }
+    if (sel.includes('tech') || sel.includes('electron')) {
+        return cat.includes('tech') || cat.includes('electron') || cat.includes('gadget') || cat.includes('softwar') || cat.includes('it');
+    }
+    return false;
+}
+
     const categories = [
         'All',
-        'Restaurant',
-        'Retail',
+        'Restaurants & Cafes',
+        'Retail & Shopping',
         'Services',
-        'Healthcare',
+        'Health & Wellness',
+        'Beauty & Spa',
+        'Technology & Electronics',
         'Education',
-        'Technology',
     ];
 
     useEffect(() => {
@@ -407,6 +439,13 @@ export default function HomeScreen({ navigation }: any) {
 
             const response = await vendorAPI.getAll(params);
             let filteredVendors = response.data.vendors || [];
+
+            // Category filter with alias tolerance
+            if (selectedCategory && selectedCategory !== 'All') {
+                filteredVendors = filteredVendors.filter((v: Vendor) =>
+                    matchesCategory(v.category, selectedCategory)
+                );
+            }
 
             // Client-side filtering by minimum rating
             if (minRating > 0) {

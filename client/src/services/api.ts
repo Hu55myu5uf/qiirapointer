@@ -86,6 +86,7 @@ export const vendorAPI = {
     getAll: (params?: any) => api.get('/vendors', { params }),
     getById: (id: string) => api.get(`/vendors/${id}`),
     getReviews: (id: string) => api.get(`/vendors/${id}/reviews`),
+    getComments: (id: string) => api.get(`/vendors/${id}/comments`),
     addReview: (vendorId: string, data: any) =>
         api.post(`/clients/${data.clientId || data.userId || 'anonymous'}/reviews`, { vendorId, ...data }),
     updateProfile: (id: string, data: any) => api.put(`/vendors/${id}/profile`, data),

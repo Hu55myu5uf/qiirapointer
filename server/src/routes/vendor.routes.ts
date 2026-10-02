@@ -244,7 +244,9 @@ router.get('/', async (req: Request, res: Response) => {
                     .select('*, users(*)');
 
                 if (category && category !== 'All') {
-                    query = query.eq('category', category as string);
+                    const catStr = String(category).toLowerCase();
+                    const cleanWord = catStr.split('&')[0].trim().split(' ')[0].trim();
+                    query = query.or(`category.ilike.%${cleanWord}%,category.ilike.%${catStr}%`);
                 }
 
                 if (search) {
@@ -357,9 +359,18 @@ router.get('/', async (req: Request, res: Response) => {
             console.warn('Enrich vendors error:', enrichErr.message);
         }
 
-        const mappedVendors = vendors
+        let mappedVendors = vendors
             .map(mapVendor)
             .filter((v: any) => v && (v.verificationStatus === 'approved' || v.isVerified === true));
+
+        if (category && category !== 'All') {
+            const catStr = String(category).toLowerCase();
+            const rootWord = catStr.split('&')[0].trim().split(' ')[0].trim();
+            mappedVendors = mappedVendors.filter((v: any) => {
+                const vCat = String(v.category || '').toLowerCase();
+                return vCat.includes(catStr) || catStr.includes(vCat) || (rootWord.length > 3 && vCat.includes(rootWord));
+            });
+        }
 
         res.status(200).json({ vendors: mappedVendors, count: mappedVendors.length });
     } catch (error: any) {
@@ -439,7 +450,12 @@ router.get('/', async (req: Request, res: Response) => {
 
             const { category, search } = req.query;
             if (category && category !== 'All') {
-                fsVendors = fsVendors.filter(v => v.category?.toLowerCase() === (category as string).toLowerCase());
+                const catStr = String(category).toLowerCase();
+                const rootWord = catStr.split('&')[0].trim().split(' ')[0].trim();
+                fsVendors = fsVendors.filter(v => {
+                    const vCat = String(v.category || '').toLowerCase();
+                    return vCat.includes(catStr) || catStr.includes(vCat) || (rootWord.length > 3 && vCat.includes(rootWord));
+                });
             }
             if (search) {
                 const s = (search as string).toLowerCase();
@@ -853,7 +869,7 @@ router.get('/:id/reviews', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
 
-        // Fetch reviews with reviewer details using relation JOIN with timeout
+        // 1. Fetch reviews with reviewer details from Supabase
         let mappedReviews: any[] = [];
         try {
             const result = await withTimeout(
@@ -884,10 +900,211 @@ router.get('/:id/reviews', async (req: Request, res: Response) => {
             }
         } catch (_) {}
 
+        // 2. Also check Firestore reviews
+        try {
+            const [vRevSnap, rootRevSnap]: any = await Promise.all([
+                withTimeout(db.collection('vendors').doc(id).collection('reviews').get(), 1000).catch(() => null),
+                withTimeout(db.collection('reviews').where('vendorId', '==', id).get(), 1000).catch(() => null),
+            ]);
+
+            const fsReviews: any[] = [];
+            if (vRevSnap?.docs) {
+                vRevSnap.docs.forEach((doc: any) => fsReviews.push({ id: doc.id, ...doc.data() }));
+            }
+            if (rootRevSnap?.docs) {
+                rootRevSnap.docs.forEach((doc: any) => {
+                    if (!fsReviews.some(r => r.id === doc.id)) {
+                        fsReviews.push({ id: doc.id, ...doc.data() });
+                    }
+                });
+            }
+
+            for (const fr of fsReviews) {
+                if (!mappedReviews.some(r => r.id === fr.id)) {
+                    mappedReviews.push({
+                        id: fr.id,
+                        rating: fr.rating || 5,
+                        comment: fr.comment || '',
+                        createdAt: fr.createdAt || fr.created_at || new Date().toISOString(),
+                        clientName: fr.clientName || fr.userName || 'Client',
+                        reviewerName: fr.clientName || fr.userName || 'Client',
+                        reviewerAvatar: fr.clientAvatar || fr.userAvatar || fr.reviewerAvatar || null,
+                        clientId: fr.clientId || fr.userId,
+                        isVerified: Boolean(fr.isVerified),
+                        isAdmin: Boolean(fr.isAdmin),
+                    });
+                }
+            }
+        } catch (_) {}
+
+        // 3. Enrich reviewer avatars from users collection for any missing avatar
+        const missingUserIds = mappedReviews
+            .filter(r => !r.reviewerAvatar && (r.clientId || r.id))
+            .map(r => r.clientId || r.id);
+
+        if (missingUserIds.length > 0) {
+            try {
+                const userDocs = await Promise.all(
+                    missingUserIds.slice(0, 15).map(uid => db.collection('users').doc(uid).get().catch(() => null))
+                );
+                const userAvatarMap = new Map<string, string>();
+                userDocs.forEach(ud => {
+                    if (ud && ud.exists) {
+                        const d = ud.data()!;
+                        const av = d.profileImage || d.profile_image || d.photoURL || d.avatar;
+                        if (av) userAvatarMap.set(ud.id, av);
+                    }
+                });
+
+                mappedReviews = mappedReviews.map(r => {
+                    if (!r.reviewerAvatar && (r.clientId || r.id)) {
+                        const av = userAvatarMap.get(r.clientId || r.id);
+                        if (av) return { ...r, reviewerAvatar: av };
+                    }
+                    return r;
+                });
+            } catch (_) {}
+        }
+
         res.status(200).json({ reviews: mappedReviews });
     } catch (error: any) {
         console.error('Get vendor reviews error:', error);
         res.status(200).json({ reviews: [] });
+    }
+});
+
+/**
+ * @route   GET /api/vendors/:id/comments
+ * @desc    Get all post comments received across all posts of this vendor
+ * @access  Public
+ */
+router.get('/:id/comments', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const vendorComments: any[] = [];
+
+        // 1. Find all posts for this vendor
+        const postMap = new Map<string, any>();
+        try {
+            const [postsSnap, memPostsSnap]: any = await Promise.all([
+                withTimeout(db.collection('posts').where('vendorId', '==', id).get(), 1200).catch(() => null),
+                withTimeout(db.collection('posts').where('userId', '==', id).get(), 1000).catch(() => null),
+            ]);
+
+            if (postsSnap?.docs) {
+                postsSnap.docs.forEach((doc: any) => postMap.set(doc.id, { id: doc.id, ...doc.data() }));
+            }
+            if (memPostsSnap?.docs) {
+                memPostsSnap.docs.forEach((doc: any) => postMap.set(doc.id, { id: doc.id, ...doc.data() }));
+            }
+        } catch (_) {}
+
+        // Also check memory posts
+        for (const p of MEMORY_VENDORS) {
+            if (p.vendorId === id && !postMap.has(p.id)) {
+                postMap.set(p.id, p);
+            }
+        }
+
+        const vendorPosts = Array.from(postMap.values());
+
+        // 2. Collect comments for each post
+        await Promise.all(
+            vendorPosts.map(async (post) => {
+                const postId = post.id;
+                try {
+                    // Try subcollection
+                    const commSnap = await withTimeout(
+                        db.collection('posts').doc(postId).collection('comments').get(),
+                        1000
+                    ).catch(() => null);
+
+                    if (commSnap?.docs) {
+                        commSnap.docs.forEach((cDoc: any) => {
+                            const cData = cDoc.data();
+                            vendorComments.push({
+                                id: cDoc.id,
+                                postId,
+                                postCaption: post.caption || 'Product Showcase',
+                                postMediaUrl: post.mediaUrl || post.thumbnailUrl || '',
+                                userId: cData.userId,
+                                userName: cData.userName || 'Client',
+                                userAvatar: cData.userAvatar || '',
+                                text: cData.text || '',
+                                createdAt: cData.createdAt || new Date().toISOString(),
+                                isVerified: Boolean(cData.isVerified),
+                                isAdmin: Boolean(cData.isAdmin),
+                            });
+                        });
+                    }
+
+                    // Try root comments collection
+                    const rootCommSnap = await withTimeout(
+                        db.collection('comments').where('postId', '==', postId).get(),
+                        1000
+                    ).catch(() => null);
+
+                    if (rootCommSnap?.docs) {
+                        rootCommSnap.docs.forEach((cDoc: any) => {
+                            if (!vendorComments.some(c => c.id === cDoc.id)) {
+                                const cData = cDoc.data();
+                                vendorComments.push({
+                                    id: cDoc.id,
+                                    postId,
+                                    postCaption: post.caption || 'Product Showcase',
+                                    postMediaUrl: post.mediaUrl || post.thumbnailUrl || '',
+                                    userId: cData.userId,
+                                    userName: cData.userName || 'Client',
+                                    userAvatar: cData.userAvatar || '',
+                                    text: cData.text || '',
+                                    createdAt: cData.createdAt || new Date().toISOString(),
+                                    isVerified: Boolean(cData.isVerified),
+                                    isAdmin: Boolean(cData.isAdmin),
+                                });
+                            }
+                        });
+                    }
+                } catch (_) {}
+            })
+        );
+
+        // 3. Enrich missing avatars from users collection
+        const commenterIds = Array.from(new Set(vendorComments.map(c => c.userId).filter(Boolean)));
+        if (commenterIds.length > 0) {
+            try {
+                const uDocs = await Promise.all(
+                    commenterIds.slice(0, 20).map(uid => db.collection('users').doc(uid).get().catch(() => null))
+                );
+                const avMap = new Map<string, { avatar: string; isVerified: boolean; isAdmin: boolean }>();
+                uDocs.forEach(ud => {
+                    if (ud && ud.exists) {
+                        const d = ud.data()!;
+                        avMap.set(ud.id, {
+                            avatar: d.profileImage || d.profile_image || d.photoURL || d.avatar || '',
+                            isVerified: Boolean(d.isVerified || d.is_verified || d.role === 'admin'),
+                            isAdmin: d.role === 'admin',
+                        });
+                    }
+                });
+
+                for (const vc of vendorComments) {
+                    if (vc.userId && avMap.has(vc.userId)) {
+                        const info = avMap.get(vc.userId)!;
+                        if (!vc.userAvatar && info.avatar) vc.userAvatar = info.avatar;
+                        if (info.isVerified) vc.isVerified = true;
+                        if (info.isAdmin) vc.isAdmin = true;
+                    }
+                }
+            } catch (_) {}
+        }
+
+        // Sort descending by date
+        vendorComments.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+        res.status(200).json({ comments: vendorComments, count: vendorComments.length });
+    } catch (error: any) {
+        console.error('Get vendor comments error:', error);
+        res.status(200).json({ comments: [], count: 0 });
     }
 });
 

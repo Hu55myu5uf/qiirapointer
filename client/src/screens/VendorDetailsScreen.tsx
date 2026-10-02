@@ -11,6 +11,9 @@ import {
     Linking,
     Dimensions,
     Platform,
+    Modal,
+    TextInput,
+    FlatList,
 } from 'react-native';
 import { vendorAPI, clientAPI, postAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
@@ -56,6 +59,60 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
     const [postsLoading, setPostsLoading] = useState(false);
     const [menuDocuments, setMenuDocuments] = useState<any[]>([]);
     const [menuDocsLoading, setMenuDocsLoading] = useState(false);
+
+    // Comments Modal State
+    const [commentModalVisible, setCommentModalVisible] = useState<boolean>(false);
+    const [activePostForComments, setActivePostForComments] = useState<any>(null);
+    const [comments, setComments] = useState<any[]>([]);
+    const [newCommentText, setNewCommentText] = useState<string>('');
+    const [loadingComments, setLoadingComments] = useState<boolean>(false);
+    const [submittingComment, setSubmittingComment] = useState<boolean>(false);
+
+    const handleOpenComments = async (post: any) => {
+        setActivePostForComments(post);
+        setCommentModalVisible(true);
+        setLoadingComments(true);
+        try {
+            const response = await postAPI.getComments(post.id);
+            setComments(response.data.comments || []);
+        } catch (error) {
+            console.error('Fetch comments error:', error);
+        } finally {
+            setLoadingComments(false);
+        }
+    };
+
+    const handleAddComment = async () => {
+        if (!newCommentText.trim() || !activePostForComments) return;
+        if (!user) {
+            Alert.alert('Sign In Required', 'Please sign in to comment.');
+            return;
+        }
+        setSubmittingComment(true);
+        try {
+            const userName = user.displayName || user.email?.split('@')[0] || 'User';
+            const response = await postAPI.addComment(activePostForComments.id, {
+                userId: user.uid,
+                userName,
+                userAvatar: user.photoURL || '',
+                text: newCommentText.trim(),
+            });
+
+            setComments((prev) => [response.data.comment, ...prev]);
+            setNewCommentText('');
+
+            setPosts((prev) =>
+                prev.map((p) =>
+                    p.id === activePostForComments.id ? { ...p, commentsCount: (p.commentsCount || 0) + 1 } : p
+                )
+            );
+        } catch (error) {
+            console.error('Add comment error:', error);
+            Alert.alert('Error', 'Failed to post comment');
+        } finally {
+            setSubmittingComment(false);
+        }
+    };
 
     const handleDeletePost = async (postId: string) => {
         if (!user) return;
@@ -527,7 +584,9 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: SPACING.sm, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: SPACING.xs }}>
                                                         <View style={{ flexDirection: 'row', gap: SPACING.md }}>
                                                             <Text style={{ fontSize: 12, color: colors.textSecondary }}>❤️ {post.likesCount || 0} likes</Text>
-                                                            <Text style={{ fontSize: 12, color: colors.textSecondary }}>💬 {post.commentsCount || 0} comments</Text>
+                                                            <TouchableOpacity onPress={() => handleOpenComments(post)} activeOpacity={0.7}>
+                                                                <Text style={{ fontSize: 12, color: colors.primary, fontWeight: '600' }}>💬 {post.commentsCount || 0} comments</Text>
+                                                            </TouchableOpacity>
                                                         </View>
                                                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.sm }}>
                                                             {post.price ? (
@@ -604,11 +663,18 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                             <View key={review.id} style={styles.reviewCard}>
                                                 <View style={styles.reviewHeader}>
                                                     <View style={{ position: 'relative' }}>
-                                                        <View style={styles.reviewerAvatar}>
-                                                            <Text style={styles.reviewerInitial}>
-                                                                {review.reviewerName?.charAt(0).toUpperCase() || 'A'}
-                                                            </Text>
-                                                        </View>
+                                                        {review.reviewerAvatar || review.clientAvatar || review.userAvatar ? (
+                                                            <Image
+                                                                source={{ uri: review.reviewerAvatar || review.clientAvatar || review.userAvatar }}
+                                                                style={styles.reviewerAvatar}
+                                                            />
+                                                        ) : (
+                                                            <View style={styles.reviewerAvatar}>
+                                                                <Text style={styles.reviewerInitial}>
+                                                                    {review.reviewerName?.charAt(0).toUpperCase() || 'A'}
+                                                                </Text>
+                                                            </View>
+                                                        )}
                                                         <AvatarVerificationBadge
                                                             isVerified={Boolean(review.isVerified)}
                                                             isAdmin={Boolean(review.isAdmin)}
@@ -736,6 +802,94 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                     vendorId: vendor?.uid || vendor?.id,
                 } : null}
             />
+
+            {/* Comments Modal */}
+            <Modal
+                visible={commentModalVisible}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setCommentModalVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        {/* Modal Header */}
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Comments</Text>
+                            <TouchableOpacity onPress={() => setCommentModalVisible(false)}>
+                                <Ionicons name="close" size={24} color={colors.textPrimary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Comments List */}
+                        {loadingComments ? (
+                            <View style={styles.commentsLoading}>
+                                <ActivityIndicator size="small" color={colors.primary} />
+                            </View>
+                        ) : comments.length === 0 ? (
+                            <View style={styles.noCommentsContainer}>
+                                <Text style={styles.noCommentsText}>No comments yet. Be the first to comment!</Text>
+                            </View>
+                        ) : (
+                            <FlatList
+                                data={comments}
+                                keyExtractor={(item) => item.id}
+                                style={styles.commentsList}
+                                renderItem={({ item }) => (
+                                    <View style={styles.commentItem}>
+                                        <View style={{ position: 'relative' }}>
+                                            <Image
+                                                source={item.userAvatar ? { uri: item.userAvatar } : PLACEHOLDER_AVATARS.client}
+                                                style={styles.commentAvatar}
+                                            />
+                                            <AvatarVerificationBadge
+                                                isVerified={Boolean(item.isVerified ?? item.is_verified)}
+                                                isAdmin={item.role === 'admin' || item.isAdmin}
+                                                size={12}
+                                            />
+                                        </View>
+                                        <View style={styles.commentTextContainer}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                <Text style={[styles.commentUserName, { flexShrink: 1 }]}>{item.userName}</Text>
+                                                <VerificationBadgeInline
+                                                    isVerified={Boolean(item.isVerified ?? item.is_verified)}
+                                                    isAdmin={item.role === 'admin' || item.isAdmin}
+                                                    size={12}
+                                                />
+                                            </View>
+                                            <Text style={styles.commentBody}>{item.text}</Text>
+                                        </View>
+                                    </View>
+                                )}
+                            />
+                        )}
+
+                        {/* Comment Input */}
+                        <View style={styles.commentInputRow}>
+                            <TextInput
+                                style={styles.commentTextInput}
+                                placeholder="Add a comment..."
+                                placeholderTextColor={colors.textTertiary}
+                                value={newCommentText}
+                                onChangeText={setNewCommentText}
+                            />
+                            <TouchableOpacity
+                                style={[
+                                    styles.sendCommentButton,
+                                    !newCommentText.trim() && { opacity: 0.5 },
+                                ]}
+                                onPress={handleAddComment}
+                                disabled={!newCommentText.trim() || submittingComment}
+                            >
+                                {submittingComment ? (
+                                    <ActivityIndicator size="small" color={colors.primary} />
+                                ) : (
+                                    <Ionicons name="send" size={20} color={colors.primary} />
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -1138,5 +1292,98 @@ const getStyles = (colors: any) => StyleSheet.create({
         color: colors.textSecondary,
         marginTop: SPACING.xs,
         lineHeight: 20,
+    },
+    // Comments Modal
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        justifyContent: 'flex-end',
+    },
+    modalContent: {
+        backgroundColor: colors.surface,
+        borderTopLeftRadius: BORDER_RADIUS.xl,
+        borderTopRightRadius: BORDER_RADIUS.xl,
+        paddingHorizontal: SPACING.md,
+        paddingTop: SPACING.md,
+        paddingBottom: Platform.OS === 'ios' ? 34 : SPACING.md,
+        maxHeight: '80%',
+        minHeight: '45%',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingBottom: SPACING.sm,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+    },
+    modalTitle: {
+        fontSize: FONT_SIZES.md,
+        fontWeight: 'bold',
+        color: colors.textPrimary,
+    },
+    commentsLoading: {
+        paddingVertical: SPACING.xl,
+        alignItems: 'center',
+    },
+    noCommentsContainer: {
+        paddingVertical: SPACING.xl,
+        alignItems: 'center',
+    },
+    noCommentsText: {
+        color: colors.textTertiary,
+        fontSize: FONT_SIZES.sm,
+    },
+    commentsList: {
+        marginTop: SPACING.sm,
+        marginBottom: SPACING.sm,
+    },
+    commentItem: {
+        flexDirection: 'row',
+        paddingVertical: SPACING.xs,
+        gap: SPACING.sm,
+    },
+    commentAvatar: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: colors.surfaceLight,
+    },
+    commentTextContainer: {
+        flex: 1,
+        backgroundColor: colors.background,
+        paddingHorizontal: SPACING.sm,
+        paddingVertical: 6,
+        borderRadius: BORDER_RADIUS.md,
+    },
+    commentUserName: {
+        fontSize: FONT_SIZES.xs,
+        fontWeight: 'bold',
+        color: colors.textPrimary,
+    },
+    commentBody: {
+        fontSize: FONT_SIZES.sm,
+        color: colors.textPrimary,
+        marginTop: 2,
+    },
+    commentInputRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.sm,
+        borderTopWidth: 1,
+        borderTopColor: colors.border,
+        paddingTop: SPACING.sm,
+    },
+    commentTextInput: {
+        flex: 1,
+        backgroundColor: colors.background,
+        borderRadius: BORDER_RADIUS.round,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 8,
+        color: colors.textPrimary,
+        fontSize: FONT_SIZES.sm,
+    },
+    sendCommentButton: {
+        padding: 8,
     },
 });

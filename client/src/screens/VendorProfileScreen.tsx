@@ -19,12 +19,13 @@ import {
     StatusBar,
     Linking,
 } from 'react-native';
-import { vendorAPI, postAPI } from '../services/api';
+import { vendorAPI, postAPI, authAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { shareVendorProfile, sharePost } from '../services/shareService';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { auth, storage } from '../config/firebase';
+import { updateProfile } from 'firebase/auth';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy'; // Use Legacy API for SDK 54
@@ -647,6 +648,29 @@ export default function VendorProfileScreen({ navigation }: any) {
                 bannerImage: bannerUrl,
                 businessHours,
             });
+
+            // Also synchronize with auth user profile so photo and name reflect everywhere in chat/comments/feed
+            try {
+                await authAPI.updateProfile(user.uid, {
+                    fullName: businessName,
+                    profileImage: imageUrl,
+                });
+            } catch (_) {}
+
+            if (auth.currentUser) {
+                try {
+                    await updateProfile(auth.currentUser, {
+                        displayName: businessName,
+                        photoURL: imageUrl || undefined,
+                    });
+                } catch (_) {}
+            }
+
+            useAuthStore.getState().setUser({
+                ...(user as any),
+                displayName: businessName,
+                photoURL: imageUrl,
+            } as any);
 
             // Update local state to prevent re-upload
             if (imageUrl !== businessImage) setBusinessImage(imageUrl);

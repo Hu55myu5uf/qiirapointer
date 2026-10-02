@@ -150,11 +150,14 @@ router.get('/feed', async (req: Request, res: Response) => {
 
         let filtered = allPosts.filter(p => {
             if (type && type !== 'all' && p.type !== type) return false;
-            if (category && category !== 'All' && p.category && p.category.toLowerCase() !== String(category).toLowerCase()) {
-                // Also check if category matches vendorCategory
-                if (!p.vendorCategory || p.vendorCategory.toLowerCase() !== String(category).toLowerCase()) {
-                    return false;
-                }
+            if (category && category !== 'All') {
+                const catStr = String(category).toLowerCase();
+                const rootWord = catStr.split('&')[0].trim().split(' ')[0].trim();
+                const pCat = String(p.category || '').toLowerCase();
+                const vCat = String(p.vendorCategory || '').toLowerCase();
+                const matches = pCat.includes(catStr) || catStr.includes(pCat) || (rootWord.length > 3 && pCat.includes(rootWord)) ||
+                                vCat.includes(catStr) || catStr.includes(vCat) || (rootWord.length > 3 && vCat.includes(rootWord));
+                if (!matches) return false;
             }
             return true;
         });
@@ -411,24 +414,41 @@ router.get('/:id/comments', async (req: Request, res: Response) => {
         const { id } = req.params;
         const commentsList: any[] = [];
 
-        // Check In-Memory comments
+        // 1. Check In-Memory comments
         if (IN_MEMORY_COMMENTS[id]) {
             commentsList.push(...IN_MEMORY_COMMENTS[id]);
         }
 
-        // Also check Firestore
+        // 2. Check Firestore post subcollection
         try {
-            const snapshot = await db.collection('posts').doc(id).collection('comments').orderBy('createdAt', 'asc').get();
-            snapshot.forEach(doc => {
-                if (!commentsList.some(c => c.id === doc.id)) {
-                    commentsList.push({ id: doc.id, ...doc.data() });
-                }
-            });
+            let snapshot: any = await db.collection('posts').doc(id).collection('comments').orderBy('createdAt', 'asc').get().catch(() => null);
+            if (!snapshot) {
+                snapshot = await db.collection('posts').doc(id).collection('comments').get().catch(() => null);
+            }
+            if (snapshot?.forEach) {
+                snapshot.forEach((doc: any) => {
+                    if (!commentsList.some(c => c.id === doc.id)) {
+                        commentsList.push({ id: doc.id, ...doc.data() });
+                    }
+                });
+            }
         } catch (_) {}
 
-        // Enrich comments with live verification status from users collection
+        // 3. Check Firestore root comments collection
+        try {
+            const rootSnap: any = await db.collection('comments').where('postId', '==', id).get().catch(() => null);
+            if (rootSnap?.forEach) {
+                rootSnap.forEach((doc: any) => {
+                    if (!commentsList.some(c => c.id === doc.id)) {
+                        commentsList.push({ id: doc.id, ...doc.data() });
+                    }
+                });
+            }
+        } catch (_) {}
+
+        // 4. Enrich comments with live verification status and latest profile photos
         const userIds = Array.from(new Set(commentsList.map(c => c.userId).filter(Boolean)));
-        const userVerifyMap = new Map<string, { isVerified: boolean; isAdmin: boolean }>();
+        const userVerifyMap = new Map<string, { isVerified: boolean; isAdmin: boolean; avatar?: string; name?: string }>();
 
         if (userIds.length > 0) {
             try {
@@ -439,6 +459,8 @@ router.get('/:id/comments', async (req: Request, res: Response) => {
                         userVerifyMap.set(doc.id, {
                             isVerified: Boolean(d.isVerified || d.is_verified || d.role === 'admin'),
                             isAdmin: d.role === 'admin',
+                            avatar: d.profileImage || d.profile_image || d.photoURL || d.avatar || '',
+                            name: d.fullName || d.full_name || d.displayName || '',
                         });
                     }
                 });
@@ -449,10 +471,14 @@ router.get('/:id/comments', async (req: Request, res: Response) => {
             const vInfo = userVerifyMap.get(c.userId);
             return {
                 ...c,
+                userAvatar: vInfo?.avatar || c.userAvatar || '',
+                userName: vInfo?.name || c.userName || 'User',
                 isVerified: vInfo?.isVerified ?? Boolean(c.isVerified),
                 isAdmin: vInfo?.isAdmin ?? false,
             };
         });
+
+        enrichedComments.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
 
         res.status(200).json({
             comments: enrichedComments,
@@ -479,13 +505,25 @@ router.post('/:id/comments', async (req: Request, res: Response) => {
             return;
         }
 
+        // Resolve latest user avatar from users collection
+        let resolvedAvatar = userAvatar || '';
+        let resolvedName = userName || 'User';
+        try {
+            const uDoc = await db.collection('users').doc(userId).get();
+            if (uDoc.exists) {
+                const uData = uDoc.data()!;
+                resolvedAvatar = uData.profileImage || uData.profile_image || uData.photoURL || uData.avatar || resolvedAvatar;
+                resolvedName = uData.fullName || uData.full_name || uData.displayName || resolvedName;
+            }
+        } catch (_) {}
+
         const commentId = `comment_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
         const newComment = {
             id: commentId,
             postId: id,
             userId,
-            userName: userName || 'User',
-            userAvatar: userAvatar || '',
+            userName: resolvedName,
+            userAvatar: resolvedAvatar,
             text,
             createdAt: new Date().toISOString(),
         };
@@ -501,9 +539,10 @@ router.post('/:id/comments', async (req: Request, res: Response) => {
             targetPost.commentsCount = (targetPost.commentsCount || 0) + 1;
         }
 
-        // Persist to Firestore
+        // Persist to Firestore (subcollection and root collection for max durability)
         try {
             await db.collection('posts').doc(id).collection('comments').doc(commentId).set(newComment);
+            await db.collection('comments').doc(commentId).set(newComment);
             await db.collection('posts').doc(id).set({
                 commentsCount: (targetPost?.commentsCount || 1),
             }, { merge: true });
