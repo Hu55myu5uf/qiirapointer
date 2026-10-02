@@ -24,6 +24,7 @@ import { postAPI } from '../services/api';
 import { sharePost, shareVendorProfile } from '../services/shareService';
 import VerificationBadge, { AvatarVerificationBadge, VerificationBadgeInline } from '../components/VerificationBadge';
 import CartButton from '../components/CartButton';
+import SharePostModal from '../components/SharePostModal';
 import { auth } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
 import { useCartStore } from '../store/cartStore';
@@ -155,6 +156,7 @@ export default function ExploreScreen({ navigation }: any) {
     const [newCommentText, setNewCommentText] = useState<string>('');
     const [loadingComments, setLoadingComments] = useState<boolean>(false);
     const [submittingComment, setSubmittingComment] = useState<boolean>(false);
+    const [selectedPostToShare, setSelectedPostToShare] = useState<any>(null);
 
     const currentUserId = auth.currentUser?.uid;
 
@@ -272,14 +274,7 @@ export default function ExploreScreen({ navigation }: any) {
     };
 
     const handleShare = async (post: any) => {
-        await sharePost({
-            postId: post.id,
-            vendorName: post.vendorName,
-            caption: post.caption,
-            price: post.price,
-            currency: post.currency,
-            mediaUrl: post.mediaUrl,
-        });
+        setSelectedPostToShare(post);
     };
 
     const handleDeletePost = async (postId: string) => {
@@ -530,7 +525,7 @@ export default function ExploreScreen({ navigation }: any) {
                     <Ionicons name="search-outline" size={18} color={colors.textTertiary} />
                     <TextInput
                         style={styles.searchInput}
-                        placeholder="Search products, services, reels..."
+                        placeholder="Search products, services, showcase..."
                         placeholderTextColor={colors.textTertiary}
                         value={searchQuery}
                         onChangeText={setSearchQuery}
@@ -542,7 +537,7 @@ export default function ExploreScreen({ navigation }: any) {
                     ) : null}
                 </View>
 
-                {/* Feed vs Reels Switcher */}
+                {/* Feed vs Showcase Switcher */}
                 <View style={styles.feedTypeSwitcher}>
                     <TouchableOpacity
                         style={[styles.switcherTab, activeTab === 'feed' && styles.switcherTabActive]}
@@ -578,7 +573,7 @@ export default function ExploreScreen({ navigation }: any) {
                                 activeTab === 'reels' && styles.switcherTabTextActive,
                             ]}
                         >
-                            Short Reels 🎬
+                            Showcase 🎬
                         </Text>
                     </TouchableOpacity>
                 </View>
@@ -611,7 +606,7 @@ export default function ExploreScreen({ navigation }: any) {
                 </ScrollView>
             </View>
 
-            {/* Posts / Reels List */}
+            {/* Posts / Showcase List */}
             {loading ? (
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={colors.primary} />
@@ -621,7 +616,7 @@ export default function ExploreScreen({ navigation }: any) {
                     <Ionicons name="images-outline" size={56} color={colors.textTertiary} />
                     <Text style={styles.emptyTitle}>No posts found</Text>
                     <Text style={styles.emptySubtitle}>
-                        Be the first vendor to share products and reels in this category!
+                        Be the first vendor to share products and showcase in this category!
                     </Text>
                     {userRole === 'vendor' && (
                         <TouchableOpacity
@@ -733,6 +728,12 @@ export default function ExploreScreen({ navigation }: any) {
                     </View>
                 </View>
             </Modal>
+
+            <SharePostModal
+                visible={!!selectedPostToShare}
+                onClose={() => setSelectedPostToShare(null)}
+                post={selectedPostToShare}
+            />
         </View>
     );
 }

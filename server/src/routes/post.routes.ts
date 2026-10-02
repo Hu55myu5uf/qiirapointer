@@ -175,27 +175,28 @@ router.get('/feed', async (req: Request, res: Response) => {
 });
 
 /**
- * @route   GET /api/posts/reels
- * @desc    Get reels only feed
+ * @route   GET /api/posts/showcase (or /api/posts/reels)
+ * @desc    Get showcase (video) only feed
  * @access  Public
  */
-router.get('/reels', async (req: Request, res: Response) => {
+router.get(['/reels', '/showcase'], async (req: Request, res: Response) => {
     try {
         const { userId } = req.query;
         const allPosts = await getAllUnifiedPosts();
 
-        const reels = allPosts.filter(p => p.type === 'reel').map(p => ({
+        const showcaseList = allPosts.filter(p => p.type === 'reel' || p.type === 'showcase').map(p => ({
             ...p,
             isLiked: userId ? (p.likedBy || []).includes(userId as string) : false,
         }));
 
         res.status(200).json({
-            reels,
-            count: reels.length,
+            showcase: showcaseList,
+            reels: showcaseList,
+            count: showcaseList.length,
         });
     } catch (error: any) {
-        console.error('Get reels error:', error);
-        res.status(500).json({ error: 'Failed to fetch reels', message: error.message });
+        console.error('Get showcase error:', error);
+        res.status(500).json({ error: 'Failed to fetch showcase', message: error.message });
     }
 });
 

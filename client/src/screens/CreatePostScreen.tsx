@@ -15,6 +15,7 @@ import {
     FlatList,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
@@ -169,6 +170,73 @@ export default function CreatePostScreen({ navigation }: any) {
             }
         } catch (error) {
             console.error('Pick media error:', error);
+        }
+    };
+
+    const handleSnapCamera = async () => {
+        try {
+            const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+            if (!permissionResult.granted) {
+                Alert.alert('Permission Denied', 'Camera permission is required to capture photos or video.');
+                return;
+            }
+
+            const isShowcase = postType === 'reels';
+            const result = await ImagePicker.launchCameraAsync({
+                mediaTypes: isShowcase ? ['videos'] : ['images', 'videos'],
+                videoMaxDuration: 60,
+                quality: 0.8,
+                base64: true,
+            });
+
+            if (!result.canceled && result.assets && result.assets.length > 0) {
+                const asset = result.assets[0];
+                let finalUri = '';
+                if (asset.base64) {
+                    finalUri = asset.base64.startsWith('data:')
+                        ? asset.base64
+                        : `data:${asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg')};base64,${asset.base64}`;
+                } else if (asset.uri) {
+                    finalUri = await convertBlobToBase64(asset.uri);
+                }
+                if (finalUri) {
+                    setMediaItems(prev => [
+                        ...prev,
+                        {
+                            uri: finalUri,
+                            type: asset.type === 'video' ? 'video' : 'image',
+                            id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+                        }
+                    ]);
+                }
+            }
+        } catch (error) {
+            console.error('Camera capture error:', error);
+            Alert.alert('Error', 'Could not open camera.');
+        }
+    };
+
+    const handlePickDocument = async () => {
+        try {
+            const result = await DocumentPicker.getDocumentAsync({
+                type: ['image/*', 'video/*'],
+                copyToCacheDirectory: true,
+            });
+            if (!result.canceled && result.assets && result.assets.length > 0) {
+                const asset = result.assets[0];
+                const uri = await convertBlobToBase64(asset.uri);
+                const isVideo = asset.mimeType?.startsWith('video/') || asset.name.endsWith('.mp4');
+                setMediaItems(prev => [
+                    ...prev,
+                    {
+                        uri,
+                        type: isVideo ? 'video' : 'image',
+                        id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+                    }
+                ]);
+            }
+        } catch (e) {
+            console.error('Document pick error:', e);
         }
     };
 
@@ -336,7 +404,7 @@ export default function CreatePostScreen({ navigation }: any) {
                             color={postType === 'reels' ? colors.textInverse : colors.textSecondary}
                         />
                         <Text style={[styles.typeButtonText, postType === 'reels' && styles.typeButtonTextActive]}>
-                            Reels
+                            Showcase
                         </Text>
                     </TouchableOpacity>
 
@@ -380,43 +448,50 @@ export default function CreatePostScreen({ navigation }: any) {
                         />
                     )}
 
-                    {/* Add Media Buttons */}
+                    {/* Add Media Buttons: Gallery & Camera */}
                     <View style={styles.addMediaRow}>
-                        <TouchableOpacity style={styles.addMediaButton} onPress={handlePickImages}>
+                        <TouchableOpacity style={[styles.addMediaButton, { flex: 1 }]} onPress={handlePickImages}>
                             <View style={styles.addMediaIconContainer}>
-                                <Ionicons name="cloud-upload-outline" size={28} color={colors.primary} />
+                                <Ionicons name="images-outline" size={26} color={colors.primary} />
                             </View>
                             <Text style={styles.addMediaButtonTitle}>
-                                {postType === 'reels' ? 'Add Videos' : postType === 'mixed' ? 'Add Media' : 'Add Photos'}
+                                {postType === 'reels' ? 'Gallery Video' : 'Gallery'}
                             </Text>
                             <Text style={styles.addMediaButtonSubtitle}>
-                                Select multiple from library
+                                Choose from library
                             </Text>
                         </TouchableOpacity>
 
-                        {postType === 'mixed' && (
-                            <>
-                                <TouchableOpacity style={styles.addMediaButtonSmall} onPress={() => handlePickSingleMedia('images')}>
-                                    <Ionicons name="image-outline" size={22} color={colors.primary} />
-                                    <Text style={styles.addMediaButtonSmallText}>Photos</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.addMediaButtonSmall} onPress={() => handlePickSingleMedia('videos')}>
-                                    <Ionicons name="videocam-outline" size={22} color={colors.primary} />
-                                    <Text style={styles.addMediaButtonSmallText}>Videos</Text>
-                                </TouchableOpacity>
-                            </>
-                        )}
+                        <TouchableOpacity style={[styles.addMediaButton, { flex: 1 }]} onPress={handleSnapCamera}>
+                            <View style={[styles.addMediaIconContainer, { backgroundColor: '#3B82F6' + '20' }]}>
+                                <Ionicons name="camera-outline" size={26} color="#3B82F6" />
+                            </View>
+                            <Text style={styles.addMediaButtonTitle}>
+                                {postType === 'reels' ? 'Record Video' : 'Camera Snap'}
+                            </Text>
+                            <Text style={styles.addMediaButtonSubtitle}>
+                                Take with camera
+                            </Text>
+                        </TouchableOpacity>
                     </View>
 
-                    {/* URL / Preset Options */}
-                    <View style={styles.quickMediaBar}>
+                    {/* Document / File & URL Options */}
+                    <View style={{ flexDirection: 'row', gap: SPACING.sm, marginTop: SPACING.xs }}>
                         <TouchableOpacity
-                            style={styles.quickMediaButton}
+                            style={[styles.quickMediaButton, { flex: 1 }]}
+                            onPress={handlePickDocument}
+                        >
+                            <Ionicons name="document-attach-outline" size={16} color={colors.primary} />
+                            <Text style={styles.quickMediaButtonText}>Browse Files</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.quickMediaButton, { flex: 1 }]}
                             onPress={() => setShowUrlInput(!showUrlInput)}
                         >
                             <Ionicons name="link-outline" size={16} color={colors.primary} />
                             <Text style={styles.quickMediaButtonText}>
-                                {showUrlInput ? 'Hide URL Box' : 'Paste Image URL'}
+                                {showUrlInput ? 'Hide URL' : 'Image URL'}
                             </Text>
                         </TouchableOpacity>
                     </View>

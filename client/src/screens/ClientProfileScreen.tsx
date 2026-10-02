@@ -77,22 +77,59 @@ export default function ClientProfileScreen() {
     };
 
     const handlePickImage = async () => {
-        const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!permissionResult.granted) {
-            Alert.alert('Permission Required', 'Please grant permission to access your photos');
-            return;
-        }
-
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.8,
-        });
-
-        if (!result.canceled && result.assets[0]) {
-            setProfileImage(result.assets[0].uri);
-        }
+        Alert.alert(
+            'Profile Photo',
+            'Choose image source:',
+            [
+                {
+                    text: 'Snap with Camera',
+                    onPress: async () => {
+                        try {
+                            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+                            if (status !== 'granted') {
+                                Alert.alert('Permission Required', 'Camera permission is required.');
+                                return;
+                            }
+                            const res = await ImagePicker.launchCameraAsync({
+                                mediaTypes: ['images'],
+                                allowsEditing: true,
+                                aspect: [1, 1],
+                                quality: 0.8,
+                            });
+                            if (!res.canceled && res.assets[0]) {
+                                setProfileImage(res.assets[0].uri);
+                            }
+                        } catch (e) {
+                            console.error('Camera photo error:', e);
+                        }
+                    },
+                },
+                {
+                    text: 'Choose from Gallery',
+                    onPress: async () => {
+                        try {
+                            const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                            if (!permissionResult.granted) {
+                                Alert.alert('Permission Required', 'Please grant permission to access your photos');
+                                return;
+                            }
+                            const result = await ImagePicker.launchImageLibraryAsync({
+                                mediaTypes: ['images'],
+                                allowsEditing: true,
+                                aspect: [1, 1],
+                                quality: 0.8,
+                            });
+                            if (!result.canceled && result.assets[0]) {
+                                setProfileImage(result.assets[0].uri);
+                            }
+                        } catch (e) {
+                            console.error('Gallery error:', e);
+                        }
+                    },
+                },
+                { text: 'Cancel', style: 'cancel' },
+            ]
+        );
     };
 
     const handleSave = async () => {

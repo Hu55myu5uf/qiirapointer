@@ -26,6 +26,7 @@ import { useCartStore } from '../store/cartStore';
 import { useCallStore } from '../store/callStore';
 import CartButton from '../components/CartButton';
 import CallOptionModal from '../components/CallOptionModal';
+import SharePostModal from '../components/SharePostModal';
 
 const { width } = Dimensions.get('window');
 
@@ -43,6 +44,7 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
     const { user, userRole } = useAuthStore();
     const { addItem: addToCart } = useCartStore();
     const { startCall } = useCallStore();
+    const [selectedPostToShare, setSelectedPostToShare] = useState<any>(null);
     const [vendor, setVendor] = useState<any>(null);
     const [loading, setLoading] = useState(true);
     const [isFavorite, setIsFavorite] = useState(false);
@@ -301,16 +303,28 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
 
                         {/* Stats Row */}
                         <View style={styles.statsRow}>
-                            {vendor.averageRating > 0 ? (
-                                <View style={styles.statItem}>
-                                    <Text style={styles.statValue}>⭐ {Number(vendor.averageRating).toFixed(1)}</Text>
-                                    <Text style={styles.statLabel}>Rating</Text>
-                                </View>
-                            ) : null}
-                            <View style={styles.statItem}>
+                            <TouchableOpacity
+                                style={styles.statItem}
+                                onPress={() => navigation.navigate('WriteReview', {
+                                    vendorId: vendor.id || vendor.uid,
+                                    businessName: vendor.businessName,
+                                    isVerified: Boolean(vendor.isVerified ?? vendor.is_verified)
+                                })}
+                                activeOpacity={0.7}
+                            >
+                                <Text style={styles.statValue}>⭐ {vendor.averageRating > 0 ? Number(vendor.averageRating).toFixed(1) : 'Rate'}</Text>
+                                <Text style={styles.statLabel}>{vendor.averageRating > 0 ? 'Rating' : 'Add Review'}</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={styles.statItem}
+                                onPress={() => setActiveTab('reviews')}
+                                activeOpacity={0.7}
+                            >
                                 <Text style={styles.statValue}>{vendor.totalReviews || 0}</Text>
                                 <Text style={styles.statLabel}>Reviews</Text>
-                            </View>
+                            </TouchableOpacity>
+
                             {vendor.address ? (
                                 <View style={[styles.statItem, { flex: 1 }]}>
                                     <Text style={styles.statLabel} numberOfLines={1}>📍 {vendor.address}</Text>
@@ -318,7 +332,7 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                             ) : null}
                         </View>
 
-                        {/* Direct Action Row: Chat & Call */}
+                        {/* Direct Action Row: Chat, Call & Review */}
                         <View style={styles.primaryActionRow}>
                             <TouchableOpacity
                                 style={styles.chatActionButton}
@@ -336,7 +350,7 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                 }}
                                 activeOpacity={0.8}
                             >
-                                <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.textPrimary} />
+                                <Ionicons name="chatbubble-ellipses-outline" size={17} color={colors.textPrimary} />
                                 <Text style={styles.chatActionText}>Chat</Text>
                             </TouchableOpacity>
 
@@ -345,8 +359,21 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                 onPress={handleContact}
                                 activeOpacity={0.8}
                             >
-                                <Ionicons name="call-outline" size={18} color={colors.textInverse} />
+                                <Ionicons name="call-outline" size={17} color={colors.textInverse} />
                                 <Text style={styles.callActionText}>Call</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={styles.reviewActionButton}
+                                onPress={() => navigation.navigate('WriteReview', {
+                                    vendorId: vendor.id || vendor.uid,
+                                    businessName: vendor.businessName,
+                                    isVerified: Boolean(vendor.isVerified ?? vendor.is_verified)
+                                })}
+                                activeOpacity={0.8}
+                            >
+                                <Ionicons name="star" size={16} color="#F59E0B" />
+                                <Text style={styles.reviewActionText}>Review</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -413,12 +440,50 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                     ) : (
                                         <Text style={styles.noHoursText}>Business hours not available</Text>
                                     )}
+                                    <View style={styles.quickReviewCard}>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.quickReviewTitle}>Have you worked with this vendor?</Text>
+                                            <Text style={styles.quickReviewSub}>Leave a quick rating & review</Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.quickReviewBtn}
+                                            onPress={() => navigation.navigate('WriteReview', {
+                                                vendorId: vendor.id || vendor.uid,
+                                                businessName: vendor.businessName,
+                                                isVerified: Boolean(vendor.isVerified ?? vendor.is_verified)
+                                            })}
+                                            activeOpacity={0.8}
+                                        >
+                                            <Ionicons name="star" size={14} color="#F59E0B" />
+                                            <Text style={styles.quickReviewBtnText}>Rate Vendor</Text>
+                                        </TouchableOpacity>
+                                    </View>
                                 </View>
                             </View>
                         )}
 
                         {activeTab === 'services' && (
-                            <Text style={styles.bodyText}>{vendor.services || 'No services listed.'}</Text>
+                            <View>
+                                <Text style={styles.bodyText}>{vendor.services || 'No services listed.'}</Text>
+                                <View style={[styles.quickReviewCard, { marginTop: SPACING.lg }]}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.quickReviewTitle}>Satisfied with their service?</Text>
+                                        <Text style={styles.quickReviewSub}>Share your review with other clients</Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={styles.quickReviewBtn}
+                                        onPress={() => navigation.navigate('WriteReview', {
+                                            vendorId: vendor.id || vendor.uid,
+                                            businessName: vendor.businessName,
+                                            isVerified: Boolean(vendor.isVerified ?? vendor.is_verified)
+                                        })}
+                                        activeOpacity={0.8}
+                                    >
+                                        <Ionicons name="star" size={14} color="#F59E0B" />
+                                        <Text style={styles.quickReviewBtnText}>Write Review</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
                         )}
 
                         {activeTab === 'posts' && (
@@ -429,7 +494,7 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                     <View style={{ alignItems: 'center', paddingVertical: SPACING.xl }}>
                                         <Ionicons name="images-outline" size={40} color={colors.textTertiary} />
                                         <Text style={{ color: colors.textSecondary, marginTop: SPACING.sm, fontSize: FONT_SIZES.sm }}>
-                                            No products or reels published yet.
+                                            No products or showcase published yet.
                                         </Text>
                                     </View>
                                 ) : (
@@ -441,10 +506,10 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                                         source={{ uri: post.mediaUrl || post.thumbnailUrl || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=400' }}
                                                         style={{ width: '100%', height: 220, resizeMode: 'cover', backgroundColor: colors.surfaceLight }}
                                                     />
-                                                    {post.type === 'reel' && (
-                                                        <View style={{ position: 'absolute', top: 8, left: 8, backgroundColor: 'rgba(0,0,0,0.7)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                    {(post.type === 'reel' || post.type === 'showcase') && (
+                                                        <View style={{ position: 'absolute', top: 8, left: 8, backgroundColor: 'rgba(0,0,0,0.75)', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                                                             <Ionicons name="play" size={12} color="#fff" />
-                                                            <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>REEL</Text>
+                                                            <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>SHOWCASE</Text>
                                                         </View>
                                                     )}
                                                     {post.price !== undefined && post.price !== null && post.price !== '' && Number(post.price) > 0 ? (
@@ -493,7 +558,7 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                                                     <Text style={{ fontSize: 11, fontWeight: 'bold', color: colors.textInverse }}>Add</Text>
                                                                 </TouchableOpacity>
                                                             ) : null}
-                                                            <TouchableOpacity onPress={() => sharePost({ postId: post.id, vendorName: vendor.businessName, caption: post.caption, price: post.price })}>
+                                                            <TouchableOpacity onPress={() => setSelectedPostToShare(post)}>
                                                                 <Ionicons name="share-social-outline" size={18} color={colors.primary} />
                                                             </TouchableOpacity>
                                                             {((user && (user.uid === vendor?.uid || user.uid === vendor?.id || user.uid === post.vendorId)) || userRole === 'admin') && (
@@ -658,6 +723,19 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                 onClose={() => setCallModalVisible(false)}
                 navigation={navigation}
             />
+            <SharePostModal
+                visible={!!selectedPostToShare}
+                onClose={() => setSelectedPostToShare(null)}
+                post={selectedPostToShare ? {
+                    id: selectedPostToShare.id,
+                    vendorName: vendor?.businessName || 'Vendor',
+                    caption: selectedPostToShare.caption,
+                    price: selectedPostToShare.price,
+                    currency: selectedPostToShare.currency,
+                    mediaUrl: selectedPostToShare.mediaUrl,
+                    vendorId: vendor?.uid || vendor?.id,
+                } : null}
+            />
         </View>
     );
 }
@@ -796,6 +874,58 @@ const getStyles = (colors: any) => StyleSheet.create({
         fontSize: FONT_SIZES.sm,
         fontWeight: 'bold',
         color: colors.textInverse,
+    },
+    reviewActionButton: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        paddingVertical: 10,
+        borderRadius: BORDER_RADIUS.round,
+        backgroundColor: '#F59E0B' + '15',
+        borderWidth: 1.5,
+        borderColor: '#F59E0B' + '50',
+    },
+    reviewActionText: {
+        fontSize: FONT_SIZES.sm,
+        fontWeight: 'bold',
+        color: '#D97706',
+    },
+    quickReviewCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.surface,
+        padding: SPACING.md,
+        borderRadius: BORDER_RADIUS.md,
+        marginTop: SPACING.md,
+        borderWidth: 1,
+        borderColor: '#F59E0B' + '40',
+        gap: SPACING.sm,
+    },
+    quickReviewTitle: {
+        fontSize: FONT_SIZES.sm,
+        fontWeight: '700',
+        color: colors.textPrimary,
+    },
+    quickReviewSub: {
+        fontSize: FONT_SIZES.xs,
+        color: colors.textSecondary,
+        marginTop: 2,
+    },
+    quickReviewBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: '#F59E0B',
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 8,
+        borderRadius: BORDER_RADIUS.round,
+    },
+    quickReviewBtnText: {
+        fontSize: FONT_SIZES.xs,
+        fontWeight: 'bold',
+        color: '#FFFFFF',
     },
     // Info
     infoContainer: {

@@ -125,23 +125,59 @@ export default function AdminDashboardScreen({ navigation }: any) {
 
 
     const handlePickImage = async () => {
-        const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-        if (!permissionResult.granted) {
-            Alert.alert('Permission Required', 'Please grant permission to access your photos');
-            return;
-        }
-
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
-            allowsEditing: true,
-            aspect: [16, 9],
-            quality: 0.8,
-        });
-
-        if (!result.canceled && result.assets[0]) {
-            setFormData({ ...formData, businessImage: result.assets[0].uri });
-        }
+        Alert.alert(
+            'Vendor Image',
+            'Choose image source:',
+            [
+                {
+                    text: 'Snap with Camera',
+                    onPress: async () => {
+                        try {
+                            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+                            if (status !== 'granted') {
+                                Alert.alert('Permission Required', 'Camera permission is required.');
+                                return;
+                            }
+                            const res = await ImagePicker.launchCameraAsync({
+                                mediaTypes: ['images'],
+                                allowsEditing: true,
+                                aspect: [16, 9],
+                                quality: 0.8,
+                            });
+                            if (!res.canceled && res.assets[0]) {
+                                setFormData({ ...formData, businessImage: res.assets[0].uri });
+                            }
+                        } catch (e) {
+                            console.error('Camera error:', e);
+                        }
+                    },
+                },
+                {
+                    text: 'Choose from Gallery',
+                    onPress: async () => {
+                        try {
+                            const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                            if (!permissionResult.granted) {
+                                Alert.alert('Permission Required', 'Please grant permission to access your photos');
+                                return;
+                            }
+                            const result = await ImagePicker.launchImageLibraryAsync({
+                                mediaTypes: ['images'],
+                                allowsEditing: true,
+                                aspect: [16, 9],
+                                quality: 0.8,
+                            });
+                            if (!result.canceled && result.assets[0]) {
+                                setFormData({ ...formData, businessImage: result.assets[0].uri });
+                            }
+                        } catch (e) {
+                            console.error('Gallery error:', e);
+                        }
+                    },
+                },
+                { text: 'Cancel', style: 'cancel' },
+            ]
+        );
     };
 
     const handleCreateVendor = async () => {
@@ -370,7 +406,7 @@ export default function AdminDashboardScreen({ navigation }: any) {
                                 </View>
                             </View>
                             <Text style={styles.viewModeDesc}>
-                                Experience discovery maps, explore reels, products, saved cart, vendor chats, and customer profile.
+                                Experience discovery maps, explore showcase, products, saved cart, vendor chats, and customer profile.
                             </Text>
                         </View>
                         <Ionicons name="chevron-forward" size={22} color={colors.textSecondary} />
@@ -392,7 +428,7 @@ export default function AdminDashboardScreen({ navigation }: any) {
                                 </View>
                             </View>
                             <Text style={styles.viewModeDesc}>
-                                Experience merchant storefront, publish posts & reels, review customer feedback, and manage business profile.
+                                Experience merchant storefront, publish posts & showcase, review customer feedback, and manage business profile.
                             </Text>
                         </View>
                         <Ionicons name="chevron-forward" size={22} color={colors.textSecondary} />

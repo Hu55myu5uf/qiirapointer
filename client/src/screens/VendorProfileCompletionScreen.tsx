@@ -62,16 +62,54 @@ export default function VendorProfileCompletionScreen({ route, navigation }: any
             return;
         }
 
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
-            allowsEditing: true,
-            aspect: [16, 9],
-            quality: 0.8,
-        });
-
-        if (!result.canceled && result.assets[0]) {
-            setFormData({ ...formData, businessImage: result.assets[0].uri });
-        }
+        Alert.alert(
+            'Business Image',
+            'Choose image source:',
+            [
+                {
+                    text: 'Snap with Camera',
+                    onPress: async () => {
+                        try {
+                            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+                            if (status !== 'granted') {
+                                Alert.alert('Permission Required', 'Camera permission is required.');
+                                return;
+                            }
+                            const res = await ImagePicker.launchCameraAsync({
+                                mediaTypes: ['images'],
+                                allowsEditing: true,
+                                aspect: [16, 9],
+                                quality: 0.8,
+                            });
+                            if (!res.canceled && res.assets[0]) {
+                                setFormData({ ...formData, businessImage: res.assets[0].uri });
+                            }
+                        } catch (e) {
+                            console.error('Camera error:', e);
+                        }
+                    },
+                },
+                {
+                    text: 'Choose from Gallery',
+                    onPress: async () => {
+                        try {
+                            const result = await ImagePicker.launchImageLibraryAsync({
+                                mediaTypes: ['images'],
+                                allowsEditing: true,
+                                aspect: [16, 9],
+                                quality: 0.8,
+                            });
+                            if (!result.canceled && result.assets[0]) {
+                                setFormData({ ...formData, businessImage: result.assets[0].uri });
+                            }
+                        } catch (e) {
+                            console.error('Gallery error:', e);
+                        }
+                    },
+                },
+                { text: 'Cancel', style: 'cancel' },
+            ]
+        );
     };
 
     const handleComplete = async () => {

@@ -258,8 +258,13 @@ router.get('/conversations/:conversationId/messages', async (req: Request, res: 
             return {
                 id: doc.id,
                 senderId: d.senderId || d.sender_id,
-                text: d.text,
-                createdAt: d.createdAt || d.created_at
+                text: d.text || '',
+                createdAt: d.createdAt || d.created_at,
+                mediaUrl: d.mediaUrl || null,
+                mediaType: d.mediaType || null,
+                fileName: d.fileName || null,
+                replyTo: d.replyTo || null,
+                sharedPost: d.sharedPost || null
             };
         });
 
@@ -271,16 +276,76 @@ router.get('/conversations/:conversationId/messages', async (req: Request, res: 
 });
 
 /**
+ * @route   POST /api/chats/upload-attachment
+ * @desc    Upload an attachment (photo, video, document) for chat
+ * @access  Private
+ */
+router.post('/upload-attachment', async (req: Request, res: Response) => {
+    try {
+        const { userId, fileData, fileName, fileType } = req.body;
+        if (!userId || !fileData) {
+            return res.status(400).json({ error: 'Missing required fields (userId, fileData)' });
+        }
+
+        const fs = require('fs');
+        const path = require('path');
+
+        const uploadsDir = path.join(__dirname, '../../uploads/chats', userId);
+        if (!fs.existsSync(uploadsDir)) {
+            fs.mkdirSync(uploadsDir, { recursive: true });
+        }
+
+        const safeName = (fileName || 'attachment').replace(/[^a-zA-Z0-9._-]/g, '_');
+        const ext = path.extname(safeName) || (fileType?.includes('video') ? '.mp4' : fileType?.includes('image') ? '.jpg' : '.dat');
+        const baseName = path.basename(safeName, ext);
+        const uniqueFilename = `${baseName}_${Date.now()}${ext}`;
+        const filepath = path.join(uploadsDir, uniqueFilename);
+
+        const base64Data = fileData.replace(/^data:[^;]+;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
+        fs.writeFileSync(filepath, buffer);
+
+        const protocol = req.protocol || 'http';
+        const host = req.get('host') || 'localhost:5000';
+        const url = `${protocol}://${host}/uploads/chats/${userId}/${uniqueFilename}`;
+
+        res.status(200).json({
+            url,
+            fileName: safeName,
+            fileType: fileType || 'application/octet-stream',
+            fileSize: buffer.length
+        });
+    } catch (error: any) {
+        console.error('Upload chat attachment error:', error);
+        res.status(500).json({ error: 'Failed to upload chat attachment', message: error.message });
+    }
+});
+
+/**
  * @route   POST /api/chats/messages
  * @desc    Send a message (creates conversation if it doesn't exist)
  * @access  Private (requires authentication)
  */
 router.post('/messages', async (req: Request, res: Response) => {
     try {
-        let { conversationId, senderId, receiverId, text, receiverName, receiverImage, senderImage } = req.body;
+        let {
+            conversationId,
+            senderId,
+            receiverId,
+            text,
+            receiverName,
+            receiverImage,
+            senderImage,
+            mediaUrl,
+            mediaType,
+            fileName,
+            replyTo,
+            sharedPost
+        } = req.body;
 
-        if (!text || (!senderId && !conversationId)) {
-            return res.status(400).json({ error: 'Missing message text or sender' });
+        const effectiveText = (text || '').trim();
+        if (!effectiveText && !mediaUrl && !sharedPost) {
+            return res.status(400).json({ error: 'Missing message content, media, or shared post' });
         }
 
         if (!receiverId && conversationId) {
@@ -298,12 +363,22 @@ router.post('/messages', async (req: Request, res: Response) => {
             } catch (_) {}
         }
 
-        if (!senderId || !receiverId || !text) {
-            return res.status(400).json({ error: 'Missing required fields: senderId, receiverId, or text' });
+        if (!senderId || !receiverId) {
+            return res.status(400).json({ error: 'Missing required fields: senderId or receiverId' });
         }
 
         const convId = conversationId || [senderId, receiverId].sort().join('_');
         const now = new Date().toISOString();
+
+        // Summary representation for lastMessage
+        let lastMessagePreview = effectiveText;
+        if (!lastMessagePreview) {
+            if (mediaType === 'image') lastMessagePreview = '📷 Photo';
+            else if (mediaType === 'video') lastMessagePreview = '🎥 Video';
+            else if (fileName) lastMessagePreview = `📎 ${fileName}`;
+            else if (sharedPost) lastMessagePreview = `🛍️ ${sharedPost.title || sharedPost.vendorName || 'Shared Post'}`;
+            else lastMessagePreview = 'Shared an attachment';
+        }
 
         // Retrieve sender & receiver profiles if not supplied
         const senderProfile = await getParticipantProfile(senderId);
@@ -339,17 +414,25 @@ router.post('/messages', async (req: Request, res: Response) => {
                 participants: [senderId, receiverId],
                 participantNames,
                 participantImages,
-                lastMessage: text,
+                lastMessage: lastMessagePreview,
                 lastMessageAt: now,
                 updatedAt: now
             }, { merge: true });
 
-            const msgRef = await convRef.collection('messages').add({
+            const messagePayload: any = {
                 senderId,
                 receiverId,
-                text,
-                createdAt: now
-            });
+                text: effectiveText,
+                createdAt: now,
+            };
+
+            if (mediaUrl) messagePayload.mediaUrl = mediaUrl;
+            if (mediaType) messagePayload.mediaType = mediaType;
+            if (fileName) messagePayload.fileName = fileName;
+            if (replyTo) messagePayload.replyTo = replyTo;
+            if (sharedPost) messagePayload.sharedPost = sharedPost;
+
+            const msgRef = await convRef.collection('messages').add(messagePayload);
 
             // 2. Attempt Supabase insert in background
             try {
@@ -364,13 +447,13 @@ router.post('/messages', async (req: Request, res: Response) => {
                         id: convId,
                         client_id: senderId,
                         vendor_id: receiverId,
-                        last_message: text,
+                        last_message: lastMessagePreview,
                         last_message_at: now,
                         participant_names: participantNames
                     });
                 } else {
                     await supabase.from('conversations').update({
-                        last_message: text,
+                        last_message: lastMessagePreview,
                         last_message_at: now
                     }).eq('id', convId);
                 }
@@ -378,7 +461,7 @@ router.post('/messages', async (req: Request, res: Response) => {
                 await supabase.from('messages').insert({
                     conversation_id: convId,
                     sender_id: senderId,
-                    text
+                    text: effectiveText || lastMessagePreview
                 });
             } catch (_) {}
 
@@ -386,9 +469,7 @@ router.post('/messages', async (req: Request, res: Response) => {
                 message: 'Message sent successfully',
                 data: {
                     id: msgRef.id,
-                    senderId,
-                    text,
-                    createdAt: now
+                    ...messagePayload
                 },
                 conversationId: convId
             });

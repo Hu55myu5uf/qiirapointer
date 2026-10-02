@@ -167,7 +167,7 @@ export default function CartScreen({ navigation }: any) {
                     <Ionicons name="cart-outline" size={72} color={colors.textTertiary} />
                     <Text style={styles.emptyTitle}>Your cart is empty</Text>
                     <Text style={styles.emptySubtitle}>
-                        Explore products and reels from vendors and save the items you love!
+                        Explore products and showcase from vendors and save the items you love!
                     </Text>
                     <TouchableOpacity
                         style={styles.exploreButton}

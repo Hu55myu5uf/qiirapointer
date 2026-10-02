@@ -142,11 +142,22 @@ export const chatAPI = {
         conversationId?: string;
         senderId: string;
         receiverId: string;
-        text: string;
+        text?: string;
         receiverName: string;
         receiverImage?: string;
         senderImage?: string;
+        mediaUrl?: string;
+        mediaType?: 'image' | 'video' | 'file' | 'document';
+        fileName?: string;
+        replyTo?: any;
+        sharedPost?: any;
     }) => api.post('/chats/messages', data),
+    uploadAttachment: (data: {
+        userId: string;
+        fileData: string;
+        fileName: string;
+        fileType?: string;
+    }) => api.post('/chats/upload-attachment', data),
 };
 
 export const postAPI = {
@@ -154,6 +165,8 @@ export const postAPI = {
         api.get('/posts/feed', { params }),
     getReels: (userId?: string) =>
         api.get('/posts/reels', { params: { userId } }),
+    getShowcase: (userId?: string) =>
+        api.get('/posts/showcase', { params: { userId } }),
     getVendorPosts: (vendorId: string, userId?: string) =>
         api.get(`/posts/vendor/${vendorId}`, { params: { userId } }),
     getPost: (id: string, userId?: string) =>
