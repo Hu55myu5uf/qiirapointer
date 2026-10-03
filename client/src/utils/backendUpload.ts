@@ -1,8 +1,22 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { API_URL } from '../services/api';
+import { auth } from '../config/firebase';
+
+// Build JSON headers including the Firebase ID token (required by secured upload endpoints)
+const getAuthHeaders = async (): Promise<Record<string, string>> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const user = auth.currentUser;
+    if (user) {
+        const token = await user.getIdToken();
+        headers.Authorization = `Bearer ${token}`;
+    }
+    return headers;
+};
+
+const resolveUserId = (userId?: string) => userId || auth.currentUser?.uid || '';
 
 // Helper: Upload image via backend API (temporary, testing without Firebase Storage)
-export const uploadImageViaBackend = async (uri: string, imageType: 'profile' | 'banner', userId?: string): Promise<string> => {
+export const uploadImageViaBackend = async (uri: string, imageType: 'profile' | 'banner' | string, userId?: string): Promise<string> => {
     let base64 = '';
 
     if (uri.startsWith('data:image')) {
@@ -13,11 +27,11 @@ export const uploadImageViaBackend = async (uri: string, imageType: 'profile' | 
         // So we can just pass the full URI.
         const response = await fetch(`${API_URL}/vendors/upload-image`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: await getAuthHeaders(),
             body: JSON.stringify({
                 imageData: uri,
                 imageType,
-                userId: userId || 'default_user'
+                userId: resolveUserId(userId)
             })
         });
 
@@ -59,13 +73,13 @@ export const uploadImageViaBackend = async (uri: string, imageType: 'profile' | 
     const payload = {
         imageData: dataURI,
         imageType,
-        userId: userId || 'default_user'
+        userId: resolveUserId(userId)
     };
 
     console.log('[Upload] Sending to backend API...');
     const response = await fetch(`${API_URL}/vendors/upload-image`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(),
         body: JSON.stringify(payload)
     });
 
@@ -93,12 +107,12 @@ export const uploadDocumentViaBackend = async (
         console.log('[Upload Doc] Received data URI.');
         const response = await fetch(`${API_URL}/vendors/upload-document`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: await getAuthHeaders(),
             body: JSON.stringify({
                 fileData: uri,
                 fileName,
                 fileType: mimeType,
-                userId: userId || 'default_user'
+                userId: resolveUserId(userId)
             })
         });
 
@@ -136,13 +150,13 @@ export const uploadDocumentViaBackend = async (
         fileData: dataURI,
         fileName,
         fileType: mimeType,
-        userId: userId || 'default_user'
+        userId: resolveUserId(userId)
     };
 
     console.log('[Upload Doc] Sending document to backend API...');
     const response = await fetch(`${API_URL}/vendors/upload-document`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: await getAuthHeaders(),
         body: JSON.stringify(payload)
     });
 

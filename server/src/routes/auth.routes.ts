@@ -1,8 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { auth, db } from '../config/firebase';
 import supabase from '../config/supabase';
+import { authenticateUser, requireSelfOrAdmin, MASTER_ADMIN_UID } from '../utils/authMiddleware';
+import { rateLimiter } from '../utils/rateLimiter';
 
 const router = Router();
+
+// Rate limiter for authentication endpoints: 40 requests per 15 minutes per IP
+const authLimiter = rateLimiter(15 * 60 * 1000, 40, 'Too many authentication attempts. Please try again later.');
 
 // Resilient user profile retriever (checks Firestore, Supabase, and Firebase Auth)
 async function getUserProfile(uid: string) {
@@ -56,8 +61,7 @@ async function getUserProfile(uid: string) {
             if (fbUser) {
                 const email = fbUser.email || '';
                 let role = 'client';
-                if (email.includes('admin')) role = 'admin';
-                else if (email.includes('bistro') || email.includes('repair') || email.includes('clinic') || email.includes('market') || email.includes('vendor')) role = 'vendor';
+                if (email.includes('bistro') || email.includes('repair') || email.includes('clinic') || email.includes('market') || email.includes('vendor')) role = 'vendor';
 
                 rawData = {
                     uid,
@@ -84,7 +88,8 @@ async function getUserProfile(uid: string) {
     const profileImage = rawData.profileImage || rawData.profile_image || rawData.photoURL || '';
     const phoneNumber = rawData.phoneNumber || rawData.phone_number || null;
     const role = rawData.role || 'client';
-    const isAdmin = Boolean(role === 'admin' || uid === 'v8MwaOet0ISfZAWXIDAPAGcg1td2' || (rawData.email && String(rawData.email).includes('admin')));
+    // STRICT Admin check: Only explicit DB role === 'admin' OR the master admin UID
+    const isAdmin = Boolean(role === 'admin' || uid === MASTER_ADMIN_UID);
     const isVerified = rawData.isVerified ?? rawData.is_verified ?? isAdmin;
     const isSuspended = rawData.isSuspended ?? rawData.is_suspended ?? false;
 
@@ -114,7 +119,7 @@ async function getUserProfile(uid: string) {
  * @desc    Register a new user (Client or Vendor)
  * @access  Public
  */
-router.post('/register', async (req: Request, res: Response) => {
+router.post('/register', authLimiter, async (req: Request, res: Response) => {
     try {
         const { email, password, role, fullName, phoneNumber } = req.body;
 
@@ -217,7 +222,7 @@ router.post('/register', async (req: Request, res: Response) => {
  * @desc    Login user (handled by Firebase Client SDK, this is for verification)
  * @access  Public
  */
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', authLimiter, async (req: Request, res: Response) => {
     try {
         const { idToken } = req.body;
 
@@ -381,7 +386,7 @@ router.get('/user/:uid', async (req: Request, res: Response) => {
  * @desc    Update user profile
  * @access  Private (requires authentication)
  */
-router.put('/user/:uid', async (req: Request, res: Response) => {
+router.put('/user/:uid', authenticateUser, requireSelfOrAdmin('uid'), async (req: Request, res: Response) => {
     try {
         const { uid } = req.params;
         const {
@@ -487,22 +492,19 @@ router.put('/user/:uid', async (req: Request, res: Response) => {
  * @desc    Change user password
  * @access  Private (requires authentication)
  */
-router.post('/change-password', async (req: Request, res: Response) => {
+router.post('/change-password', authenticateUser, async (req: Request, res: Response) => {
     try {
         const { newPassword, currentPassword, uid: bodyUid } = req.body;
+        const callerUid = req.user!.uid;
+        const isCallerAdmin = req.user!.isAdmin;
 
-        let uid = bodyUid;
-        const authHeader = req.headers.authorization;
-        if (authHeader && authHeader.startsWith('Bearer ')) {
-            try {
-                const token = authHeader.split('Bearer ')[1];
-                const decoded = await auth.verifyIdToken(token);
-                if (decoded?.uid) uid = decoded.uid;
-            } catch (_) {}
-        }
-
-        if (!uid) {
-            return res.status(400).json({ error: 'User ID is required' });
+        // If target uid is provided and differs from caller, caller MUST be an admin
+        const targetUid = bodyUid || callerUid;
+        if (targetUid !== callerUid && !isCallerAdmin) {
+            return res.status(403).json({
+                error: 'Forbidden',
+                message: 'You are only allowed to change your own password.'
+            });
         }
 
         if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
@@ -510,7 +512,7 @@ router.post('/change-password', async (req: Request, res: Response) => {
         }
 
         // Update password using Firebase Admin
-        await auth.updateUser(uid, { password: newPassword });
+        await auth.updateUser(targetUid, { password: newPassword });
 
         res.status(200).json({ message: 'Password changed successfully' });
     } catch (error: any) {

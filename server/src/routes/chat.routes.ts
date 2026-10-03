@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../config/firebase';
 import supabase from '../config/supabase';
+import { authenticateUser, requireSelfOrAdmin, MASTER_ADMIN_UID } from '../utils/authMiddleware';
 
 const router = Router();
 
@@ -116,7 +117,7 @@ async function getParticipantProfile(uid: string): Promise<{ name: string; avata
         avatar = role === 'vendor' ? DEFAULT_AVATARS.vendor : DEFAULT_AVATARS.client;
     }
 
-    const isAdmin = role === 'admin' || uid === 'v8MwaOet0ISfZAWXIDAPAGcg1td2' || name?.toLowerCase().includes('admin');
+    const isAdmin = role === 'admin' || uid === MASTER_ADMIN_UID;
     if (isAdmin) {
         isVerified = true;
     }
@@ -131,11 +132,16 @@ async function getParticipantProfile(uid: string): Promise<{ name: string; avata
  * @desc    Get all conversations for a user
  * @access  Private (requires authentication)
  */
-router.get('/conversations/:userId', async (req: Request, res: Response) => {
+router.get('/conversations/:userId', authenticateUser, requireSelfOrAdmin('userId'), async (req: Request, res: Response) => {
     try {
         const { userId } = req.params;
         if (!userId) {
             return res.status(200).json({ conversations: [] });
+        }
+
+        const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '');
+        if (!safeUserId) {
+            return res.status(400).json({ error: 'Invalid user ID' });
         }
 
         let rawConvs: any[] = [];
@@ -146,7 +152,7 @@ router.get('/conversations/:userId', async (req: Request, res: Response) => {
                 supabase
                     .from('conversations')
                     .select('*')
-                    .or(`client_id.eq.${userId},vendor_id.eq.${userId}`)
+                    .or(`client_id.eq.${safeUserId},vendor_id.eq.${safeUserId}`)
                     .order('last_message_at', { ascending: false }),
                 1000
             ).catch(() => null);
@@ -290,26 +296,53 @@ router.get('/conversations/:conversationId/messages', async (req: Request, res: 
  * @desc    Upload an attachment (photo, video, document) for chat
  * @access  Private
  */
-router.post('/upload-attachment', async (req: Request, res: Response) => {
+router.post('/upload-attachment', authenticateUser, async (req: Request, res: Response) => {
     try {
         const { userId, fileData, fileName, fileType } = req.body;
+        const callerUid = req.user!.uid;
+        const isAdmin = req.user!.isAdmin;
+
         if (!userId || !fileData) {
             return res.status(400).json({ error: 'Missing required fields (userId, fileData)' });
+        }
+
+        if (userId !== callerUid && !isAdmin) {
+            return res.status(403).json({ error: 'Forbidden: You can only upload attachments for your own messages' });
+        }
+
+        const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '');
+        if (!safeUserId) {
+            return res.status(400).json({ error: 'Invalid userId' });
         }
 
         const fs = require('fs');
         const path = require('path');
 
-        const uploadsDir = path.join(__dirname, '../../uploads/chats', userId);
+        const baseUploadsDir = path.resolve(__dirname, '../../uploads/chats');
+        const uploadsDir = path.resolve(baseUploadsDir, safeUserId);
+
+        // Path containment check
+        if (!uploadsDir.startsWith(baseUploadsDir)) {
+            return res.status(400).json({ error: 'Invalid upload directory path' });
+        }
+
         if (!fs.existsSync(uploadsDir)) {
             fs.mkdirSync(uploadsDir, { recursive: true });
         }
 
-        const safeName = (fileName || 'attachment').replace(/[^a-zA-Z0-9._-]/g, '_');
-        const ext = path.extname(safeName) || (fileType?.includes('video') ? '.mp4' : fileType?.includes('image') ? '.jpg' : '.dat');
-        const baseName = path.basename(safeName, ext);
-        const uniqueFilename = `${baseName}_${Date.now()}${ext}`;
-        const filepath = path.join(uploadsDir, uniqueFilename);
+        // Strict extension allowlist
+        const rawExt = path.extname(fileName || '').toLowerCase();
+        const allowedExts = ['.jpg', '.jpeg', '.png', '.webp', '.mp4', '.mov', '.pdf', '.doc', '.docx'];
+        const fallbackExt = fileType?.includes('video') ? '.mp4' : fileType?.includes('image') ? '.jpg' : '.pdf';
+        const ext = allowedExts.includes(rawExt) ? rawExt : fallbackExt;
+
+        const safeBaseName = path.basename(fileName || 'attachment', rawExt).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const uniqueFilename = `${safeBaseName}_${Date.now()}${ext}`;
+        const filepath = path.resolve(uploadsDir, uniqueFilename);
+
+        if (!filepath.startsWith(uploadsDir)) {
+            return res.status(400).json({ error: 'Invalid destination file path' });
+        }
 
         const base64Data = fileData.replace(/^data:[^;]+;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
@@ -317,11 +350,11 @@ router.post('/upload-attachment', async (req: Request, res: Response) => {
 
         const protocol = req.protocol || 'http';
         const host = req.get('host') || 'localhost:5000';
-        const url = `${protocol}://${host}/uploads/chats/${userId}/${uniqueFilename}`;
+        const url = `${protocol}://${host}/uploads/chats/${safeUserId}/${uniqueFilename}`;
 
         res.status(200).json({
             url,
-            fileName: safeName,
+            fileName: `${safeBaseName}${ext}`,
             fileType: fileType || 'application/octet-stream',
             fileSize: buffer.length
         });
@@ -336,7 +369,7 @@ router.post('/upload-attachment', async (req: Request, res: Response) => {
  * @desc    Send a message (creates conversation if it doesn't exist)
  * @access  Private (requires authentication)
  */
-router.post('/messages', async (req: Request, res: Response) => {
+router.post('/messages', authenticateUser, async (req: Request, res: Response) => {
     try {
         let {
             conversationId,

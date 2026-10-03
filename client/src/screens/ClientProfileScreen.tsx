@@ -29,6 +29,8 @@ import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as FileSystem from 'expo-file-system/legacy';
 import TabSwipeHandler from '../components/TabSwipeHandler';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import UpgradeToVendorModal from '../components/UpgradeToVendorModal';
 
 export default function ClientProfileScreen() {
     const navigation = useNavigation<any>();
@@ -41,6 +43,8 @@ export default function ClientProfileScreen() {
     const [saving, setSaving] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+    const [upgradeModalVisible, setUpgradeModalVisible] = useState(false);
+    const [hasPendingConversion, setHasPendingConversion] = useState(false);
 
     // Profile fields
     const [fullName, setFullName] = useState('');
@@ -48,6 +52,29 @@ export default function ClientProfileScreen() {
     const [phoneNumber, setPhoneNumber] = useState('');
     const [profileImage, setProfileImage] = useState('');
     const [isVerified, setIsVerified] = useState(false);
+    const [postNotifications, setPostNotifications] = useState(true);
+
+    useEffect(() => {
+        const loadNotificationPref = async () => {
+            try {
+                const saved = await AsyncStorage.getItem('@qiira_post_notifications_enabled');
+                if (saved !== null) {
+                    setPostNotifications(saved === 'true');
+                }
+            } catch (e) {}
+        };
+        loadNotificationPref();
+    }, []);
+
+    const handleTogglePostNotifications = async (val: boolean) => {
+        setPostNotifications(val);
+        try {
+            await AsyncStorage.setItem('@qiira_post_notifications_enabled', String(val));
+            if (user?.uid) {
+                authAPI.updateProfile(user.uid, { postNotificationsEnabled: val } as any).catch(() => {});
+            }
+        } catch (e) {}
+    };
 
     useFocusEffect(
         useCallback(() => {
@@ -66,6 +93,7 @@ export default function ClientProfileScreen() {
                 setPhoneNumber(userData.phoneNumber || userData.phone_number || '');
                 setProfileImage(userData.profileImage || userData.profile_image || userData.photoURL || '');
                 setIsVerified(Boolean(userData.isVerified ?? userData.is_verified ?? false));
+                setHasPendingConversion(Boolean(userData.hasPendingVendorConversion));
             }
         } catch (error) {
             console.error('Error fetching profile:', error);
@@ -352,6 +380,47 @@ export default function ClientProfileScreen() {
                     <Text style={[styles.chevron, { color: '#B28A45', fontWeight: 'bold' }]}>›</Text>
                 </TouchableOpacity>
 
+                {/* Upgrade to Vendor / Become a Merchant */}
+                <Text style={styles.sectionHeader}>Business Account</Text>
+                <TouchableOpacity
+                    style={[
+                        styles.card,
+                        {
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            padding: 16,
+                            borderColor: '#B28A45',
+                            borderWidth: 1.5,
+                            backgroundColor: hasPendingConversion ? 'rgba(178, 138, 69, 0.18)' : 'rgba(178, 138, 69, 0.08)',
+                        }
+                    ]}
+                    onPress={() => setUpgradeModalVisible(true)}
+                    activeOpacity={0.8}
+                >
+                    <View style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 22,
+                        backgroundColor: 'rgba(178, 138, 69, 0.2)',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        marginRight: 12,
+                    }}>
+                        <Ionicons name="storefront" size={24} color="#B28A45" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                        <Text style={[styles.settingTitle, { color: colors.textPrimary, fontWeight: 'bold' }]}>
+                            {hasPendingConversion ? 'Vendor Upgrade Pending ⏳' : 'Upgrade to Vendor Account 🏪'}
+                        </Text>
+                        <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
+                            {hasPendingConversion
+                                ? 'Your merchant application is under review by QIIRA admin'
+                                : 'Start listing products, services, catalogs & receiving client orders'}
+                        </Text>
+                    </View>
+                    <Text style={[styles.chevron, { color: '#B28A45', fontWeight: 'bold' }]}>›</Text>
+                </TouchableOpacity>
+
                 {/* Account & Security Card */}
                 <Text style={styles.sectionHeader}>Account & Security</Text>
                 <View style={styles.card}>
@@ -387,6 +456,21 @@ export default function ClientProfileScreen() {
                         />
                     </View>
 
+                    <View style={styles.settingRow}>
+                        <View style={styles.settingInfo}>
+                            <Text style={styles.settingTitle}>🔔 Post & Product Notifications</Text>
+                            <Text style={styles.settingDescription}>
+                                Receive notifications for new posts, deals & updates
+                            </Text>
+                        </View>
+                        <Switch
+                            value={postNotifications}
+                            onValueChange={handleTogglePostNotifications}
+                            trackColor={{ false: colors.border, true: colors.primaryLight }}
+                            thumbColor={postNotifications ? colors.primary : colors.surface}
+                        />
+                    </View>
+
                     {/* Customer Support */}
                     <TouchableOpacity
                         style={styles.settingRow}
@@ -413,7 +497,7 @@ export default function ClientProfileScreen() {
                 </View>
 
                 {/* Logout Button */}
-                <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+                <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.8}>
                     <Text style={styles.logoutButtonText}>🚪 Logout</Text>
                 </TouchableOpacity>
             </ScrollView>
@@ -422,6 +506,18 @@ export default function ClientProfileScreen() {
             <ChangePasswordModal
                 visible={passwordModalVisible}
                 onClose={() => setPasswordModalVisible(false)}
+            />
+
+            {/* Upgrade To Vendor Modal */}
+            <UpgradeToVendorModal
+                visible={upgradeModalVisible}
+                onClose={() => setUpgradeModalVisible(false)}
+                clientId={user?.uid || ''}
+                clientEmail={email}
+                clientName={fullName}
+                onSuccess={() => {
+                    setHasPendingConversion(true);
+                }}
             />
         </View>
         </TabSwipeHandler>
@@ -489,6 +585,7 @@ const getStyles = (colors: any) => {
     },
     content: {
         padding: SPACING.lg,
+        paddingBottom: 130,
     },
     avatarContainer: {
         alignSelf: 'center',

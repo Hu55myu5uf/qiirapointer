@@ -2,8 +2,12 @@ import { Router, Request, Response } from 'express';
 import { auth, db } from '../config/firebase';
 import supabase from '../config/supabase';
 import { notifyVendorApproval } from '../utils/pushNotifications';
+import { authenticateUser, requireAdmin } from '../utils/authMiddleware';
 
 const router = Router();
+
+// SAST Security Hardening: Enforce authentication and administrative verification on ALL admin routes
+router.use(authenticateUser, requireAdmin);
 
 // Helper mapper to convert database snake_case to client camelCase
 function mapVendor(v: any) {
@@ -171,6 +175,7 @@ router.get('/vendors/pending', async (req: Request, res: Response) => {
                         totalReviews: Number(data.totalReviews || 0),
                         paymentReference: data.lastBadgePayment?.paymentReference || data.paymentReference || null,
                         paymentAmount: data.lastBadgePayment?.amount || 3000,
+                        verificationDocument: data.verificationDocument || data.verification_document || userDocData?.verificationDocument || userDocData?.verification_document || null,
                         createdAt: data.createdAt || new Date().toISOString(),
                         userInfo: {
                             uid: id,
@@ -209,6 +214,7 @@ router.get('/vendors/pending', async (req: Request, res: Response) => {
                         totalReviews: 0,
                         paymentReference: data.lastBadgePayment?.paymentReference || null,
                         paymentAmount: data.lastBadgePayment?.amount || 3000,
+                        verificationDocument: data.verificationDocument || data.verification_document || null,
                         createdAt: data.createdAt || new Date().toISOString(),
                         userInfo: {
                             uid: id,
@@ -305,12 +311,14 @@ router.put('/vendors/:id/verify', async (req: Request, res: Response) => {
             updated_at: now.toISOString(),
         };
 
-        if (shouldGrantBadge) {
+        if (isApproved) {
             updateData.is_verified = true;
+            updateData.isVerified = true;
             updateData.badge_subscribed_at = now.toISOString();
-            updateData.badge_expires_at = expiresAt;
-        } else if (!isApproved) {
+            updateData.badge_expires_at = expiresAt || new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
+        } else {
             updateData.is_verified = false;
+            updateData.isVerified = false;
         }
 
         // 1. Update Supabase vendors table
@@ -327,13 +335,12 @@ router.put('/vendors/:id/verify', async (req: Request, res: Response) => {
         try {
             const userSbUpdate: any = {
                 verification_status: status,
+                is_verified: isApproved,
+                updated_at: now.toISOString(),
             };
-            if (shouldGrantBadge) {
-                userSbUpdate.is_verified = true;
+            if (isApproved) {
                 userSbUpdate.badge_subscribed_at = now.toISOString();
-                userSbUpdate.badge_expires_at = expiresAt;
-            } else if (!isApproved) {
-                userSbUpdate.is_verified = false;
+                userSbUpdate.badge_expires_at = expiresAt || new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
             }
 
             await supabase
@@ -351,19 +358,16 @@ router.put('/vendors/:id/verify', async (req: Request, res: Response) => {
                 verification_status: status,
                 isActive: isApproved,
                 is_active: isApproved,
+                isVerified: isApproved,
+                is_verified: isApproved,
                 verifiedAt: isApproved ? now.toISOString() : null,
                 rejectionReason: isApproved ? null : (rejectionReason || 'Application rejected by administration'),
                 updatedAt: now.toISOString(),
             };
 
-            if (shouldGrantBadge) {
-                vendorUpdate.isVerified = true;
-                vendorUpdate.is_verified = true;
+            if (isApproved) {
                 vendorUpdate.badgeSubscribedAt = now.toISOString();
-                vendorUpdate.badgeExpiresAt = expiresAt;
-            } else if (!isApproved) {
-                vendorUpdate.isVerified = false;
-                vendorUpdate.is_verified = false;
+                vendorUpdate.badgeExpiresAt = expiresAt || new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
             }
 
             await db.collection('vendors').doc(id).set(vendorUpdate, { merge: true });
@@ -383,17 +387,14 @@ router.put('/vendors/:id/verify', async (req: Request, res: Response) => {
             const userUpdate: any = {
                 verificationStatus: status,
                 verification_status: status,
+                isVerified: isApproved,
+                is_verified: isApproved,
                 updatedAt: now.toISOString(),
             };
 
-            if (shouldGrantBadge) {
-                userUpdate.isVerified = true;
-                userUpdate.is_verified = true;
+            if (isApproved) {
                 userUpdate.badgeSubscribedAt = now.toISOString();
-                userUpdate.badgeExpiresAt = expiresAt;
-            } else if (!isApproved) {
-                userUpdate.isVerified = false;
-                userUpdate.is_verified = false;
+                userUpdate.badgeExpiresAt = expiresAt || new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
             }
 
             await db.collection('users').doc(id).set(userUpdate, { merge: true });
@@ -860,7 +861,191 @@ router.put('/users/:id/verified', async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error('Admin badge update error:', error);
-        res.status(500).json({ error: 'Failed to update verified badge', message: error.message });
+        res.status(500).json({ error: 'Failed to update badge status', message: error.message });
+    }
+});
+
+/**
+ * @route   GET /api/admin/conversions/pending
+ * @desc    Get pending client-to-vendor conversion requests
+ * @access  Private (Admin only)
+ */
+router.get('/conversions/pending', async (req: Request, res: Response) => {
+    try {
+        const snap = await db.collection('conversion_requests').where('status', '==', 'pending').get();
+        const requests = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        res.status(200).json({ requests });
+    } catch (error: any) {
+        console.error('Get conversion requests error:', error);
+        res.status(500).json({ error: 'Failed to fetch conversion requests', message: error.message });
+    }
+});
+
+/**
+ * @route   PUT /api/admin/conversions/:id
+ * @desc    Approve or reject client-to-vendor conversion
+ * @access  Private (Admin only)
+ */
+router.put('/conversions/:id', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { status, notes } = req.body; // 'approved' or 'rejected'
+
+        const reqDoc = await db.collection('conversion_requests').doc(id).get();
+        if (!reqDoc.exists) {
+            return res.status(404).json({ error: 'Conversion request not found' });
+        }
+
+        const reqData = reqDoc.data()!;
+        const clientId = reqData.clientId;
+        const now = new Date().toISOString();
+
+        await db.collection('conversion_requests').doc(id).set({
+            status,
+            adminNotes: notes || '',
+            resolvedAt: now,
+        }, { merge: true });
+
+        if (status === 'approved') {
+            // 1. Upgrade user role in Firestore users
+            await db.collection('users').doc(clientId).set({
+                role: 'vendor',
+                businessName: reqData.businessName,
+                category: reqData.category,
+                description: reqData.description,
+                phoneNumber: reqData.phoneNumber || '',
+                address: reqData.address || '',
+                hasPendingVendorConversion: false,
+                isVerified: true,
+                verificationStatus: 'approved',
+                updatedAt: now,
+            }, { merge: true });
+
+            // 2. Create/update vendor in Firestore vendors
+            await db.collection('vendors').doc(clientId).set({
+                uid: clientId,
+                id: clientId,
+                businessName: reqData.businessName,
+                business_name: reqData.businessName,
+                category: reqData.category,
+                description: reqData.description,
+                phoneNumber: reqData.phoneNumber || '',
+                address: reqData.address || '',
+                isVerified: true,
+                is_verified: true,
+                verificationStatus: 'approved',
+                verification_status: 'approved',
+                isActive: true,
+                is_active: true,
+                createdAt: now,
+                updatedAt: now,
+            }, { merge: true });
+
+            // 3. Update Supabase
+            try {
+                await supabase.from('users').update({ role: 'vendor', is_verified: true, verification_status: 'approved' }).eq('uid', clientId);
+            } catch (_) {}
+            try {
+                await supabase.from('vendors').upsert({
+                    uid: clientId,
+                    business_name: reqData.businessName,
+                    category: reqData.category,
+                    description: reqData.description,
+                    phone_number: reqData.phoneNumber,
+                    address: reqData.address,
+                    is_active: true,
+                    is_verified: true,
+                    verification_status: 'approved',
+                    created_at: now,
+                });
+            } catch (_) {}
+
+            // 4. Update Firebase Auth Custom Claims if possible
+            try {
+                await auth.setCustomUserClaims(clientId, { role: 'vendor' });
+            } catch (_) {}
+        } else {
+            // Rejected
+            try {
+                await db.collection('users').doc(clientId).set({
+                    hasPendingVendorConversion: false,
+                }, { merge: true });
+            } catch (_) {}
+        }
+
+        res.status(200).json({
+            message: `Conversion request ${status}`,
+            status,
+        });
+    } catch (error: any) {
+        console.error('Resolve conversion error:', error);
+        res.status(500).json({ error: 'Failed to process conversion', message: error.message });
+    }
+});
+
+/**
+ * @route   GET /api/admin/adverts/pending
+ * @desc    Get pending post/product advert requests
+ * @access  Private (Admin only)
+ */
+router.get('/adverts/pending', async (req: Request, res: Response) => {
+    try {
+        const snap = await db.collection('advert_requests').where('status', '==', 'pending').get();
+        const adverts = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        res.status(200).json({ adverts });
+    } catch (error: any) {
+        console.error('Get advert requests error:', error);
+        res.status(500).json({ error: 'Failed to fetch advert requests', message: error.message });
+    }
+});
+
+/**
+ * @route   PUT /api/admin/adverts/:id
+ * @desc    Approve or reject advert request
+ * @access  Private (Admin only)
+ */
+router.put('/adverts/:id', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { status, notes } = req.body; // 'approved' or 'rejected'
+
+        const advDoc = await db.collection('advert_requests').doc(id).get();
+        if (!advDoc.exists) {
+            return res.status(404).json({ error: 'Advert request not found' });
+        }
+
+        const advData = advDoc.data()!;
+        const now = new Date();
+        const durationDays = Number(advData.durationDays) || 7;
+        const expiresAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+
+        await db.collection('advert_requests').doc(id).set({
+            status,
+            adminNotes: notes || '',
+            resolvedAt: now.toISOString(),
+            expiresAt: status === 'approved' ? expiresAt : null,
+        }, { merge: true });
+
+        if (status === 'approved' && advData.postId) {
+            // Update the post in Firestore to make it an active advert
+            try {
+                await db.collection('posts').doc(advData.postId).set({
+                    isAdvert: true,
+                    is_advert: true,
+                    promoted: true,
+                    promotedUntil: expiresAt,
+                    boostPlan: advData.plan || 'Standard Boost',
+                }, { merge: true });
+            } catch (_) {}
+        }
+
+        res.status(200).json({
+            message: `Advert request ${status}`,
+            status,
+        });
+    } catch (error: any) {
+        console.error('Resolve advert error:', error);
+        res.status(500).json({ error: 'Failed to process advert', message: error.message });
     }
 });
 

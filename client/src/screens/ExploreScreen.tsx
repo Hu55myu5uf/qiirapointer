@@ -23,6 +23,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { PLACEHOLDER_AVATARS } from '../assets';
+import { POPULAR_CATEGORIES } from '../constants/categories';
+import CategoryPickerModal from '../components/CategoryPickerModal';
 import { postAPI } from '../services/api';
 import { sharePost, shareVendorProfile } from '../services/shareService';
 import VerificationBadge, { AvatarVerificationBadge, VerificationBadgeInline } from '../components/VerificationBadge';
@@ -131,15 +133,7 @@ function PostMediaCarousel({ item, colors, styles }: { item: any; colors: any; s
     );
 }
 
-const CATEGORIES = [
-    'All',
-    'Food & Dining',
-    'Fashion & Retail',
-    'Beauty & Spa',
-    'Electronics',
-    'Services',
-    'Events',
-];
+const CATEGORIES = POPULAR_CATEGORIES;
 
 export default function ExploreScreen({ navigation, route }: any) {
     const { colors } = useTheme();
@@ -158,6 +152,7 @@ export default function ExploreScreen({ navigation, route }: any) {
         }
     }, [route?.params?.subTab, route?.params?.initialSubTab]);
     const [selectedCategory, setSelectedCategory] = useState<string>('All');
+    const [showCategoryModal, setShowCategoryModal] = useState<boolean>(false);
     const [searchQuery, setSearchQuery] = useState<string>('');
     const [posts, setPosts] = useState<any[]>([]);
     const [loading, setLoading] = useState<boolean>(true);
@@ -192,7 +187,14 @@ export default function ExploreScreen({ navigation, route }: any) {
             };
 
             const response = await postAPI.getFeed(params);
-            setPosts(response.data.posts || []);
+            const fetchedPosts = response.data.posts || [];
+            const sortedPosts = [...fetchedPosts].sort((a: any, b: any) => {
+                const aAdv = a.isAdvert || a.promoted ? 1 : 0;
+                const bAdv = b.isAdvert || b.promoted ? 1 : 0;
+                if (aAdv !== bAdv) return bAdv - aAdv;
+                return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+            });
+            setPosts(sortedPosts);
         } catch (error) {
             console.error('Fetch feed error:', error);
         } finally {
@@ -599,6 +601,11 @@ export default function ExploreScreen({ navigation, route }: any) {
                     )}
 
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.xs }}>
+                        {(item.isAdvert || item.promoted) && (
+                            <View style={{ backgroundColor: 'rgba(178, 138, 69, 0.15)', borderWidth: 1, borderColor: '#B28A45', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 10, marginRight: 2 }}>
+                                <Text style={{ fontSize: 10, fontWeight: 'bold', color: '#B28A45' }}>Sponsored ✨</Text>
+                            </View>
+                        )}
                         {!isClientPost && (
                             <TouchableOpacity
                                 style={styles.viewVendorButton}
@@ -841,7 +848,10 @@ export default function ExploreScreen({ navigation, route }: any) {
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.categoriesContainer}
                 >
-                    {CATEGORIES.map((cat) => (
+                    {(selectedCategory !== 'All' && !CATEGORIES.includes(selectedCategory)
+                        ? ['All', selectedCategory, ...CATEGORIES.filter(c => c !== 'All')]
+                        : CATEGORIES
+                    ).map((cat) => (
                         <TouchableOpacity
                             key={cat}
                             style={[
@@ -860,8 +870,26 @@ export default function ExploreScreen({ navigation, route }: any) {
                             </Text>
                         </TouchableOpacity>
                     ))}
+                    <TouchableOpacity
+                        style={[styles.categoryChip, { backgroundColor: `${colors.primary}15`, borderColor: colors.primary }]}
+                        onPress={() => setShowCategoryModal(true)}
+                    >
+                        <Text style={[styles.categoryChipText, { color: colors.primary, fontWeight: '700' }]}>
+                            🌐 All Categories
+                        </Text>
+                    </TouchableOpacity>
                 </ScrollView>
             </View>
+
+            <CategoryPickerModal
+                visible={showCategoryModal}
+                onClose={() => setShowCategoryModal(false)}
+                selectedCategory={selectedCategory}
+                onSelectCategory={(catName) => setSelectedCategory(catName)}
+                title="Browse by Category"
+                subtitle="Filter feed and vendors by industry"
+                allowSubcategories={false}
+            />
 
             {/* Posts / Showcase List */}
             {loading ? (

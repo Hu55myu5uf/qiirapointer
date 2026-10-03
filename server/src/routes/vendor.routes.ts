@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import supabase from '../config/supabase';
 import { db, auth } from '../config/firebase';
+import { authenticateUser, requireSelfOrAdmin, MASTER_ADMIN_UID } from '../utils/authMiddleware';
 
 const router = Router();
 
@@ -20,45 +21,65 @@ export const VERIFIED_BADGE = {
 };
 
 const DEFAULT_CATEGORY_IMAGES: Record<string, { image: string; banner: string }> = {
+    'food & agriculture': {
+        image: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=500&auto=format&fit=crop&q=80',
+        banner: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200&auto=format&fit=crop&q=80',
+    },
     'restaurant': {
         image: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=500&auto=format&fit=crop&q=80',
         banner: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200&auto=format&fit=crop&q=80',
     },
-    'restaurants & cafes': {
-        image: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=500&auto=format&fit=crop&q=80',
-        banner: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200&auto=format&fit=crop&q=80',
-    },
-    'technology': {
-        image: 'https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?w=500&auto=format&fit=crop&q=80',
-        banner: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=1200&auto=format&fit=crop&q=80',
-    },
-    'technology & electronics': {
-        image: 'https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?w=500&auto=format&fit=crop&q=80',
-        banner: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=1200&auto=format&fit=crop&q=80',
-    },
-    'retail': {
-        image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=500&auto=format&fit=crop&q=80',
+    'fashion & clothing': {
+        image: 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=500&auto=format&fit=crop&q=80',
         banner: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1200&auto=format&fit=crop&q=80',
     },
-    'retail & shopping': {
-        image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=500&auto=format&fit=crop&q=80',
-        banner: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1200&auto=format&fit=crop&q=80',
-    },
-    'healthcare': {
-        image: 'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=500&auto=format&fit=crop&q=80',
-        banner: 'https://images.unsplash.com/photo-1538108149393-fbbd81895907?w=1200&auto=format&fit=crop&q=80',
-    },
-    'health & wellness': {
-        image: 'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=500&auto=format&fit=crop&q=80',
-        banner: 'https://images.unsplash.com/photo-1538108149393-fbbd81895907?w=1200&auto=format&fit=crop&q=80',
-    },
-    'beauty & spa': {
+    'beauty & grooming': {
         image: 'https://images.unsplash.com/photo-1560750588-73207b1ef5b8?w=500&auto=format&fit=crop&q=80',
         banner: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=1200&auto=format&fit=crop&q=80',
     },
-    'automotive services': {
+    'technology & it': {
+        image: 'https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?w=500&auto=format&fit=crop&q=80',
+        banner: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=1200&auto=format&fit=crop&q=80',
+    },
+    'electronics & retail': {
+        image: 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=500&auto=format&fit=crop&q=80',
+        banner: 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=1200&auto=format&fit=crop&q=80',
+    },
+    'automotive & transportation': {
         image: 'https://images.unsplash.com/photo-1619642751034-765dfdf7c58e?w=500&auto=format&fit=crop&q=80',
         banner: 'https://images.unsplash.com/photo-1486006920555-c77dce18193b?w=1200&auto=format&fit=crop&q=80',
+    },
+    'real estate & property': {
+        image: 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?w=500&auto=format&fit=crop&q=80',
+        banner: 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=1200&auto=format&fit=crop&q=80',
+    },
+    'health, medical & wellness': {
+        image: 'https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?w=500&auto=format&fit=crop&q=80',
+        banner: 'https://images.unsplash.com/photo-1538108149393-fbbd81895907?w=1200&auto=format&fit=crop&q=80',
+    },
+    'events, parties & celebrations': {
+        image: 'https://images.unsplash.com/photo-1511795409834-ef04bbd61622?w=500&auto=format&fit=crop&q=80',
+        banner: 'https://images.unsplash.com/photo-1464366400600-7168b8af9bc3?w=1200&auto=format&fit=crop&q=80',
+    },
+    'media, content & digital creators': {
+        image: 'https://images.unsplash.com/photo-1533750349088-cd871a92f312?w=500&auto=format&fit=crop&q=80',
+        banner: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=1200&auto=format&fit=crop&q=80',
+    },
+    'construction & skilled trades': {
+        image: 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=500&auto=format&fit=crop&q=80',
+        banner: 'https://images.unsplash.com/photo-1581094794329-c8112a89af12?w=1200&auto=format&fit=crop&q=80',
+    },
+    'professional services': {
+        image: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=500&auto=format&fit=crop&q=80',
+        banner: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=1200&auto=format&fit=crop&q=80',
+    },
+    'education & training': {
+        image: 'https://images.unsplash.com/photo-1523240795612-9a054b0db644?w=500&auto=format&fit=crop&q=80',
+        banner: 'https://images.unsplash.com/photo-1509062522246-3755977927d7?w=1200&auto=format&fit=crop&q=80',
+    },
+    'sports': {
+        image: 'https://images.unsplash.com/photo-1517649763962-0c623266ddc0?w=500&auto=format&fit=crop&q=80',
+        banner: 'https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=1200&auto=format&fit=crop&q=80',
     },
 };
 
@@ -143,10 +164,8 @@ function mapVendor(v: any) {
     const isAdmin = Boolean(
         userObj?.role === 'admin' ||
         v.role === 'admin' ||
-        (v.uid === 'v8MwaOet0ISfZAWXIDAPAGcg1td2') ||
-        (v.id === 'v8MwaOet0ISfZAWXIDAPAGcg1td2') ||
-        (v.email && String(v.email).includes('admin')) ||
-        (userObj?.email && String(userObj.email).includes('admin'))
+        (v.uid === MASTER_ADMIN_UID) ||
+        (v.id === MASTER_ADMIN_UID)
     );
 
     const isVerified = Boolean(
@@ -244,14 +263,18 @@ router.get('/', async (req: Request, res: Response) => {
                     .select('*, users(*)');
 
                 if (category && category !== 'All') {
-                    const catStr = String(category).toLowerCase();
-                    const cleanWord = catStr.split('&')[0].trim().split(' ')[0].trim();
-                    query = query.or(`category.ilike.%${cleanWord}%,category.ilike.%${catStr}%`);
+                    const catStr = String(category).toLowerCase().replace(/[^a-z0-9\s]/gi, '').trim();
+                    const cleanWord = catStr.split(' ')[0].trim();
+                    if (cleanWord) {
+                        query = query.or(`category.ilike.%${cleanWord}%,category.ilike.%${catStr}%`);
+                    }
                 }
 
                 if (search) {
-                    const searchTerm = `%${(search as string).toLowerCase()}%`;
-                    query = query.or(`business_name.ilike.${searchTerm},description.ilike.${searchTerm}`);
+                    const safeSearch = String(search).toLowerCase().replace(/[^a-z0-9\s]/gi, '').trim();
+                    if (safeSearch) {
+                        query = query.or(`business_name.ilike.%${safeSearch}%,description.ilike.%${safeSearch}%`);
+                    }
                 }
 
                 const result = await withTimeout(query, 1500);
@@ -532,10 +555,7 @@ router.get('/:id', async (req: Request, res: Response) => {
                 fsUser?.role === 'admin' ||
                 userObj?.role === 'admin' ||
                 vendorData?.role === 'admin' ||
-                id === 'v8MwaOet0ISfZAWXIDAPAGcg1td2' ||
-                (fsUser?.email && String(fsUser.email).includes('admin')) ||
-                (userObj?.email && String(userObj.email).includes('admin')) ||
-                (fbUser?.email && String(fbUser.email).includes('admin'))
+                id === MASTER_ADMIN_UID
             );
 
             const isVerified = Boolean(
@@ -615,7 +635,7 @@ router.get('/:id', async (req: Request, res: Response) => {
  * @desc    Update vendor profile
  * @access  Private (Vendor only)
  */
-router.put('/:id/profile', async (req: Request, res: Response) => {
+router.put('/:id/profile', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const {
@@ -714,7 +734,7 @@ router.put('/:id/profile', async (req: Request, res: Response) => {
  * @desc    Upload verification documents
  * @access  Private (Vendor only)
  */
-router.post(['/:id/verification-documents', '/:id/documents'], async (req: Request, res: Response, next: NextFunction) => {
+router.post(['/:id/verification-documents', '/:id/documents'], authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { id } = req.params;
         const { documentUrls } = req.body;
@@ -750,7 +770,7 @@ router.post(['/:id/verification-documents', '/:id/documents'], async (req: Reque
  * @desc    Process verification fee payment
  * @access  Private (Vendor only)
  */
-router.post('/:id/payment', async (req: Request, res: Response) => {
+router.post('/:id/payment', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const { paymentReference, amount } = req.body;
@@ -781,26 +801,56 @@ router.post('/:id/payment', async (req: Request, res: Response) => {
  * @desc    Upload image (Base64) and save locally (for testing without Firebase Storage)
  * @access  Private (Vendor only)
  */
-router.post('/upload-image', async (req: Request, res: Response) => {
+router.post('/upload-image', authenticateUser, async (req: Request, res: Response) => {
     try {
         const { userId, imageData, imageType } = req.body; // imageType: 'profile' or 'banner'
+        const callerUid = req.user!.uid;
+        const isAdmin = req.user!.isAdmin;
 
         if (!userId || !imageData || !imageType) {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
+        // Ownership or admin required
+        if (userId !== callerUid && !isAdmin) {
+            return res.status(403).json({ error: 'Forbidden: You can only upload images for your own profile' });
+        }
+
+        // Strictly sanitize userId to prevent path traversal
+        const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '');
+        if (!safeUserId) {
+            return res.status(400).json({ error: 'Invalid userId' });
+        }
+
+        const allowedImageTypes = ['profile', 'banner', 'post', 'document'];
+        const safeImageType = allowedImageTypes.includes(imageType) ? imageType : 'image';
+
         const fs = require('fs');
         const path = require('path');
 
-        // Create uploads directory structure
-        const uploadsDir = path.join(__dirname, '../../uploads/vendors', userId);
+        const baseUploadsDir = path.resolve(__dirname, '../../uploads/vendors');
+        const uploadsDir = path.resolve(baseUploadsDir, safeUserId);
+
+        // Path containment check
+        if (!uploadsDir.startsWith(baseUploadsDir)) {
+            return res.status(400).json({ error: 'Invalid upload directory path' });
+        }
+
         if (!fs.existsSync(uploadsDir)) {
             fs.mkdirSync(uploadsDir, { recursive: true });
         }
 
-        // Generate filename
-        const filename = `${imageType}_${Date.now()}.jpg`;
-        const filepath = path.join(uploadsDir, filename);
+        // Validate base64 image and detect extension
+        const mimeMatch = imageData.match(/^data:image\/(jpeg|jpg|png|webp);base64,/i);
+        const ext = mimeMatch ? `.${mimeMatch[1].toLowerCase() === 'jpeg' ? 'jpg' : mimeMatch[1].toLowerCase()}` : '.jpg';
+
+        // Generate safe unique filename
+        const filename = `${safeImageType}_${Date.now()}${ext}`;
+        const filepath = path.resolve(uploadsDir, filename);
+
+        if (!filepath.startsWith(uploadsDir)) {
+            return res.status(400).json({ error: 'Invalid destination file path' });
+        }
 
         // Decode Base64 and save
         const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
@@ -809,7 +859,7 @@ router.post('/upload-image', async (req: Request, res: Response) => {
         // Return accessible URL using the host from the request
         const protocol = req.protocol || 'http';
         const host = req.get('host') || 'localhost:5000';
-        const imageUrl = `${protocol}://${host}/uploads/vendors/${userId}/${filename}`;
+        const imageUrl = `${protocol}://${host}/uploads/vendors/${safeUserId}/${filename}`;
 
         res.status(200).json({ imageUrl });
     } catch (error: any) {
@@ -823,29 +873,52 @@ router.post('/upload-image', async (req: Request, res: Response) => {
  * @desc    Upload document/PDF (Base64) and save locally
  * @access  Private (Vendor only)
  */
-router.post('/upload-document', async (req: Request, res: Response) => {
+router.post('/upload-document', authenticateUser, async (req: Request, res: Response) => {
     try {
         const { userId, fileData, fileName, fileType } = req.body;
+        const callerUid = req.user!.uid;
+        const isAdmin = req.user!.isAdmin;
 
         if (!userId || !fileData) {
             return res.status(400).json({ error: 'Missing required fields (userId, fileData)' });
         }
 
+        if (userId !== callerUid && !isAdmin) {
+            return res.status(403).json({ error: 'Forbidden: You can only upload documents for your own account' });
+        }
+
+        const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '');
+        if (!safeUserId) {
+            return res.status(400).json({ error: 'Invalid userId' });
+        }
+
         const fs = require('fs');
         const path = require('path');
 
-        // Create uploads directory structure
-        const uploadsDir = path.join(__dirname, '../../uploads/vendors', userId, 'documents');
+        const baseUploadsDir = path.resolve(__dirname, '../../uploads/vendors');
+        const uploadsDir = path.resolve(baseUploadsDir, safeUserId, 'documents');
+
+        // Path containment check
+        if (!uploadsDir.startsWith(baseUploadsDir)) {
+            return res.status(400).json({ error: 'Invalid upload directory path' });
+        }
+
         if (!fs.existsSync(uploadsDir)) {
             fs.mkdirSync(uploadsDir, { recursive: true });
         }
 
-        // Sanitize and generate unique filename
-        const safeName = (fileName || 'document.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
-        const ext = path.extname(safeName) || '.pdf';
-        const baseName = path.basename(safeName, ext);
-        const uniqueFilename = `${baseName}_${Date.now()}${ext}`;
-        const filepath = path.join(uploadsDir, uniqueFilename);
+        // Strict extension allowlist: only pdf, jpg, jpeg, png, webp
+        const rawExt = path.extname(fileName || '').toLowerCase();
+        const allowedExts = ['.pdf', '.jpg', '.jpeg', '.png', '.webp'];
+        const ext = allowedExts.includes(rawExt) ? rawExt : '.pdf';
+
+        const safeBaseName = path.basename(fileName || 'document', rawExt).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const uniqueFilename = `${safeBaseName}_${Date.now()}${ext}`;
+        const filepath = path.resolve(uploadsDir, uniqueFilename);
+
+        if (!filepath.startsWith(uploadsDir)) {
+            return res.status(400).json({ error: 'Invalid destination file path' });
+        }
 
         // Decode Base64 and save
         const base64Data = fileData.replace(/^data:[^;]+;base64,/, '');
@@ -855,11 +928,11 @@ router.post('/upload-document', async (req: Request, res: Response) => {
         // Return accessible URL
         const protocol = req.protocol || 'http';
         const host = req.get('host') || 'localhost:5000';
-        const fileUrl = `${protocol}://${host}/uploads/vendors/${userId}/documents/${uniqueFilename}`;
+        const fileUrl = `${protocol}://${host}/uploads/vendors/${safeUserId}/documents/${uniqueFilename}`;
 
         res.status(200).json({
             fileUrl,
-            fileName: safeName,
+            fileName: `${safeBaseName}${ext}`,
             fileSize: buffer.length,
             fileType: fileType || 'application/pdf',
         });
@@ -1217,7 +1290,7 @@ router.get('/:id/badge', async (req: Request, res: Response) => {
  * @desc    Submit verified badge request & payment for Admin approval
  * @access  Private
  */
-router.post('/:id/badge/purchase', async (req: Request, res: Response) => {
+router.post('/:id/badge/purchase', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const { paymentReference } = req.body;
@@ -1380,7 +1453,7 @@ router.post(['/:id/documents', '/:id/menu-documents'], async (req: Request, res:
  * @desc    Remove a menu/document PDF from a vendor
  * @access  Vendor only
  */
-router.delete(['/:id/documents/:docId', '/:id/menu-documents/:docId'], async (req: Request, res: Response) => {
+router.delete(['/:id/documents/:docId', '/:id/menu-documents/:docId'], authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
     try {
         const { id, docId } = req.params;
 
@@ -1418,7 +1491,7 @@ router.delete(['/:id/documents/:docId', '/:id/menu-documents/:docId'], async (re
  * @desc    Toggle vendor between live GPS location and default business location
  * @access  Vendor only
  */
-router.put('/:id/location', async (req: Request, res: Response) => {
+router.put('/:id/location', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const { useLiveLocation, liveLatitude, liveLongitude } = req.body;
@@ -1463,6 +1536,215 @@ router.put('/:id/location', async (req: Request, res: Response) => {
     } catch (error: any) {
         console.error('Update location error:', error);
         res.status(500).json({ error: 'Failed to update location', message: error.message });
+    }
+});
+
+/**
+ * @route   POST /api/vendors/:id/submit-verification
+ * @desc    Submit KYC identity document (NIN, Driver License, Passport, etc.) for admin verification
+ * @access  Vendor only
+ */
+router.post('/:id/submit-verification', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { documentType, documentUrl, documentName, documentFileType, notes } = req.body;
+
+        if (!documentUrl) {
+            return res.status(400).json({ error: 'documentUrl is required' });
+        }
+
+        const docPayload = {
+            type: documentType || 'National ID (NIN)',
+            url: documentUrl,
+            name: documentName || 'Identity Document',
+            fileType: documentFileType || 'image/jpeg',
+            notes: notes || '',
+            submittedAt: new Date().toISOString(),
+        };
+
+        const updateData: any = {
+            verification_status: 'pending',
+            verificationStatus: 'pending',
+            is_verified: false,
+            isVerified: false,
+            verificationDocument: docPayload,
+            verification_document: docPayload,
+            updated_at: new Date().toISOString(),
+        };
+
+        // 1. Update Firestore vendors
+        try {
+            await db.collection('vendors').doc(id).set(updateData, { merge: true });
+        } catch (fsErr: any) {
+            console.warn('Firestore vendor verification submit note:', fsErr.message);
+        }
+
+        // 2. Update Firestore users
+        try {
+            await db.collection('users').doc(id).set(updateData, { merge: true });
+        } catch (_) {}
+
+        // 3. Update Supabase vendors & users
+        try {
+            await supabase.from('vendors').update({
+                verification_status: 'pending',
+                is_verified: false,
+            }).eq('uid', id);
+        } catch (_) {}
+        try {
+            await supabase.from('users').update({
+                verification_status: 'pending',
+                is_verified: false,
+            }).eq('uid', id);
+        } catch (_) {}
+
+        res.status(200).json({
+            message: 'Verification document submitted successfully! Admin will review your document shortly.',
+            status: 'pending',
+            document: docPayload,
+        });
+    } catch (error: any) {
+        console.error('Submit verification error:', error);
+        res.status(500).json({ error: 'Failed to submit verification', message: error.message });
+    }
+});
+
+/**
+ * @route   GET /api/vendors/:id/catalog
+ * @desc    Get vendor's catalog items
+ * @access  Public
+ */
+router.get('/:id/catalog', async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        let items: any[] = [];
+
+        try {
+            const doc = await db.collection('vendors').doc(id).get();
+            if (doc.exists) {
+                items = doc.data()?.catalogItems || [];
+            }
+        } catch (_) {}
+
+        if (items.length === 0) {
+            try {
+                const userDoc = await db.collection('users').doc(id).get();
+                if (userDoc.exists) {
+                    items = userDoc.data()?.catalogItems || [];
+                }
+            } catch (_) {}
+        }
+
+        res.status(200).json({ catalog: items });
+    } catch (error: any) {
+        console.error('Get catalog error:', error);
+        res.status(500).json({ error: 'Failed to fetch catalog', message: error.message });
+    }
+});
+
+/**
+ * @route   POST /api/vendors/:id/catalog
+ * @desc    Add or update a catalog item
+ * @access  Vendor only
+ */
+router.post('/:id/catalog', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { name, price, category, imageUrl, description, inStock } = req.body;
+
+        if (!name || price === undefined) {
+            return res.status(400).json({ error: 'Item name and price are required' });
+        }
+
+        const newItem = {
+            id: `cat_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            name,
+            price: Number(price),
+            category: category || 'General',
+            imageUrl: imageUrl || '',
+            description: description || '',
+            inStock: inStock !== false,
+            createdAt: new Date().toISOString(),
+        };
+
+        const vendorRef = db.collection('vendors').doc(id);
+        const vendorDoc = await vendorRef.get();
+        const existing = vendorDoc.exists ? (vendorDoc.data()?.catalogItems || []) : [];
+        existing.unshift(newItem);
+        await vendorRef.set({ catalogItems: existing }, { merge: true });
+
+        try {
+            await db.collection('users').doc(id).set({ catalogItems: existing }, { merge: true });
+        } catch (_) {}
+
+        res.status(201).json({ message: 'Catalog item added successfully', item: newItem });
+    } catch (error: any) {
+        console.error('Add catalog item error:', error);
+        res.status(500).json({ error: 'Failed to add catalog item', message: error.message });
+    }
+});
+
+/**
+ * @route   DELETE /api/vendors/:id/catalog/:itemId
+ * @desc    Delete a catalog item
+ * @access  Vendor only
+ */
+router.delete('/:id/catalog/:itemId', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
+    try {
+        const { id, itemId } = req.params;
+        const vendorRef = db.collection('vendors').doc(id);
+        const vendorDoc = await vendorRef.get();
+        if (vendorDoc.exists) {
+            const existing = vendorDoc.data()?.catalogItems || [];
+            const filtered = existing.filter((item: any) => item.id !== itemId);
+            await vendorRef.set({ catalogItems: filtered }, { merge: true });
+            try {
+                await db.collection('users').doc(id).set({ catalogItems: filtered }, { merge: true });
+            } catch (_) {}
+        }
+        res.status(200).json({ message: 'Catalog item removed', itemId });
+    } catch (error: any) {
+        console.error('Delete catalog item error:', error);
+        res.status(500).json({ error: 'Failed to delete catalog item', message: error.message });
+    }
+});
+
+/**
+ * @route   POST /api/vendors/:id/advert-request
+ * @desc    Request advertisement/boost for a post
+ * @access  Vendor only
+ */
+router.post('/:id/advert-request', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { postId, postCaption, mediaUrl, plan, durationDays, notes } = req.body;
+
+        if (!postId) {
+            return res.status(400).json({ error: 'postId is required' });
+        }
+
+        const advertData = {
+            id: `adv_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            vendorId: id,
+            postId,
+            postCaption: postCaption || '',
+            mediaUrl: mediaUrl || '',
+            plan: plan || 'Standard Boost',
+            durationDays: Number(durationDays) || 7,
+            notes: notes || '',
+            status: 'pending',
+            createdAt: new Date().toISOString(),
+        };
+
+        await db.collection('advert_requests').doc(advertData.id).set(advertData);
+
+        res.status(201).json({
+            message: 'Advert request submitted! The QIIRA administration will review and activate your promotion.',
+            advert: advertData,
+        });
+    } catch (error: any) {
+        console.error('Advert request error:', error);
+        res.status(500).json({ error: 'Failed to submit advert request', message: error.message });
     }
 });
 

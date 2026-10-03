@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../config/firebase';
 import supabase from '../config/supabase';
+import { authenticateUser } from '../utils/authMiddleware';
 
 const router = Router();
 
@@ -264,7 +265,7 @@ router.get('/:id', async (req: Request, res: Response) => {
  * @desc    Create a new post, reel, or client community post
  * @access  Authenticated users (Vendors & Clients)
  */
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', authenticateUser, async (req: Request, res: Response) => {
     try {
         const {
             vendorId,
@@ -287,7 +288,13 @@ router.post('/', async (req: Request, res: Response) => {
             tags = [],
         } = req.body;
 
-        const creatorId = vendorId || userId || authorId;
+        const callerUid = req.user!.uid;
+        const isCallerAdmin = req.user!.isAdmin;
+        const creatorId = vendorId || userId || authorId || callerUid;
+
+        if (creatorId !== callerUid && !isCallerAdmin) {
+            return res.status(403).json({ error: 'Forbidden: You can only create posts for your own account' });
+        }
 
         // Build the final media array — supports both single and multi-media
         let finalMediaUrls: string[] = [];
@@ -295,10 +302,6 @@ router.post('/', async (req: Request, res: Response) => {
             finalMediaUrls = mediaUrls.filter((u: string) => u && u.trim());
         } else if (mediaUrl) {
             finalMediaUrls = [mediaUrl];
-        }
-
-        if (!creatorId) {
-            return res.status(400).json({ error: 'creatorId / vendorId / userId is required' });
         }
 
         // For vendors, at least one media URL is required; for clients, either caption or media is required
@@ -420,15 +423,10 @@ router.post('/', async (req: Request, res: Response) => {
  * @desc    Toggle like / unlike a post
  * @access  Authenticated users
  */
-router.post('/:id/like', async (req: Request, res: Response) => {
+router.post('/:id/like', authenticateUser, async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { userId } = req.body;
-
-        if (!userId) {
-            res.status(400).json({ error: 'userId is required to like a post' });
-            return;
-        }
+        const userId = req.user!.uid;
 
         // Check in memory / seed first
         let targetPost = MEMORY_POSTS.find(p => p.id === id) || SAMPLE_POSTS.find(p => p.id === id);
@@ -570,13 +568,14 @@ router.get('/:id/comments', async (req: Request, res: Response) => {
  * @desc    Add comment to a post
  * @access  Authenticated users
  */
-router.post('/:id/comments', async (req: Request, res: Response) => {
+router.post('/:id/comments', authenticateUser, async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { userId, userName, userAvatar, text } = req.body;
+        const userId = req.user!.uid;
+        const { userName, userAvatar, text } = req.body;
 
-        if (!userId || !text) {
-            res.status(400).json({ error: 'userId and text are required' });
+        if (!text) {
+            res.status(400).json({ error: 'Comment text is required' });
             return;
         }
 
@@ -638,16 +637,11 @@ router.post('/:id/comments', async (req: Request, res: Response) => {
  * @desc    Delete a post (Vendor can delete own posts, Admin can delete any post)
  * @access  Vendor owner or Admin only
  */
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', authenticateUser, async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const userId = (req.body.userId || req.query.userId || req.headers['x-user-id']) as string;
-        const role = (req.body.role || req.query.role || req.headers['x-user-role']) as string;
-
-        if (!userId) {
-            res.status(401).json({ error: 'User ID is required to perform this action' });
-            return;
-        }
+        const callerUid = req.user!.uid;
+        const isAdmin = req.user!.isAdmin;
 
         // 1. Locate the post in Memory, Seed, or Firestore
         let targetPost = MEMORY_POSTS.find(p => p.id === id) || SAMPLE_POSTS.find(p => p.id === id);
@@ -666,9 +660,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
             return;
         }
 
-        // 2. Check permissions: Admin can delete any post; Vendor can only delete their own post
-        const isAdmin = role === 'admin' || (req as any).user?.role === 'admin';
-        const isOwner = targetPost.vendorId === userId;
+        // 2. Check permissions: Admin can delete any post; Post creator can only delete their own post
+        const isOwner = targetPost.vendorId === callerUid || targetPost.userId === callerUid || targetPost.creatorId === callerUid;
 
         if (!isAdmin && !isOwner) {
             res.status(403).json({

@@ -19,19 +19,14 @@ import * as DocumentPicker from 'expo-document-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
-import { postAPI } from '../services/api';
+import { postAPI, authAPI } from '../services/api';
 import { auth } from '../config/firebase';
+import { useAuthStore } from '../store/authStore';
+import VendorVerificationModal from '../components/VendorVerificationModal';
+import { POPULAR_CATEGORIES } from '../constants/categories';
+import CategoryPickerModal from '../components/CategoryPickerModal';
 
-const CATEGORIES = [
-    'Food & Dining',
-    'Fashion & Retail',
-    'Beauty & Spa',
-    'Electronics',
-    'Health & Medical',
-    'Automotive',
-    'Home & Living',
-    'Services',
-];
+const CATEGORIES = POPULAR_CATEGORIES.filter(c => c !== 'All');
 
 const PRESET_PHOTOS = [
     { label: '🍕 Food', url: 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=800' },
@@ -52,15 +47,47 @@ export default function CreatePostScreen({ navigation }: any) {
     const { colors } = useTheme();
     const styles = getStyles(colors);
 
+    const { user, userRole, realRole } = useAuthStore();
+    const isAdmin = Boolean(realRole === 'admin' || userRole === 'admin' || user?.email === 'admin@qiira.com' || user?.uid === 'v8MwaOet0ISfZAWXIDAPAGcg1td2');
+    const isVendor = userRole === 'vendor' || realRole === 'vendor';
+
+    const [isVerified, setIsVerified] = useState(false);
+    const [verificationStatus, setVerificationStatus] = useState<string>('pending');
+    const [checkingVerification, setCheckingVerification] = useState(isVendor && !isAdmin);
+    const [showVerificationModal, setShowVerificationModal] = useState(false);
+
     const [postType, setPostType] = useState<'photos' | 'reels' | 'mixed'>('photos');
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
     const [customUrlInput, setCustomUrlInput] = useState<string>('');
     const [showUrlInput, setShowUrlInput] = useState<boolean>(false);
     const [caption, setCaption] = useState<string>('');
     const [price, setPrice] = useState<string>('');
-    const [category, setCategory] = useState<string>('Food & Dining');
+    const [category, setCategory] = useState<string>('Food & Agriculture');
+    const [showCategoryModal, setShowCategoryModal] = useState<boolean>(false);
     const [tags, setTags] = useState<string>('');
     const [loading, setLoading] = useState<boolean>(false);
+
+    React.useEffect(() => {
+        const checkStatus = async () => {
+            if (!user || !isVendor || isAdmin) {
+                setCheckingVerification(false);
+                return;
+            }
+            try {
+                const res = await authAPI.getUser(user.uid);
+                const u = res.data?.user;
+                const verified = Boolean(u?.isVerified || u?.is_verified);
+                const status = u?.verificationStatus || u?.verification_status || 'pending';
+                setIsVerified(verified);
+                setVerificationStatus(status);
+            } catch (e) {
+                console.warn('Error checking verification in CreatePost:', e);
+            } finally {
+                setCheckingVerification(false);
+            }
+        };
+        checkStatus();
+    }, [user, isVendor, isAdmin]);
 
     // Convert local/blob URIs to permanent base64 data URIs
     const convertBlobToBase64 = async (uri: string): Promise<string> => {
@@ -353,6 +380,95 @@ export default function CreatePostScreen({ navigation }: any) {
         </View>
     );
 
+    if (checkingVerification) {
+        return (
+            <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+                <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+        );
+    }
+
+    if (isVendor && !isVerified && verificationStatus !== 'approved' && !isAdmin) {
+        return (
+            <View style={[styles.container, { padding: SPACING.lg, justifyContent: 'center', alignItems: 'center' }]}>
+                <View style={[styles.header, { width: '100%', marginBottom: SPACING.xl }]}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                        <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                    <Text style={styles.headerTitle}>Account Verification</Text>
+                    <View style={{ width: 40 }} />
+                </View>
+
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', maxWidth: 420, width: '100%', paddingHorizontal: SPACING.md }}>
+                    <View style={{ width: 84, height: 84, borderRadius: 42, backgroundColor: 'rgba(178, 138, 69, 0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.lg }}>
+                        <Ionicons name="shield-checkmark" size={46} color="#B28A45" />
+                    </View>
+
+                    <Text style={{ fontSize: FONT_SIZES.xl, fontWeight: 'bold', color: colors.textPrimary, textAlign: 'center', marginBottom: SPACING.xs }}>
+                        Verification Required to Post 🛡️
+                    </Text>
+
+                    <Text style={{ fontSize: FONT_SIZES.sm, color: colors.textSecondary, textAlign: 'center', lineHeight: 20, marginBottom: SPACING.lg }}>
+                        {verificationStatus === 'pending'
+                            ? 'Your identity document has been submitted and is currently being reviewed by the QIIRA administration. You will be able to publish posts as soon as it is approved.'
+                            : 'All registered vendors must upload a compulsory identity document (NIN, Driver’s License, or International Passport) before publishing posts or products.'}
+                    </Text>
+
+                    <View style={{ width: '100%', backgroundColor: colors.surface, borderRadius: BORDER_RADIUS.md, padding: SPACING.md, borderWidth: 1, borderColor: colors.border, marginBottom: SPACING.xl }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                            <Ionicons name="information-circle" size={18} color="#B28A45" />
+                            <Text style={{ fontSize: FONT_SIZES.sm, fontWeight: 'bold', color: colors.textPrimary }}>
+                                Status: {verificationStatus === 'pending' ? '⏳ Under Review' : '⚠️ Action Required'}
+                            </Text>
+                        </View>
+                        <Text style={{ fontSize: 12, color: colors.textSecondary }}>
+                            {verificationStatus === 'pending'
+                                ? 'Admin verification is in progress. You can still freely navigate the app, change your profile photo, and update your background banner.'
+                                : 'Upload an image or PDF of your NIN, Driver’s License, or Passport to unlock post creation.'}
+                        </Text>
+                    </View>
+
+                    <TouchableOpacity
+                        style={{
+                            width: '100%',
+                            backgroundColor: '#B28A45',
+                            paddingVertical: 14,
+                            borderRadius: BORDER_RADIUS.md,
+                            alignItems: 'center',
+                            flexDirection: 'row',
+                            justifyContent: 'center',
+                            gap: 8,
+                            marginBottom: SPACING.md,
+                        }}
+                        onPress={() => setShowVerificationModal(true)}
+                        activeOpacity={0.8}
+                    >
+                        <Ionicons name="cloud-upload" size={18} color="#FFFFFF" />
+                        <Text style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: FONT_SIZES.md }}>
+                            {verificationStatus === 'pending' ? 'Re-upload / Update Document' : 'Upload Verification Document'}
+                        </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={{ width: '100%', paddingVertical: 12, alignItems: 'center' }}
+                        onPress={() => navigation.goBack()}
+                    >
+                        <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>Back to Explore</Text>
+                    </TouchableOpacity>
+                </View>
+
+                <VendorVerificationModal
+                    visible={showVerificationModal}
+                    onClose={() => setShowVerificationModal(false)}
+                    vendorId={user?.uid || ''}
+                    onSuccess={() => {
+                        setVerificationStatus('pending');
+                    }}
+                />
+            </View>
+        );
+    }
+
     return (
         <KeyboardAvoidingView
             style={styles.container}
@@ -582,9 +698,16 @@ export default function CreatePostScreen({ navigation }: any) {
 
                 {/* Category Picker */}
                 <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Category</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={styles.inputLabel}>Category</Text>
+                        <TouchableOpacity onPress={() => setShowCategoryModal(true)}>
+                            <Text style={{ fontSize: 12, color: colors.primary, fontWeight: '700' }}>
+                                🔍 Browse All Categories
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
-                        {CATEGORIES.map((cat) => (
+                        {(!CATEGORIES.includes(category) ? [category, ...CATEGORIES] : CATEGORIES).map((cat) => (
                             <TouchableOpacity
                                 key={cat}
                                 style={[styles.categoryChip, category === cat && styles.categoryChipActive]}
@@ -600,8 +723,28 @@ export default function CreatePostScreen({ navigation }: any) {
                                 </Text>
                             </TouchableOpacity>
                         ))}
+                        <TouchableOpacity
+                            style={[styles.categoryChip, { backgroundColor: `${colors.primary}15`, borderColor: colors.primary }]}
+                            onPress={() => setShowCategoryModal(true)}
+                        >
+                            <Text style={[styles.categoryChipText, { color: colors.primary, fontWeight: '700' }]}>
+                                + More
+                            </Text>
+                        </TouchableOpacity>
                     </ScrollView>
                 </View>
+
+                <CategoryPickerModal
+                    visible={showCategoryModal}
+                    onClose={() => setShowCategoryModal(false)}
+                    selectedCategory={category}
+                    onSelectCategory={(catName, subName) => {
+                        setCategory(subName ? `${catName} - ${subName}` : catName);
+                    }}
+                    title="Select Post Category"
+                    subtitle="Tag your post for relevant buyers & discovery"
+                    allowSubcategories={true}
+                />
 
                 {/* Tags */}
                 <View style={styles.inputGroup}>

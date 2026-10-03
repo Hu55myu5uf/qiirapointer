@@ -154,7 +154,7 @@ export default function ConversationsScreen({ navigation }: any) {
             if (otherImgKey) otherImage = conv.participantImages?.[otherImgKey];
         }
 
-        if (otherId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2' || otherName?.toLowerCase().includes('admin')) {
+        if (otherId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2') {
             isAdmin = true;
             isVerified = true;
         }

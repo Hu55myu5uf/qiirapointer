@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../config/firebase';
+import { authenticateUser, requireSelfOrAdmin } from '../utils/authMiddleware';
 
 const router = Router();
+
+// Protect all cart operations: only owner or admin can read/modify the cart
+router.use(authenticateUser, requireSelfOrAdmin('userId'));
 
 export interface CartItem {
     id: string; // post ID or product ID

@@ -108,6 +108,18 @@ export const vendorAPI = {
     // Location toggle
     updateLocation: (id: string, data: { useLiveLocation: boolean; liveLatitude?: number; liveLongitude?: number }) =>
         api.put(`/vendors/${id}/location`, data),
+    // KYC Verification Submission
+    submitVerification: (id: string, data: { documentType: string; documentUrl: string; documentName?: string; documentFileType?: string; notes?: string }) =>
+        api.post(`/vendors/${id}/submit-verification`, data),
+    // Catalog Management
+    getCatalog: (id: string) => api.get(`/vendors/${id}/catalog`),
+    addCatalogItem: (id: string, data: { name: string; price: number; category?: string; imageUrl?: string; description?: string; inStock?: boolean }) =>
+        api.post(`/vendors/${id}/catalog`, data),
+    deleteCatalogItem: (id: string, itemId: string) =>
+        api.delete(`/vendors/${id}/catalog/${itemId}`),
+    // Advert / Boost
+    requestAdvert: (id: string, data: { postId: string; postCaption?: string; mediaUrl?: string; plan?: string; durationDays?: number; notes?: string }) =>
+        api.post(`/vendors/${id}/advert-request`, data),
 };
 
 export const clientAPI = {
@@ -118,7 +130,9 @@ export const clientAPI = {
         api.post(`/clients/${clientId}/favorites`, { vendorId }),
     removeFavorite: (clientId: string, vendorId: string) =>
         api.delete(`/clients/${clientId}/favorites/${vendorId}`),
-
+    // Account Conversion to Vendor
+    requestVendorConversion: (clientId: string, data: { businessName: string; category: string; description?: string; phoneNumber?: string; address?: string; documentUrl?: string; documentType?: string }) =>
+        api.post(`/clients/${clientId}/convert-to-vendor`, data),
 };
 
 export const adminAPI = {
@@ -134,6 +148,14 @@ export const adminAPI = {
         api.put(`/admin/users/${id}/suspend`, { suspended }),
     setUserVerified: (userId: string, isVerified: boolean) =>
         api.put(`/admin/users/${userId}/verified`, { isVerified }),
+    // Conversions
+    getConversionRequests: () => api.get('/admin/conversions/pending'),
+    respondConversionRequest: (id: string, status: 'approved' | 'rejected', notes?: string) =>
+        api.put(`/admin/conversions/${id}`, { status, notes }),
+    // Adverts
+    getAdvertRequests: () => api.get('/admin/adverts/pending'),
+    respondAdvertRequest: (id: string, status: 'approved' | 'rejected', notes?: string) =>
+        api.put(`/admin/adverts/${id}`, { status, notes }),
 };
 
 export const chatAPI = {
@@ -152,6 +174,9 @@ export const chatAPI = {
         fileName?: string;
         replyTo?: any;
         sharedPost?: any;
+        messageType?: string;
+        orderDetails?: any;
+        orderData?: any;
     }) => api.post('/chats/messages', data),
     uploadAttachment: (data: {
         userId: string;

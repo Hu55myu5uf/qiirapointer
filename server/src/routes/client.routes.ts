@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import supabase from '../config/supabase';
 import { db } from '../config/firebase';
 import { notifyNewReview } from '../utils/pushNotifications';
+import { authenticateUser, requireSelfOrAdmin } from '../utils/authMiddleware';
 
 const router = Router();
 
@@ -103,7 +104,7 @@ function mapVendor(v: any) {
  * @desc    Submit a review for a vendor
  * @access  Private (Client only)
  */
-router.post('/:id/reviews', async (req: Request, res: Response) => {
+router.post('/:id/reviews', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
     try {
         const { id } = req.params; // Client ID
         const { vendorId, rating, comment } = req.body;
@@ -225,7 +226,7 @@ router.get('/:id/favorites', async (req: Request, res: Response) => {
  * @desc    Add vendor to favorites
  * @access  Private (Client only)
  */
-router.post('/:id/favorites', async (req: Request, res: Response) => {
+router.post('/:id/favorites', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const { vendorId } = req.body;
@@ -261,7 +262,7 @@ router.post('/:id/favorites', async (req: Request, res: Response) => {
  * @desc    Remove vendor from favorites
  * @access  Private (Client only)
  */
-router.delete('/:id/favorites/:vendorId', async (req: Request, res: Response) => {
+router.delete('/:id/favorites/:vendorId', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
     try {
         const { id, vendorId } = req.params;
         console.log(`Comparing Remove Fav: Client ${id}, Vendor ${vendorId}`);
@@ -284,6 +285,55 @@ router.delete('/:id/favorites/:vendorId', async (req: Request, res: Response) =>
     } catch (error: any) {
         console.error('Remove favorite error:', error);
         res.status(500).json({ error: 'Failed to remove favorite', message: error.message });
+    }
+});
+
+/**
+ * @route   POST /api/clients/:id/convert-to-vendor
+ * @desc    Submit request to upgrade/convert client account to vendor account
+ * @access  Private (Client only)
+ */
+router.post('/:id/convert-to-vendor', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
+    try {
+        const { id } = req.params;
+        const { businessName, category, description, phoneNumber, address, documentUrl, documentType } = req.body;
+
+        if (!businessName || !category) {
+            return res.status(400).json({ error: 'Business name and category are required' });
+        }
+
+        const requestData = {
+            id: `conv_${Date.now()}_${id}`,
+            clientId: id,
+            businessName,
+            category,
+            description: description || '',
+            phoneNumber: phoneNumber || '',
+            address: address || '',
+            documentUrl: documentUrl || '',
+            documentType: documentType || 'Business Document',
+            status: 'pending',
+            createdAt: new Date().toISOString(),
+        };
+
+        // Save in Firestore conversion_requests collection
+        await db.collection('conversion_requests').doc(requestData.id).set(requestData);
+
+        // Update user doc with pending conversion indicator
+        try {
+            await db.collection('users').doc(id).set({
+                hasPendingVendorConversion: true,
+                pendingConversionId: requestData.id,
+            }, { merge: true });
+        } catch (_) {}
+
+        res.status(201).json({
+            message: 'Vendor conversion request submitted! An administrator will review your application.',
+            request: requestData,
+        });
+    } catch (error: any) {
+        console.error('Convert to vendor error:', error);
+        res.status(500).json({ error: 'Failed to submit conversion request', message: error.message });
     }
 });
 

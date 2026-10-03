@@ -300,6 +300,10 @@ router.get('/room/:callId', (req: Request, res: Response): any => {
     const { callId } = req.params;
     const { userId, userName = 'User', type = 'voice', targetId = '' } = req.query;
 
+    // Sanitize parameters to prevent Reflected XSS
+    const safeCallId = String(callId || '').replace(/[^a-zA-Z0-9_-]/g, '');
+    const safeUserId = String(userId || '').replace(/[^a-zA-Z0-9_-]/g, '');
+    const safeTargetId = String(targetId || '').replace(/[^a-zA-Z0-9_-]/g, '');
     const isVideo = type === 'video';
 
     const html = `<!DOCTYPE html>
@@ -403,9 +407,9 @@ router.get('/room/:callId', (req: Request, res: Response): any => {
     </div>
 
     <script>
-        const CALL_ID = "${callId}";
-        const USER_ID = "${userId}";
-        const TARGET_ID = "${targetId}";
+        const CALL_ID = "${safeCallId}";
+        const USER_ID = "${safeUserId}";
+        const TARGET_ID = "${safeTargetId}";
         const IS_VIDEO = ${isVideo};
         const API_BASE = window.location.origin + '/api';
 

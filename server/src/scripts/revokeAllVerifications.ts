@@ -17,7 +17,7 @@ async function revokeAllNonAdminVerifications() {
             const data = doc.data();
             const role = data.role || 'client';
             const email = data.email || '';
-            const isAdmin = role === 'admin' || email.includes('admin');
+            const isAdmin = role === 'admin' || doc.id === 'v8MwaOet0ISfZAWXIDAPAGcg1td2';
 
             if (isAdmin) {
                 adminsPreserved++;

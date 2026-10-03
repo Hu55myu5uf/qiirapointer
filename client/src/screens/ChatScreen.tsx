@@ -215,8 +215,7 @@ export default function ChatScreen({ route, navigation }: any) {
     const isActuallyAdmin = Boolean(
         isSupportChat ||
         initialIsAdmin ||
-        otherUserId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2' ||
-        initialOtherUserName?.toLowerCase().includes('admin')
+        otherUserId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2'
     );
     const [otherUserName, setOtherUserName] = useState(
         isSupportChat ? 'QIIRA Official Support' : (initialOtherUserName || 'Chat')

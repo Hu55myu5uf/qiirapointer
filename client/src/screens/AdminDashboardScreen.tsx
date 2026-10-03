@@ -15,6 +15,7 @@ import {
     Platform,
     Image,
     StatusBar,
+    Linking,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { adminAPI, chatAPI } from '../services/api';
@@ -25,6 +26,7 @@ import { confirmAction } from '../utils/alert';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 import { useAuthStore } from '../store/authStore';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import CategoryPickerModal from '../components/CategoryPickerModal';
 
 const SUPPORT_QUICK_RESPONSES = [
     'Hello! We are currently looking into this and will assist you immediately.',
@@ -45,8 +47,14 @@ export default function AdminDashboardScreen({ navigation }: any) {
     const [analytics, setAnalytics] = useState<any>(null);
     const [pendingVendors, setPendingVendors] = useState<any[]>([]);
 
-    // Navigation Sub-tab: 'overview' | 'support'
-    const [adminActiveTab, setAdminActiveTab] = useState<'overview' | 'support'>('overview');
+    // Navigation Sub-tab: 'overview' | 'support' | 'conversions' | 'adverts'
+    const [adminActiveTab, setAdminActiveTab] = useState<'overview' | 'support' | 'conversions' | 'adverts'>('overview');
+
+    // Conversions & Adverts state
+    const [pendingConversions, setPendingConversions] = useState<any[]>([]);
+    const [loadingConversions, setLoadingConversions] = useState(false);
+    const [pendingAdverts, setPendingAdverts] = useState<any[]>([]);
+    const [loadingAdverts, setLoadingAdverts] = useState(false);
 
     // Support Queue states
     const [supportConversations, setSupportConversations] = useState<any[]>([]);
@@ -80,6 +88,7 @@ export default function AdminDashboardScreen({ navigation }: any) {
         services: '',
         businessImage: '',
     });
+    const [showAdminCategoryPicker, setShowAdminCategoryPicker] = useState(false);
 
     const fetchSupportConversations = async (silent = false) => {
         if (!silent) setLoadingSupport(true);
@@ -93,9 +102,73 @@ export default function AdminDashboardScreen({ navigation }: any) {
         }
     };
 
+    const fetchConversionRequests = async () => {
+        setLoadingConversions(true);
+        try {
+            const res = await adminAPI.getConversionRequests();
+            setPendingConversions(res.data?.requests || []);
+        } catch (err) {
+            console.error('Error fetching conversions:', err);
+        } finally {
+            setLoadingConversions(false);
+        }
+    };
+
+    const handleRespondConversion = async (requestId: string, status: 'approved' | 'rejected', clientName?: string) => {
+        const actionText = status === 'approved' ? 'Approve conversion of' : 'Deny conversion of';
+        confirmAction(
+            `${status === 'approved' ? 'Approve' : 'Deny'} Conversion`,
+            `Are you sure you want to ${actionText} ${clientName || 'this user'} to Vendor status?`,
+            async () => {
+                try {
+                    await adminAPI.respondConversionRequest(requestId, status);
+                    Alert.alert('Success', `Account conversion has been ${status}!`);
+                    fetchConversionRequests();
+                    fetchData();
+                } catch (error: any) {
+                    Alert.alert('Error', error.response?.data?.message || 'Failed to process request.');
+                }
+            },
+            status === 'approved' ? 'Approve' : 'Deny'
+        );
+    };
+
+    const fetchAdvertRequests = async () => {
+        setLoadingAdverts(true);
+        try {
+            const res = await adminAPI.getAdvertRequests();
+            setPendingAdverts(res.data?.requests || []);
+        } catch (err) {
+            console.error('Error fetching adverts:', err);
+        } finally {
+            setLoadingAdverts(false);
+        }
+    };
+
+    const handleRespondAdvert = async (requestId: string, status: 'approved' | 'rejected', postTitle?: string) => {
+        const actionText = status === 'approved' ? 'Approve and boost advert for' : 'Reject advert for';
+        confirmAction(
+            `${status === 'approved' ? 'Approve' : 'Reject'} Advert`,
+            `Are you sure you want to ${actionText} "${postTitle || 'this post'}"?`,
+            async () => {
+                try {
+                    await adminAPI.respondAdvertRequest(requestId, status);
+                    Alert.alert('Success', `Advert request has been ${status}!`);
+                    fetchAdvertRequests();
+                    fetchData();
+                } catch (error: any) {
+                    Alert.alert('Error', error.response?.data?.message || 'Failed to process advert.');
+                }
+            },
+            status === 'approved' ? 'Approve' : 'Reject'
+        );
+    };
+
     useEffect(() => {
         fetchData();
         fetchSupportConversations(true);
+        fetchConversionRequests();
+        fetchAdvertRequests();
     }, []);
 
     const fetchData = async () => {
@@ -119,6 +192,8 @@ export default function AdminDashboardScreen({ navigation }: any) {
         setRefreshing(true);
         fetchData();
         fetchSupportConversations(true);
+        fetchConversionRequests();
+        fetchAdvertRequests();
     };
 
     const handleOpenSupportChat = (item: any) => {
@@ -424,6 +499,46 @@ export default function AdminDashboardScreen({ navigation }: any) {
                     </Text>
                 ) : null}
 
+                {/* KYC Identity Document Details */}
+                {item.verificationDocument ? (
+                    <View style={{ backgroundColor: colors.surfaceLight, padding: 12, borderRadius: BORDER_RADIUS.md, marginVertical: 8, borderWidth: 1, borderColor: colors.border }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary }}>
+                                📑 ID Document: {item.verificationDocument.documentType || 'Identity Document'}
+                            </Text>
+                            <View style={{ backgroundColor: `${colors.primary}20`, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                <Text style={{ fontSize: 10, color: colors.primary, fontWeight: '700' }}>
+                                    {(item.verificationDocument.documentFileType || 'image').toUpperCase()}
+                                </Text>
+                            </View>
+                        </View>
+                        <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 4 }}>
+                            Filename: {item.verificationDocument.documentName || 'Document'}
+                        </Text>
+                        {item.verificationDocument.documentUrl ? (
+                            <TouchableOpacity
+                                style={{
+                                    marginTop: 8,
+                                    backgroundColor: colors.primary,
+                                    paddingVertical: 6,
+                                    paddingHorizontal: 12,
+                                    borderRadius: BORDER_RADIUS.sm,
+                                    alignSelf: 'flex-start',
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                }}
+                                onPress={() => Linking.openURL(item.verificationDocument.documentUrl)}
+                            >
+                                <Ionicons name="eye-outline" size={14} color="#FFF" />
+                                <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>
+                                    View / Inspect Document
+                                </Text>
+                            </TouchableOpacity>
+                        ) : null}
+                    </View>
+                ) : null}
+
                 <View style={styles.actionButtons}>
                     <TouchableOpacity
                         style={[styles.actionButton, styles.approveButton]}
@@ -511,19 +626,20 @@ export default function AdminDashboardScreen({ navigation }: any) {
                 </View>
             </View>
 
-            {/* Top Admin Section Switcher: Overview vs Support Desk Queue */}
-            <View style={styles.topSegmentBar}>
+            {/* Top Admin Section Switcher: Overview vs Upgrades vs Adverts vs Support */}
+            <View style={[styles.topSegmentBar, { flexWrap: 'wrap', gap: 6 }]}>
                 <TouchableOpacity
                     style={[
                         styles.topSegmentBtn,
                         adminActiveTab === 'overview' && styles.topSegmentBtnActive,
+                        { flex: 1, minWidth: 100 }
                     ]}
                     onPress={() => setAdminActiveTab('overview')}
                     activeOpacity={0.8}
                 >
                     <Ionicons
                         name="grid-outline"
-                        size={16}
+                        size={15}
                         color={adminActiveTab === 'overview' ? colors.primary : colors.textSecondary}
                     />
                     <Text
@@ -532,7 +648,7 @@ export default function AdminDashboardScreen({ navigation }: any) {
                             adminActiveTab === 'overview' && styles.topSegmentTextActive,
                         ]}
                     >
-                        Overview & Approvals
+                        KYC
                     </Text>
                     {pendingVendors.length > 0 && (
                         <View style={styles.segmentBadge}>
@@ -544,7 +660,72 @@ export default function AdminDashboardScreen({ navigation }: any) {
                 <TouchableOpacity
                     style={[
                         styles.topSegmentBtn,
+                        adminActiveTab === 'conversions' && styles.topSegmentBtnActive,
+                        { flex: 1, minWidth: 100 }
+                    ]}
+                    onPress={() => {
+                        setAdminActiveTab('conversions');
+                        fetchConversionRequests();
+                    }}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons
+                        name="swap-horizontal"
+                        size={15}
+                        color={adminActiveTab === 'conversions' ? colors.primary : colors.textSecondary}
+                    />
+                    <Text
+                        style={[
+                            styles.topSegmentText,
+                            adminActiveTab === 'conversions' && styles.topSegmentTextActive,
+                        ]}
+                    >
+                        Upgrades
+                    </Text>
+                    {pendingConversions.length > 0 && (
+                        <View style={[styles.segmentBadge, { backgroundColor: '#F59E0B' }]}>
+                            <Text style={styles.segmentBadgeText}>{pendingConversions.length}</Text>
+                        </View>
+                    )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={[
+                        styles.topSegmentBtn,
+                        adminActiveTab === 'adverts' && styles.topSegmentBtnActive,
+                        { flex: 1, minWidth: 100 }
+                    ]}
+                    onPress={() => {
+                        setAdminActiveTab('adverts');
+                        fetchAdvertRequests();
+                    }}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons
+                        name="rocket-outline"
+                        size={15}
+                        color={adminActiveTab === 'adverts' ? colors.primary : colors.textSecondary}
+                    />
+                    <Text
+                        style={[
+                            styles.topSegmentText,
+                            adminActiveTab === 'adverts' && styles.topSegmentTextActive,
+                        ]}
+                    >
+                        Adverts
+                    </Text>
+                    {pendingAdverts.length > 0 && (
+                        <View style={[styles.segmentBadge, { backgroundColor: '#B28A45' }]}>
+                            <Text style={styles.segmentBadgeText}>{pendingAdverts.length}</Text>
+                        </View>
+                    )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={[
+                        styles.topSegmentBtn,
                         adminActiveTab === 'support' && styles.topSegmentBtnActive,
+                        { flex: 1, minWidth: 100 }
                     ]}
                     onPress={() => {
                         setAdminActiveTab('support');
@@ -554,7 +735,7 @@ export default function AdminDashboardScreen({ navigation }: any) {
                 >
                     <Ionicons
                         name="headset"
-                        size={16}
+                        size={15}
                         color={adminActiveTab === 'support' ? colors.primary : colors.textSecondary}
                     />
                     <Text
@@ -563,15 +744,11 @@ export default function AdminDashboardScreen({ navigation }: any) {
                             adminActiveTab === 'support' && styles.topSegmentTextActive,
                         ]}
                     >
-                        Support Queue
+                        Support
                     </Text>
                     {pendingInquiriesCount > 0 ? (
-                        <View style={[styles.segmentBadge, { backgroundColor: '#F59E0B' }]}>
+                        <View style={[styles.segmentBadge, { backgroundColor: '#EF4444' }]}>
                             <Text style={styles.segmentBadgeText}>{pendingInquiriesCount}</Text>
-                        </View>
-                    ) : supportConversations.length > 0 ? (
-                        <View style={[styles.segmentBadge, { backgroundColor: '#10B981' }]}>
-                            <Text style={styles.segmentBadgeText}>{supportConversations.length}</Text>
                         </View>
                     ) : null}
                 </TouchableOpacity>
@@ -696,6 +873,178 @@ export default function AdminDashboardScreen({ navigation }: any) {
                     ))
                 )}
             </ScrollView>
+            ) : adminActiveTab === 'conversions' ? (
+                <ScrollView
+                    contentContainerStyle={styles.scrollContent}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+                    }
+                >
+                    <View style={styles.supportHeaderRow}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.sectionTitle}>🔄 Account Upgrade Requests</Text>
+                            <Text style={styles.supportSubText}>
+                                Clients requesting to upgrade their accounts into full merchant vendor stores.
+                            </Text>
+                        </View>
+                        <TouchableOpacity
+                            style={styles.refreshQueueBtn}
+                            onPress={() => fetchConversionRequests()}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons name="refresh" size={15} color={colors.primary} />
+                            <Text style={[styles.refreshQueueBtnText, { color: colors.primary }]}>Refresh</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {loadingConversions ? (
+                        <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: SPACING.xl }} />
+                    ) : pendingConversions.length === 0 ? (
+                        <View style={styles.emptySupportCard}>
+                            <Ionicons name="checkmark-done-circle-outline" size={48} color={colors.textTertiary} />
+                            <Text style={styles.emptySupportTitle}>No Pending Conversion Requests</Text>
+                            <Text style={styles.emptySupportSubtitle}>
+                                When clients submit an upgrade request, it will appear here for verification.
+                            </Text>
+                        </View>
+                    ) : (
+                        pendingConversions.map((req) => (
+                            <View key={req.id} style={[styles.vendorCard, { marginBottom: SPACING.md }]}>
+                                <View style={styles.vendorHeader}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.vendorName}>{req.businessName}</Text>
+                                        <Text style={styles.vendorCategory}>Category: {req.category}</Text>
+                                    </View>
+                                    <View style={[styles.statusBadge, { backgroundColor: '#F59E0B' }]}>
+                                        <Text style={styles.statusText}>PENDING REVIEW</Text>
+                                    </View>
+                                </View>
+
+                                <Text style={styles.vendorInfo}>👤 Applicant: {req.clientName || 'Client'} ({req.clientEmail || 'No email'})</Text>
+                                <Text style={styles.vendorInfo}>📱 Phone: {req.phoneNumber || 'N/A'}</Text>
+                                <Text style={styles.vendorInfo}>📍 Location: {req.address || 'N/A'}</Text>
+                                {req.description ? (
+                                    <Text style={[styles.vendorDescription, { marginTop: 4 }]}>
+                                        {req.description}
+                                    </Text>
+                                ) : null}
+
+                                {/* ID Document preview */}
+                                {req.documentUrl ? (
+                                    <View style={{ backgroundColor: colors.surfaceLight, padding: 10, borderRadius: BORDER_RADIUS.sm, marginVertical: 8, borderWidth: 1, borderColor: colors.border }}>
+                                        <Text style={{ fontSize: 12, fontWeight: 'bold', color: colors.textPrimary }}>
+                                            📑 Verification Doc: {req.documentType || 'ID Document'}
+                                        </Text>
+                                        <TouchableOpacity
+                                            style={{ marginTop: 6, backgroundColor: colors.primary, paddingVertical: 5, paddingHorizontal: 10, borderRadius: BORDER_RADIUS.sm, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                                            onPress={() => Linking.openURL(req.documentUrl)}
+                                        >
+                                            <Ionicons name="eye-outline" size={14} color="#FFF" />
+                                            <Text style={{ color: '#FFF', fontSize: 12, fontWeight: 'bold' }}>View Document</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                ) : null}
+
+                                <View style={styles.actionButtons}>
+                                    <TouchableOpacity
+                                        style={[styles.actionButton, styles.approveButton]}
+                                        onPress={() => handleRespondConversion(req.id, 'approved', req.businessName)}
+                                    >
+                                        <Text style={styles.actionButtonText}>✓ Approve as Vendor</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[styles.actionButton, styles.rejectButton]}
+                                        onPress={() => handleRespondConversion(req.id, 'rejected', req.businessName)}
+                                    >
+                                        <Text style={styles.actionButtonText}>✕ Deny Request</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        ))
+                    )}
+                </ScrollView>
+            ) : adminActiveTab === 'adverts' ? (
+                <ScrollView
+                    contentContainerStyle={styles.scrollContent}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+                    }
+                >
+                    <View style={styles.supportHeaderRow}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.sectionTitle}>🚀 Advert & Boost Requests</Text>
+                            <Text style={styles.supportSubText}>
+                                Vendor promotion campaigns for posts, showcase reels, and products.
+                            </Text>
+                        </View>
+                        <TouchableOpacity
+                            style={styles.refreshQueueBtn}
+                            onPress={() => fetchAdvertRequests()}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons name="refresh" size={15} color={colors.primary} />
+                            <Text style={[styles.refreshQueueBtnText, { color: colors.primary }]}>Refresh</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {loadingAdverts ? (
+                        <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: SPACING.xl }} />
+                    ) : pendingAdverts.length === 0 ? (
+                        <View style={styles.emptySupportCard}>
+                            <Ionicons name="rocket-outline" size={48} color={colors.textTertiary} />
+                            <Text style={styles.emptySupportTitle}>No Pending Advert Campaigns</Text>
+                            <Text style={styles.emptySupportSubtitle}>
+                                When vendors request to promote or boost a post, it will appear here for approval.
+                            </Text>
+                        </View>
+                    ) : (
+                        pendingAdverts.map((ad) => (
+                            <View key={ad.id} style={[styles.vendorCard, { marginBottom: SPACING.md }]}>
+                                <View style={styles.vendorHeader}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.vendorName}>{ad.vendorName || 'Vendor'}</Text>
+                                        <Text style={styles.vendorCategory}>Plan: {ad.plan || 'Boost'} ({ad.durationDays || 7} Days)</Text>
+                                    </View>
+                                    <View style={[styles.statusBadge, { backgroundColor: '#B28A45' }]}>
+                                        <Text style={styles.statusText}>PROMOTION</Text>
+                                    </View>
+                                </View>
+
+                                {/* Post Preview */}
+                                <View style={{ flexDirection: 'row', gap: 10, backgroundColor: colors.surfaceLight, padding: 10, borderRadius: BORDER_RADIUS.md, marginVertical: 6, borderWidth: 1, borderColor: colors.border }}>
+                                    {ad.mediaUrl ? (
+                                        <Image source={{ uri: ad.mediaUrl }} style={{ width: 70, height: 70, borderRadius: BORDER_RADIUS.sm }} />
+                                    ) : null}
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 13, color: colors.textPrimary, fontWeight: '600' }} numberOfLines={2}>
+                                            {ad.postCaption || 'Advert Post'}
+                                        </Text>
+                                        {ad.notes ? (
+                                            <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 4 }}>
+                                                Targeting note: "{ad.notes}"
+                                            </Text>
+                                        ) : null}
+                                    </View>
+                                </View>
+
+                                <View style={styles.actionButtons}>
+                                    <TouchableOpacity
+                                        style={[styles.actionButton, styles.approveButton]}
+                                        onPress={() => handleRespondAdvert(ad.id, 'approved', ad.postCaption)}
+                                    >
+                                        <Text style={styles.actionButtonText}>🚀 Boost Post</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[styles.actionButton, styles.rejectButton]}
+                                        onPress={() => handleRespondAdvert(ad.id, 'rejected', ad.postCaption)}
+                                    >
+                                        <Text style={styles.actionButtonText}>✕ Reject</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        ))
+                    )}
+                </ScrollView>
             ) : (
                 <ScrollView
                     contentContainerStyle={styles.scrollContent}
@@ -1000,13 +1349,32 @@ export default function AdminDashboardScreen({ navigation }: any) {
                             onChangeText={(text) => setFormData({ ...formData, businessName: text })}
                         />
 
-                        <Text style={styles.modalLabel}>Category *</Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={styles.modalLabel}>Category *</Text>
+                            <TouchableOpacity onPress={() => setShowAdminCategoryPicker(true)}>
+                                <Text style={{ fontSize: 12, color: colors.primary, fontWeight: 'bold' }}>
+                                    🔍 Pick Category
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
                         <TextInput
                             style={styles.modalInput}
-                            placeholder="Restaurant, Retail, Services, etc."
+                            placeholder="e.g. Food & Agriculture, Technology & IT..."
                             placeholderTextColor={colors.textTertiary}
                             value={formData.category}
                             onChangeText={(text) => setFormData({ ...formData, category: text })}
+                        />
+
+                        <CategoryPickerModal
+                            visible={showAdminCategoryPicker}
+                            onClose={() => setShowAdminCategoryPicker(false)}
+                            selectedCategory={formData.category}
+                            onSelectCategory={(catName, subName) => {
+                                setFormData({ ...formData, category: subName ? `${catName} - ${subName}` : catName });
+                            }}
+                            title="Select Vendor Category"
+                            subtitle="Choose from verified industry categories"
+                            allowSubcategories={true}
                         />
 
                         <Text style={styles.modalLabel}>Description</Text>

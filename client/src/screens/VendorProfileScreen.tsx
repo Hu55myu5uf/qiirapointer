@@ -28,6 +28,8 @@ import { auth, storage } from '../config/firebase';
 import { updateProfile } from 'firebase/auth';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { BUSINESS_CATEGORIES } from '../constants/categories';
+import CategoryPickerModal from '../components/CategoryPickerModal';
 import * as FileSystem from 'expo-file-system/legacy'; // Use Legacy API for SDK 54
 import { ref, uploadString, uploadBytes, uploadBytesResumable, getDownloadURL } from 'firebase/storage'; // Changed uploadBytes to uploadString
 import { setLogLevel } from 'firebase/app';
@@ -40,6 +42,10 @@ import { confirmAction } from '../utils/alert';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 import TabSwipeHandler from '../components/TabSwipeHandler';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import VendorVerificationModal from '../components/VendorVerificationModal';
+import VendorAdvertModal from '../components/VendorAdvertModal';
+import AddCatalogItemModal from '../components/AddCatalogItemModal';
 
 // Enable Debug Logs for Firebase
 setLogLevel('debug');
@@ -52,24 +58,8 @@ const X_THEME = {
     avatarSize: 80,
 };
 
-// Vendor category options
-const VENDOR_CATEGORIES = [
-    'Restaurants & Cafes',
-    'Retail & Shopping',
-    'Health & Wellness',
-    'Beauty & Spa',
-    'Automotive Services',
-    'Home Services',
-    'Professional Services',
-    'Entertainment',
-    'Education & Training',
-    'Technology & Electronics',
-    'Fashion & Apparel',
-    'Grocery & Supermarket',
-    'Travel & Tourism',
-    'Fitness & Gym',
-    'Other',
-];
+// Vendor category options (derived from qiira-categories.docx)
+const VENDOR_CATEGORIES = BUSINESS_CATEGORIES;
 
 export default function VendorProfileScreen({ navigation }: any) {
   const { theme, colors, toggleTheme } = useTheme();
@@ -83,6 +73,29 @@ export default function VendorProfileScreen({ navigation }: any) {
     const [showCategoryPicker, setShowCategoryPicker] = useState(false);
     const [passwordModalVisible, setPasswordModalVisible] = useState(false);
     const [settingsModalVisible, setSettingsModalVisible] = useState(false);
+    const [postNotifications, setPostNotifications] = useState(true);
+
+    useEffect(() => {
+        const loadNotificationPref = async () => {
+            try {
+                const saved = await AsyncStorage.getItem('@qiira_post_notifications_enabled');
+                if (saved !== null) {
+                    setPostNotifications(saved === 'true');
+                }
+            } catch (e) {}
+        };
+        loadNotificationPref();
+    }, []);
+
+    const handleTogglePostNotifications = async (val: boolean) => {
+        setPostNotifications(val);
+        try {
+            await AsyncStorage.setItem('@qiira_post_notifications_enabled', String(val));
+            if (user?.uid) {
+                authAPI.updateProfile(user.uid, { postNotificationsEnabled: val } as any).catch(() => {});
+            }
+        } catch (e) {}
+    };
 
     // Form State
     const [businessName, setBusinessName] = useState('');
@@ -97,9 +110,19 @@ export default function VendorProfileScreen({ navigation }: any) {
     const [bannerImage, setBannerImage] = useState('');
 
     // Tab State for View Mode (Defaults to 'posts' as requested)
-    const [activeTab, setActiveTab] = useState<'posts' | 'about' | 'services' | 'docs'>('posts');
+    const [activeTab, setActiveTab] = useState<'posts' | 'catalog' | 'about' | 'services' | 'docs'>('posts');
     const [posts, setPosts] = useState<any[]>([]);
     const [postsLoading, setPostsLoading] = useState(false);
+
+    // Catalog State
+    const [catalogItems, setCatalogItems] = useState<any[]>([]);
+    const [catalogLoading, setCatalogLoading] = useState(false);
+    const [addCatalogModalVisible, setAddCatalogModalVisible] = useState(false);
+
+    // Advert & KYC Modals
+    const [verificationModalVisible, setVerificationModalVisible] = useState(false);
+    const [advertModalVisible, setAdvertModalVisible] = useState(false);
+    const [selectedPostForAdvert, setSelectedPostForAdvert] = useState<any>(null);
 
     // Comments Modal State
     const [commentsModalVisible, setCommentsModalVisible] = useState(false);
@@ -288,6 +311,7 @@ export default function VendorProfileScreen({ navigation }: any) {
             fetchVendorProfile();
             fetchVendorPosts();
             fetchMenuDocuments();
+            fetchCatalogItems();
         }, [user])
     );
 
@@ -305,11 +329,13 @@ export default function VendorProfileScreen({ navigation }: any) {
                 setServices(vendor.services || '');
                 setBusinessImage(vendor.businessImage || '');
                 setBannerImage(vendor.bannerImage || '');
-                setVerificationStatus(vendor.verificationStatus || 'approved');
+                setVerificationStatus(vendor.verificationStatus || vendor.verification_status || 'pending');
                 const verifiedFlag = Boolean(
-                    vendor.isVerified ??
-                    vendor.is_verified ??
-                    vendor.userInfo?.isVerified ??
+                    vendor.isVerified ||
+                    vendor.is_verified ||
+                    vendor.userInfo?.isVerified ||
+                    vendor.verificationStatus === 'approved' ||
+                    vendor.verification_status === 'approved' ||
                     (userRole === 'admin')
                 );
                 setIsVerified(verifiedFlag);
@@ -341,6 +367,29 @@ export default function VendorProfileScreen({ navigation }: any) {
         }
     }, [user]);
 
+    const fetchCatalogItems = useCallback(async () => {
+        if (!user) return;
+        setCatalogLoading(true);
+        try {
+            const response = await vendorAPI.getCatalog(user.uid);
+            setCatalogItems(response.data?.catalog || []);
+        } catch (error) {
+            console.error('Error fetching catalog items:', error);
+        } finally {
+            setCatalogLoading(false);
+        }
+    }, [user]);
+
+    const handleDeleteCatalogItem = async (itemId: string) => {
+        if (!user) return;
+        try {
+            await vendorAPI.deleteCatalogItem(user.uid, itemId);
+            setCatalogItems(prev => prev.filter(i => i.id !== itemId));
+        } catch (error) {
+            console.error('Error deleting catalog item:', error);
+        }
+    };
+
     useFocusEffect(
         useCallback(() => {
             fetchVendorProfile();
@@ -353,8 +402,10 @@ export default function VendorProfileScreen({ navigation }: any) {
     useEffect(() => {
         if (activeTab === 'posts') {
             fetchVendorPosts();
+        } else if (activeTab === 'catalog') {
+            fetchCatalogItems();
         }
-    }, [activeTab]);
+    }, [activeTab, fetchVendorPosts, fetchCatalogItems]);
 
     const handleOpenComments = async (post: any) => {
         setActivePostForComments(post);
@@ -804,14 +855,20 @@ export default function VendorProfileScreen({ navigation }: any) {
                                 alignItems: 'center',
                                 borderColor: '#B28A45',
                                 borderWidth: 1.5,
-                                backgroundColor: isVerified ? '#B28A4515' : '#B28A4510',
+                                backgroundColor: isVerified ? '#B28A4515' : verificationStatus === 'pending' ? 'rgba(245, 158, 11, 0.12)' : '#B28A4510',
                                 borderRadius: BORDER_RADIUS.md,
                                 padding: SPACING.md,
                                 marginHorizontal: SPACING.md,
                                 marginTop: SPACING.sm,
                                 marginBottom: SPACING.xs,
                             }}
-                            onPress={() => navigation.navigate('GetVerified')}
+                            onPress={() => {
+                                if (!isVerified) {
+                                    setVerificationModalVisible(true);
+                                } else {
+                                    navigation.navigate('GetVerified');
+                                }
+                            }}
                             activeOpacity={0.8}
                         >
                             <View style={{
@@ -823,14 +880,22 @@ export default function VendorProfileScreen({ navigation }: any) {
                                 alignItems: 'center',
                                 marginRight: 12,
                             }}>
-                                <Ionicons name="checkmark-circle" size={24} color="#B28A45" />
+                                <Ionicons
+                                    name={isVerified ? "checkmark-circle" : verificationStatus === 'pending' ? "time-outline" : "shield-outline"}
+                                    size={24}
+                                    color="#B28A45"
+                                />
                             </View>
                             <View style={{ flex: 1 }}>
                                 <Text style={{ fontSize: FONT_SIZES.md, fontWeight: 'bold', color: colors.textPrimary }}>
-                                    {isVerified ? 'Verified Account ✓' : 'Get Verified ✓'}
+                                    {isVerified ? 'Verified Merchant ✓' : verificationStatus === 'pending' ? 'Verification Under Review ⏳' : 'Compulsory ID Verification 🛡️'}
                                 </Text>
                                 <Text style={{ fontSize: FONT_SIZES.xs, color: colors.textSecondary, marginTop: 2 }}>
-                                    {isVerified ? 'Your golden verified badge is active' : 'Get a verified badge on your profile for ₦3,000/month'}
+                                    {isVerified
+                                        ? 'Your golden verified badge is active'
+                                        : verificationStatus === 'pending'
+                                        ? 'Your identity document is being reviewed by QIIRA administration'
+                                        : 'Upload your NIN, Driver’s License, or Passport to unlock post creation'}
                                 </Text>
                             </View>
                             <Text style={{ fontSize: 20, color: '#B28A45', fontWeight: 'bold' }}>›</Text>
@@ -888,18 +953,27 @@ export default function VendorProfileScreen({ navigation }: any) {
 
                         {/* Tabs */}
                         <View style={styles.tabBar}>
-                            {['posts', 'about', 'services', 'docs'].map((tab) => (
+                            {['posts', 'catalog', 'about', 'services', 'docs'].map((tab) => (
                                 <TouchableOpacity
                                     key={tab}
                                     style={[styles.tabItem, activeTab === tab && styles.tabItemActive]}
                                     onPress={() => {
                                         setActiveTab(tab as any);
                                         if (tab === 'posts') fetchVendorPosts();
+                                        if (tab === 'catalog') fetchCatalogItems();
                                         if (tab === 'docs') fetchMenuDocuments();
                                     }}
                                 >
                                     <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                                        {tab === 'posts' ? 'Posts' : tab === 'docs' ? '📄 Docs' : tab === 'about' ? 'About us' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                                        {tab === 'posts'
+                                            ? 'Posts'
+                                            : tab === 'catalog'
+                                            ? '📖 Catalog'
+                                            : tab === 'docs'
+                                            ? '📄 Docs'
+                                            : tab === 'about'
+                                            ? 'About us'
+                                            : 'Services'}
                                     </Text>
                                 </TouchableOpacity>
                             ))}
@@ -927,7 +1001,13 @@ export default function VendorProfileScreen({ navigation }: any) {
                                             gap: 6,
                                             marginBottom: SPACING.md,
                                         }}
-                                        onPress={() => navigation.navigate('CreatePost')}
+                                        onPress={() => {
+                                            if (!isVerified && verificationStatus !== 'approved' && !isAdmin) {
+                                                setVerificationModalVisible(true);
+                                            } else {
+                                                navigation.navigate('CreatePost');
+                                            }
+                                        }}
                                     >
                                         <Ionicons name="add-circle-outline" size={18} color={colors.textInverse} />
                                         <Text style={{ color: colors.textInverse, fontWeight: 'bold', fontSize: FONT_SIZES.sm }}>
@@ -975,16 +1055,116 @@ export default function VendorProfileScreen({ navigation }: any) {
                                                                 </Text>
                                                             ) : null}
                                                         </View>
-                                                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: SPACING.xs, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 }}>
+                                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: SPACING.xs, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 }}>
+                                                            <TouchableOpacity
+                                                                style={{
+                                                                    flexDirection: 'row',
+                                                                    alignItems: 'center',
+                                                                    gap: 4,
+                                                                    paddingVertical: 5,
+                                                                    paddingHorizontal: 10,
+                                                                    borderRadius: BORDER_RADIUS.sm,
+                                                                    backgroundColor: 'rgba(178, 138, 69, 0.15)',
+                                                                    borderWidth: 1,
+                                                                    borderColor: '#B28A45',
+                                                                }}
+                                                                onPress={() => {
+                                                                    setSelectedPostForAdvert(post);
+                                                                    setAdvertModalVisible(true);
+                                                                }}
+                                                            >
+                                                                <Ionicons name="rocket-outline" size={14} color="#B28A45" />
+                                                                <Text style={{ fontSize: 12, fontWeight: '700', color: '#B28A45' }}>Promote / Advert 🚀</Text>
+                                                            </TouchableOpacity>
+
                                                             <TouchableOpacity
                                                                 style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, borderRadius: BORDER_RADIUS.sm, backgroundColor: 'rgba(239, 68, 68, 0.1)' }}
                                                                 onPress={() => handleDeletePost(post.id)}
                                                             >
                                                                 <Ionicons name="trash-outline" size={14} color={colors.error} />
-                                                                <Text style={{ fontSize: 12, fontWeight: '600', color: colors.error }}>Delete Post</Text>
+                                                                <Text style={{ fontSize: 12, fontWeight: '600', color: colors.error }}>Delete</Text>
                                                             </TouchableOpacity>
                                                         </View>
                                                     </View>
+                                                </View>
+                                            ))}
+                                        </View>
+                                    )}
+                                </View>
+                            )}
+
+                            {/* Catalog Tab */}
+                            {activeTab === 'catalog' && (
+                                <View>
+                                    <TouchableOpacity
+                                        style={{
+                                            backgroundColor: colors.primary,
+                                            paddingVertical: SPACING.sm,
+                                            paddingHorizontal: SPACING.md,
+                                            borderRadius: BORDER_RADIUS.round,
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: 6,
+                                            marginBottom: SPACING.md,
+                                        }}
+                                        onPress={() => setAddCatalogModalVisible(true)}
+                                    >
+                                        <Ionicons name="add-circle-outline" size={18} color={colors.textInverse} />
+                                        <Text style={{ color: colors.textInverse, fontWeight: 'bold', fontSize: FONT_SIZES.sm }}>
+                                            + Add Item to Catalog
+                                        </Text>
+                                    </TouchableOpacity>
+
+                                    {catalogLoading ? (
+                                        <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: SPACING.md }} />
+                                    ) : catalogItems.length === 0 ? (
+                                        <View style={{ alignItems: 'center', paddingVertical: SPACING.xl, backgroundColor: colors.surface, borderRadius: BORDER_RADIUS.md, padding: SPACING.lg, borderWidth: 1, borderColor: colors.border }}>
+                                            <Ionicons name="book-outline" size={44} color={colors.textTertiary} />
+                                            <Text style={{ color: colors.textPrimary, fontWeight: 'bold', marginTop: SPACING.sm, fontSize: FONT_SIZES.md }}>
+                                                Your Catalog is Empty
+                                            </Text>
+                                            <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 4, fontSize: FONT_SIZES.sm }}>
+                                                Organize your food menu, services, or retail inventory into easy-to-browse collections.
+                                            </Text>
+                                        </View>
+                                    ) : (
+                                        <View style={{ gap: SPACING.sm }}>
+                                            {catalogItems.map((item) => (
+                                                <View key={item.id} style={{ flexDirection: 'row', backgroundColor: colors.surface, borderRadius: BORDER_RADIUS.md, borderWidth: 1, borderColor: colors.border, padding: 10, gap: 12, alignItems: 'center' }}>
+                                                    {item.imageUrl ? (
+                                                        <Image source={{ uri: item.imageUrl }} style={{ width: 64, height: 64, borderRadius: BORDER_RADIUS.sm }} />
+                                                    ) : (
+                                                        <View style={{ width: 64, height: 64, borderRadius: BORDER_RADIUS.sm, backgroundColor: `${colors.primary}15`, alignItems: 'center', justifyContent: 'center' }}>
+                                                            <Ionicons name="cube-outline" size={24} color={colors.primary} />
+                                                        </View>
+                                                    )}
+                                                    <View style={{ flex: 1 }}>
+                                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                                                            <Text style={{ fontSize: FONT_SIZES.sm, fontWeight: 'bold', color: colors.textPrimary }} numberOfLines={1}>
+                                                                {item.name}
+                                                            </Text>
+                                                            {item.category ? (
+                                                                <View style={{ backgroundColor: `${colors.primary}15`, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                                                    <Text style={{ fontSize: 9, color: colors.primary, fontWeight: 'bold' }}>{item.category}</Text>
+                                                                </View>
+                                                            ) : null}
+                                                        </View>
+                                                        {item.description ? (
+                                                            <Text style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 4 }} numberOfLines={1}>
+                                                                {item.description}
+                                                            </Text>
+                                                        ) : null}
+                                                        <Text style={{ fontSize: FONT_SIZES.sm, fontWeight: 'bold', color: colors.primary }}>
+                                                            ₦{Number(item.price || 0).toLocaleString()}
+                                                        </Text>
+                                                    </View>
+                                                    <TouchableOpacity
+                                                        onPress={() => confirmAction('Delete Item', `Remove "${item.name}" from catalog?`, () => handleDeleteCatalogItem(item.id), 'Delete')}
+                                                        style={{ padding: 6 }}
+                                                    >
+                                                        <Ionicons name="trash-outline" size={18} color={colors.error} />
+                                                    </TouchableOpacity>
                                                 </View>
                                             ))}
                                         </View>
@@ -1257,6 +1437,28 @@ export default function VendorProfileScreen({ navigation }: any) {
                                 </View>
                             )}
                         </View>
+
+                        {/* Persistent Profile Bottom Logout Button */}
+                        <View style={{ paddingHorizontal: SPACING.md, marginTop: SPACING.xl, marginBottom: SPACING.lg }}>
+                            <TouchableOpacity
+                                style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: 8,
+                                    paddingVertical: 14,
+                                    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                                    borderRadius: BORDER_RADIUS.md,
+                                    borderWidth: 1.5,
+                                    borderColor: 'rgba(239, 68, 68, 0.35)',
+                                }}
+                                onPress={() => confirmAction('Logout', 'Are you sure you want to logout of your vendor account?', () => auth.signOut(), 'Logout')}
+                                activeOpacity={0.8}
+                            >
+                                <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+                                <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: FONT_SIZES.md }}>🚪 Log Out</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </ScrollView>
 
@@ -1300,6 +1502,26 @@ export default function VendorProfileScreen({ navigation }: any) {
                                     activeOpacity={0.8}
                                 >
                                     <View style={[styles.settingsToggleKnob, theme === 'dark' && styles.settingsToggleKnobActive]} />
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Post Notifications Toggle */}
+                            <View style={styles.settingsItem}>
+                                <View style={styles.settingsItemLeft}>
+                                    <View style={styles.settingsIconCircle}>
+                                        <Ionicons name={postNotifications ? "notifications" : "notifications-off-outline"} size={20} color={colors.primary} />
+                                    </View>
+                                    <View style={{ flex: 1, paddingRight: 8 }}>
+                                        <Text style={styles.settingsItemTitle}>Post Notifications</Text>
+                                        <Text style={styles.settingsItemSub}>{postNotifications ? 'Mobile alerts for posts active' : 'Post alerts paused'}</Text>
+                                    </View>
+                                </View>
+                                <TouchableOpacity
+                                    style={[styles.settingsToggle, postNotifications && styles.settingsToggleActive]}
+                                    onPress={() => handleTogglePostNotifications(!postNotifications)}
+                                    activeOpacity={0.8}
+                                >
+                                    <View style={[styles.settingsToggleKnob, postNotifications && styles.settingsToggleKnobActive]} />
                                 </TouchableOpacity>
                             </View>
 
@@ -1458,6 +1680,42 @@ export default function VendorProfileScreen({ navigation }: any) {
                         </View>
                     </View>
                 </Modal>
+                {/* Vendor KYC Verification Modal */}
+                <VendorVerificationModal
+                    visible={verificationModalVisible}
+                    onClose={() => setVerificationModalVisible(false)}
+                    vendorId={user?.uid || ''}
+                    onSuccess={() => {
+                        setVerificationStatus('pending');
+                        setIsVerified(false);
+                    }}
+                />
+
+                {/* Vendor Advert / Boost Modal */}
+                {selectedPostForAdvert && (
+                    <VendorAdvertModal
+                        visible={advertModalVisible}
+                        onClose={() => {
+                            setAdvertModalVisible(false);
+                            setSelectedPostForAdvert(null);
+                        }}
+                        vendorId={user?.uid || ''}
+                        post={selectedPostForAdvert}
+                        onSuccess={() => {
+                            fetchVendorPosts();
+                        }}
+                    />
+                )}
+
+                {/* Add Catalog Item Modal */}
+                <AddCatalogItemModal
+                    visible={addCatalogModalVisible}
+                    onClose={() => setAddCatalogModalVisible(false)}
+                    vendorId={user?.uid || ''}
+                    onSuccess={() => {
+                        fetchCatalogItems();
+                    }}
+                />
             </View>
             </TabSwipeHandler>
         );
@@ -1654,45 +1912,17 @@ export default function VendorProfileScreen({ navigation }: any) {
             </ScrollView>
 
             {/* Category Picker Modal */}
-            <Modal
+            <CategoryPickerModal
                 visible={showCategoryPicker}
-                animationType="slide"
-                transparent={true}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Select Category</Text>
-                            <TouchableOpacity onPress={() => setShowCategoryPicker(false)}>
-                                <Text style={styles.modalClose}>✕</Text>
-                            </TouchableOpacity>
-                        </View>
-                        <FlatList
-                            data={VENDOR_CATEGORIES}
-                            keyExtractor={(item) => item}
-                            renderItem={({ item }) => (
-                                <TouchableOpacity
-                                    style={[
-                                        styles.categoryItem,
-                                        category === item && styles.categoryItemSelected
-                                    ]}
-                                    onPress={() => {
-                                        setCategory(item);
-                                        setShowCategoryPicker(false);
-                                    }}
-                                >
-                                    <Text style={[
-                                        styles.categoryItemText,
-                                        category === item && styles.categoryItemTextSelected
-                                    ]}>
-                                        {item}
-                                    </Text>
-                                </TouchableOpacity>
-                            )}
-                        />
-                    </View>
-                </View>
-            </Modal>
+                onClose={() => setShowCategoryPicker(false)}
+                selectedCategory={category}
+                onSelectCategory={(catName, subName) => {
+                    setCategory(subName ? `${catName} - ${subName}` : catName);
+                }}
+                title="Select Business Category"
+                subtitle="Select your industry or specialized trade"
+                allowSubcategories={true}
+            />
         </KeyboardAvoidingView>
     );
 }
@@ -1722,7 +1952,7 @@ const getStyles = (colors: any) => {
         },
     // --- View Mode Styles ---
     viewContent: {
-        paddingBottom: 50,
+        paddingBottom: 130,
     },
     bannerContainer: {
         height: X_THEME.bannerHeight,

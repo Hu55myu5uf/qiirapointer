@@ -30,6 +30,7 @@ import { useCallStore } from '../store/callStore';
 import CartButton from '../components/CartButton';
 import CallOptionModal from '../components/CallOptionModal';
 import SharePostModal from '../components/SharePostModal';
+import PlaceOrderModal from '../components/PlaceOrderModal';
 
 const { width } = Dimensions.get('window');
 
@@ -52,13 +53,19 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
     const [loading, setLoading] = useState(true);
     const [isFavorite, setIsFavorite] = useState(false);
     const [callModalVisible, setCallModalVisible] = useState(false);
-    const [activeTab, setActiveTab] = useState<'about' | 'services' | 'posts' | 'reviews' | 'docs'>(route.params?.initialTab || 'posts');
+    const [activeTab, setActiveTab] = useState<'posts' | 'catalog' | 'about' | 'services' | 'reviews' | 'docs'>(route.params?.initialTab || 'posts');
     const [reviews, setReviews] = useState<any[]>([]);
     const [reviewsLoading, setReviewsLoading] = useState(false);
     const [posts, setPosts] = useState<any[]>([]);
     const [postsLoading, setPostsLoading] = useState(false);
     const [menuDocuments, setMenuDocuments] = useState<any[]>([]);
     const [menuDocsLoading, setMenuDocsLoading] = useState(false);
+
+    // Catalog & Ordering State
+    const [catalogItems, setCatalogItems] = useState<any[]>([]);
+    const [catalogLoading, setCatalogLoading] = useState(false);
+    const [orderModalVisible, setOrderModalVisible] = useState(false);
+    const [selectedProductForOrder, setSelectedProductForOrder] = useState<any>(null);
 
     // Comments Modal State
     const [commentModalVisible, setCommentModalVisible] = useState<boolean>(false);
@@ -195,12 +202,26 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
         }
     };
 
-    // Fetch reviews / posts when tab is switched
+    const fetchCatalogItems = async () => {
+        setCatalogLoading(true);
+        try {
+            const response = await vendorAPI.getCatalog(vendorId);
+            setCatalogItems(response.data?.catalog || []);
+        } catch (error) {
+            console.error('Error fetching vendor catalog:', error);
+        } finally {
+            setCatalogLoading(false);
+        }
+    };
+
+    // Fetch reviews / posts / catalog when tab is switched
     useEffect(() => {
         if (activeTab === 'reviews' && reviews.length === 0) {
             fetchReviews();
         } else if (activeTab === 'posts' && posts.length === 0) {
             fetchVendorPosts();
+        } else if (activeTab === 'catalog' && catalogItems.length === 0) {
+            fetchCatalogItems();
         }
     }, [activeTab]);
 
@@ -437,18 +458,19 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
 
                     {/* Tabs */}
                     <View style={styles.tabBar}>
-                        {(['posts', 'about', 'services', 'docs', 'reviews'] as const).map((tab) => (
+                        {(['posts', 'catalog', 'services', 'about', 'docs', 'reviews'] as const).map((tab) => (
                             <TouchableOpacity
                                 key={tab}
                                 style={[styles.tabItem, activeTab === tab && styles.tabItemActive]}
                                 onPress={() => {
                                     setActiveTab(tab);
                                     if (tab === 'posts') fetchVendorPosts();
+                                    if (tab === 'catalog') fetchCatalogItems();
                                     if (tab === 'docs') fetchVendorDocuments();
                                 }}
                             >
                                 <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                                    {tab === 'posts' ? 'Posts' : tab === 'docs' ? '📄 Docs' : tab === 'about' ? 'About us' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                                    {tab === 'posts' ? 'Posts' : tab === 'catalog' ? '📖 Catalog' : tab === 'docs' ? '📄 Docs' : tab === 'about' ? 'About us' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                                 </Text>
                             </TouchableOpacity>
                         ))}
@@ -543,6 +565,128 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                             </View>
                         )}
 
+                        {activeTab === 'catalog' && (
+                            <View>
+                                {catalogLoading ? (
+                                    <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: SPACING.lg }} />
+                                ) : catalogItems.length === 0 ? (
+                                    <View style={{ alignItems: 'center', paddingVertical: SPACING.xl, backgroundColor: colors.surface, borderRadius: BORDER_RADIUS.md, padding: SPACING.lg, borderWidth: 1, borderColor: colors.border }}>
+                                        <Ionicons name="book-outline" size={44} color={colors.textTertiary} />
+                                        <Text style={{ color: colors.textPrimary, fontWeight: 'bold', marginTop: SPACING.sm, fontSize: FONT_SIZES.md }}>
+                                            No Catalog Items Listed
+                                        </Text>
+                                        <Text style={{ color: colors.textSecondary, textAlign: 'center', marginTop: 4, fontSize: FONT_SIZES.sm }}>
+                                            This vendor has not published items in their catalog yet.
+                                        </Text>
+                                    </View>
+                                ) : (
+                                    <View style={{ gap: SPACING.sm }}>
+                                        {catalogItems.map((item) => (
+                                            <View key={item.id} style={{ backgroundColor: colors.surface, borderRadius: BORDER_RADIUS.md, borderWidth: 1, borderColor: colors.border, padding: 12 }}>
+                                                <View style={{ flexDirection: 'row', gap: 12 }}>
+                                                    {item.imageUrl ? (
+                                                        <Image source={{ uri: item.imageUrl }} style={{ width: 74, height: 74, borderRadius: BORDER_RADIUS.sm, backgroundColor: colors.surfaceLight }} />
+                                                    ) : (
+                                                        <View style={{ width: 74, height: 74, borderRadius: BORDER_RADIUS.sm, backgroundColor: `${colors.primary}15`, alignItems: 'center', justifyContent: 'center' }}>
+                                                            <Ionicons name="pricetag-outline" size={28} color={colors.primary} />
+                                                        </View>
+                                                    )}
+                                                    <View style={{ flex: 1 }}>
+                                                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                                            <Text style={{ color: colors.textPrimary, fontWeight: 'bold', fontSize: FONT_SIZES.md, flex: 1, marginRight: 6 }}>
+                                                                {item.name}
+                                                            </Text>
+                                                            <Text style={{ color: colors.primary, fontWeight: '800', fontSize: FONT_SIZES.md }}>
+                                                                ₦{Number(item.price || 0).toLocaleString()}
+                                                            </Text>
+                                                        </View>
+                                                        {item.section ? (
+                                                            <View style={{ alignSelf: 'flex-start', backgroundColor: `${colors.primary}15`, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginTop: 3 }}>
+                                                                <Text style={{ fontSize: 10, color: colors.primary, fontWeight: '700' }}>
+                                                                    {item.section}
+                                                                </Text>
+                                                            </View>
+                                                        ) : null}
+                                                        {item.description ? (
+                                                            <Text style={{ color: colors.textSecondary, fontSize: FONT_SIZES.xs, marginTop: 4 }} numberOfLines={2}>
+                                                                {item.description}
+                                                            </Text>
+                                                        ) : null}
+                                                    </View>
+                                                </View>
+
+                                                {/* Action Row */}
+                                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border }}>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: item.inStock !== false ? '#10B981' : '#EF4444' }} />
+                                                        <Text style={{ fontSize: 11, color: item.inStock !== false ? '#10B981' : '#EF4444', fontWeight: '600' }}>
+                                                            {item.inStock !== false ? 'In Stock' : 'Out of Stock'}
+                                                        </Text>
+                                                    </View>
+
+                                                    <View style={{ flexDirection: 'row', gap: SPACING.sm }}>
+                                                        <TouchableOpacity
+                                                            style={{
+                                                                flexDirection: 'row',
+                                                                alignItems: 'center',
+                                                                gap: 4,
+                                                                backgroundColor: colors.surfaceLight,
+                                                                paddingHorizontal: 10,
+                                                                paddingVertical: 6,
+                                                                borderRadius: BORDER_RADIUS.sm,
+                                                                borderWidth: 1,
+                                                                borderColor: colors.border,
+                                                            }}
+                                                            onPress={() => {
+                                                                addToCart({
+                                                                    id: item.id,
+                                                                    postId: item.id,
+                                                                    title: item.name,
+                                                                    price: item.price,
+                                                                    mediaUrl: item.imageUrl,
+                                                                    vendorId: vendor.uid || vendor.id || vendorId,
+                                                                    vendorName: vendor.businessName,
+                                                                }, user?.uid);
+                                                                Alert.alert('Saved to Cart 🛒', `${item.name} added to your cart!`);
+                                                            }}
+                                                        >
+                                                            <Ionicons name="cart-outline" size={14} color={colors.textPrimary} />
+                                                            <Text style={{ fontSize: 12, fontWeight: '600', color: colors.textPrimary }}>Save</Text>
+                                                        </TouchableOpacity>
+
+                                                        <TouchableOpacity
+                                                            style={{
+                                                                flexDirection: 'row',
+                                                                alignItems: 'center',
+                                                                gap: 4,
+                                                                backgroundColor: '#10B981',
+                                                                paddingHorizontal: 12,
+                                                                paddingVertical: 6,
+                                                                borderRadius: BORDER_RADIUS.sm,
+                                                            }}
+                                                            onPress={() => {
+                                                                setSelectedProductForOrder({
+                                                                    id: item.id,
+                                                                    title: item.name,
+                                                                    price: item.price,
+                                                                    image: item.imageUrl,
+                                                                    category: item.section || vendor.category,
+                                                                });
+                                                                setOrderModalVisible(true);
+                                                            }}
+                                                        >
+                                                            <Ionicons name="flash" size={13} color="#FFFFFF" />
+                                                            <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>Order Now ⚡</Text>
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </View>
+                                )}
+                            </View>
+                        )}
+
                         {activeTab === 'posts' && (
                             <View>
                                 {postsLoading ? (
@@ -590,32 +734,59 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                                         </View>
                                                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.sm }}>
                                                             {post.price ? (
-                                                                <TouchableOpacity
-                                                                    style={{
-                                                                        flexDirection: 'row',
-                                                                        alignItems: 'center',
-                                                                        gap: 4,
-                                                                        backgroundColor: colors.primary,
-                                                                        paddingHorizontal: 8,
-                                                                        paddingVertical: 4,
-                                                                        borderRadius: BORDER_RADIUS.sm,
-                                                                    }}
-                                                                    onPress={() => {
-                                                                        addToCart({
-                                                                            id: post.id,
-                                                                            postId: post.id,
-                                                                            title: post.caption?.slice(0, 40) || 'Product Item',
-                                                                            price: post.price,
-                                                                            mediaUrl: post.mediaUrl,
-                                                                            vendorId: vendor.uid || vendor.id,
-                                                                            vendorName: vendor.businessName,
-                                                                        }, user?.uid);
-                                                                        Alert.alert('Saved to Cart 🛒', 'Item added to your saved cart!');
-                                                                    }}
-                                                                >
-                                                                    <Ionicons name="cart-outline" size={14} color={colors.textInverse} />
-                                                                    <Text style={{ fontSize: 11, fontWeight: 'bold', color: colors.textInverse }}>Add</Text>
-                                                                </TouchableOpacity>
+                                                                <>
+                                                                    <TouchableOpacity
+                                                                        style={{
+                                                                            flexDirection: 'row',
+                                                                            alignItems: 'center',
+                                                                            gap: 4,
+                                                                            backgroundColor: '#10B981',
+                                                                            paddingHorizontal: 8,
+                                                                            paddingVertical: 4,
+                                                                            borderRadius: BORDER_RADIUS.sm,
+                                                                        }}
+                                                                        onPress={() => {
+                                                                            setSelectedProductForOrder({
+                                                                                id: post.id,
+                                                                                title: post.caption?.slice(0, 50) || 'Product Item',
+                                                                                price: post.price,
+                                                                                image: post.mediaUrl || post.thumbnailUrl,
+                                                                                category: vendor.category || 'Product',
+                                                                            });
+                                                                            setOrderModalVisible(true);
+                                                                        }}
+                                                                    >
+                                                                        <Ionicons name="flash" size={12} color="#FFFFFF" />
+                                                                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: '#FFFFFF' }}>Order ⚡</Text>
+                                                                    </TouchableOpacity>
+
+                                                                    <TouchableOpacity
+                                                                        style={{
+                                                                            flexDirection: 'row',
+                                                                            alignItems: 'center',
+                                                                            gap: 4,
+                                                                            backgroundColor: colors.primary,
+                                                                            paddingHorizontal: 8,
+                                                                            paddingVertical: 4,
+                                                                            borderRadius: BORDER_RADIUS.sm,
+                                                                        }}
+                                                                        onPress={() => {
+                                                                            addToCart({
+                                                                                id: post.id,
+                                                                                postId: post.id,
+                                                                                title: post.caption?.slice(0, 40) || 'Product Item',
+                                                                                price: post.price,
+                                                                                mediaUrl: post.mediaUrl,
+                                                                                vendorId: vendor.uid || vendor.id,
+                                                                                vendorName: vendor.businessName,
+                                                                            }, user?.uid);
+                                                                            Alert.alert('Saved to Cart 🛒', 'Item added to your saved cart!');
+                                                                        }}
+                                                                    >
+                                                                        <Ionicons name="cart-outline" size={14} color={colors.textInverse} />
+                                                                        <Text style={{ fontSize: 11, fontWeight: 'bold', color: colors.textInverse }}>Add</Text>
+                                                                    </TouchableOpacity>
+                                                                </>
                                                             ) : null}
                                                             <TouchableOpacity onPress={() => setSelectedPostToShare(post)}>
                                                                 <Ionicons name="share-social-outline" size={18} color={colors.primary} />
@@ -890,6 +1061,22 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                     </View>
                 </View>
             </Modal>
+
+            {/* Direct Order Placement Modal */}
+            {selectedProductForOrder && (
+                <PlaceOrderModal
+                    visible={orderModalVisible}
+                    onClose={() => {
+                        setOrderModalVisible(false);
+                        setSelectedProductForOrder(null);
+                    }}
+                    vendorId={vendor?.uid || vendor?.id || vendorId}
+                    vendorName={vendor?.businessName || 'Vendor'}
+                    vendorImage={vendor?.businessImage || vendor?.business_image}
+                    product={selectedProductForOrder}
+                    navigation={navigation}
+                />
+            )}
         </View>
     );
 }

@@ -169,7 +169,7 @@ export default function UserManagementScreen({ route }: any) {
     const renderUser = ({ item }: { item: any }) => {
         const displayName = item.fullName || item.full_name || item.businessName || item.displayName || (item.email ? item.email.split('@')[0] : 'User');
         const secondaryInfo = item.businessName && item.businessName !== displayName ? `🏢 ${item.businessName}` : null;
-        const isAdmin = Boolean(item.role === 'admin' || item.id === 'v8MwaOet0ISfZAWXIDAPAGcg1td2' || item.uid === 'v8MwaOet0ISfZAWXIDAPAGcg1td2' || item.email?.includes('admin'));
+        const isAdmin = Boolean(item.role === 'admin' || item.id === 'v8MwaOet0ISfZAWXIDAPAGcg1td2' || item.uid === 'v8MwaOet0ISfZAWXIDAPAGcg1td2');
         const isVerified = Boolean(item.isVerified || item.is_verified || isAdmin);
 
         return (

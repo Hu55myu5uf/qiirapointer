@@ -18,25 +18,11 @@ import * as ImagePicker from 'expo-image-picker';
 import { vendorAPI } from '../services/api';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
+import { BUSINESS_CATEGORIES } from '../constants/categories';
+import CategoryPickerModal from '../components/CategoryPickerModal';
 
-// Vendor category options
-const VENDOR_CATEGORIES = [
-    'Restaurants & Cafes',
-    'Retail & Shopping',
-    'Health & Wellness',
-    'Beauty & Spa',
-    'Automotive Services',
-    'Home Services',
-    'Professional Services',
-    'Entertainment',
-    'Education & Training',
-    'Technology & Electronics',
-    'Fashion & Apparel',
-    'Grocery & Supermarket',
-    'Travel & Tourism',
-    'Fitness & Gym',
-    'Other',
-];
+// Vendor category options (derived from qiira-categories.docx)
+const VENDOR_CATEGORIES = BUSINESS_CATEGORIES;
 
 export default function VendorProfileCompletionScreen({ route, navigation }: any) {
     const { colors } = useTheme();
@@ -257,47 +243,17 @@ export default function VendorProfileCompletionScreen({ route, navigation }: any
             </ScrollView>
 
             {/* Category Picker Modal */}
-            <Modal
+            <CategoryPickerModal
                 visible={showCategoryPicker}
-                animationType="slide"
-                transparent={true}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Select Category</Text>
-                            <TouchableOpacity onPress={() => setShowCategoryPicker(false)}>
-                                <Text style={styles.modalClose}>✕</Text>
-                            </TouchableOpacity>
-                        </View>
-                        <FlatList
-                            data={VENDOR_CATEGORIES}
-                            keyExtractor={(item) => item}
-                            renderItem={({ item }) => (
-                                <TouchableOpacity
-                                    style={[
-                                        styles.categoryItem,
-                                        formData.category === item && styles.categoryItemSelected,
-                                    ]}
-                                    onPress={() => {
-                                        setFormData({ ...formData, category: item });
-                                        setShowCategoryPicker(false);
-                                    }}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.categoryText,
-                                            formData.category === item && styles.categoryTextSelected,
-                                        ]}
-                                    >
-                                        {item}
-                                    </Text>
-                                </TouchableOpacity>
-                            )}
-                        />
-                    </View>
-                </View>
-            </Modal>
+                onClose={() => setShowCategoryPicker(false)}
+                selectedCategory={formData.category}
+                onSelectCategory={(catName, subName) => {
+                    setFormData({ ...formData, category: subName ? `${catName} - ${subName}` : catName });
+                }}
+                title="Select Business Category"
+                subtitle="Choose your industry or primary trade"
+                allowSubcategories={true}
+            />
         </KeyboardAvoidingView>
     );
 }
