@@ -28,6 +28,7 @@ import { uploadImageViaBackend } from '../utils/backendUpload';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as FileSystem from 'expo-file-system/legacy';
+import TabSwipeHandler from '../components/TabSwipeHandler';
 
 export default function ClientProfileScreen() {
     const navigation = useNavigation<any>();
@@ -202,8 +203,9 @@ export default function ClientProfileScreen() {
     }
 
     return (
-        <View style={styles.container}>
-            {/* Header */}
+        <TabSwipeHandler currentTab="Profile" navigation={navigation}>
+            <View style={styles.container}>
+                {/* Header */}
             <View style={styles.header}>
                 <View style={styles.headerProfile}>
                     <Image
@@ -398,6 +400,7 @@ export default function ClientProfileScreen() {
                 onClose={() => setPasswordModalVisible(false)}
             />
         </View>
+        </TabSwipeHandler>
     );
 }
 

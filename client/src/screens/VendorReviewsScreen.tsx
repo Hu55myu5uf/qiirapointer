@@ -16,6 +16,7 @@ import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme'
 import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { AvatarVerificationBadge, VerificationBadgeInline } from '../components/VerificationBadge';
+import TabSwipeHandler from '../components/TabSwipeHandler';
 
 interface Review {
     id: string;
@@ -205,7 +206,8 @@ export default function VendorReviewsScreen({ navigation }: any) {
     }
 
     return (
-        <View style={styles.container}>
+        <TabSwipeHandler currentTab="Reviews" navigation={navigation}>
+            <View style={styles.container}>
             {/* Stats Header */}
             <View style={styles.statsContainer}>
                 <View style={styles.statItem}>
@@ -302,6 +304,7 @@ export default function VendorReviewsScreen({ navigation }: any) {
                 )
             )}
         </View>
+        </TabSwipeHandler>
     );
 }
 

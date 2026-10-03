@@ -23,6 +23,7 @@ import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme'
 import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
+import TabSwipeHandler from '../components/TabSwipeHandler';
 
 interface Conversation {
     id: string;
@@ -287,8 +288,9 @@ export default function ConversationsScreen({ navigation }: any) {
     }
 
     return (
-        <View style={styles.container}>
-            <View style={styles.header}>
+        <TabSwipeHandler currentTab="Messages" navigation={navigation}>
+            <View style={styles.container}>
+                <View style={styles.header}>
                 <Text style={styles.headerTitle}>Messages</Text>
             </View>
 
@@ -354,6 +356,7 @@ export default function ConversationsScreen({ navigation }: any) {
                 />
             )}
         </View>
+        </TabSwipeHandler>
     );
 }
 

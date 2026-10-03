@@ -18,6 +18,7 @@ import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme'
 import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
+import TabSwipeHandler from '../components/TabSwipeHandler';
 
 export default function FavoritesScreen({ navigation }: any) {
     const { colors } = useTheme();
@@ -131,8 +132,9 @@ export default function FavoritesScreen({ navigation }: any) {
     }
 
     return (
-        <View style={styles.container}>
-            <View style={styles.header}>
+        <TabSwipeHandler currentTab="Favorites" navigation={navigation}>
+            <View style={styles.container}>
+                <View style={styles.header}>
                 <Text style={styles.headerTitle}>My Favorites</Text>
             </View>
 
@@ -158,6 +160,7 @@ export default function FavoritesScreen({ navigation }: any) {
                 />
             )}
         </View>
+        </TabSwipeHandler>
     );
 }
 

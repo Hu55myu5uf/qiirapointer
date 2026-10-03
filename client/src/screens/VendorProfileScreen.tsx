@@ -39,6 +39,7 @@ import { useTheme } from '../context/ThemeContext';
 import { confirmAction } from '../utils/alert';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
+import TabSwipeHandler from '../components/TabSwipeHandler';
 
 // Enable Debug Logs for Firebase
 setLogLevel('debug');
@@ -722,7 +723,8 @@ export default function VendorProfileScreen({ navigation }: any) {
     // --- VIEW MODE ---
     if (!isEditing) {
         return (
-            <View style={styles.container}>
+            <TabSwipeHandler currentTab="Profile" navigation={navigation}>
+                <View style={styles.container}>
                 {/* Custom Header */}
                 <View style={styles.customHeader}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -1428,6 +1430,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                     </View>
                 </Modal>
             </View>
+            </TabSwipeHandler>
         );
     }
 

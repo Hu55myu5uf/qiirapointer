@@ -31,6 +31,7 @@ import CartButton from '../components/CartButton';
 import { useAuthStore } from '../store/authStore';
 import { confirmAction } from '../utils/alert';
 import CallOptionModal from '../components/CallOptionModal';
+import TabSwipeHandler from '../components/TabSwipeHandler';
 
 // Haversine formula to calculate distance between two coordinates in km
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -511,8 +512,9 @@ function matchesCategory(vendorCategory: string | undefined, selected: string): 
     };
 
     return (
-        <View style={styles.container}>
-            {/* Header */}
+        <TabSwipeHandler currentTab="Home" navigation={navigation}>
+            <View style={styles.container}>
+                {/* Header */}
             <View style={styles.header}>
                 <View style={styles.headerContent}>
                     <View style={{ flex: 1, marginRight: 8 }}>
@@ -760,6 +762,7 @@ function matchesCategory(vendorCategory: string | undefined, selected: string): 
                 navigation={navigation}
             />
         </View>
+        </TabSwipeHandler>
     );
 }
 

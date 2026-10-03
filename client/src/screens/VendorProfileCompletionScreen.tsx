@@ -122,14 +122,21 @@ export default function VendorProfileCompletionScreen({ route, navigation }: any
         setLoading(true);
         try {
             await vendorAPI.updateProfile(vendorId, formData);
+            let navigated = false;
+            const goToLogin = () => {
+                if (navigated) return;
+                navigated = true;
+                navigation.navigate('Login');
+            };
             Alert.alert(
-                'Success',
-                'Profile completed! You can now log in.',
-                [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
+                'Registration & Profile Completed 🎉',
+                'Your vendor profile is set up and ready! Redirecting you to login...',
+                [{ text: 'Log In Now', onPress: goToLogin }]
             );
+            setTimeout(goToLogin, 1800);
         } catch (error: any) {
             console.error('Error completing profile:', error);
-            Alert.alert('Error', error.response?.data?.message || 'Failed to update profile');
+            Alert.alert('Profile Setup Failed', error.response?.data?.message || 'Failed to update profile');
         } finally {
             setLoading(false);
         }

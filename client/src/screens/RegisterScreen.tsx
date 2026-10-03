@@ -12,6 +12,7 @@ import {
     ActivityIndicator,
 } from 'react-native';
 import { authAPI } from '../services/api';
+import { scheduleLocalNotification } from '../services/notifications';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -30,21 +31,30 @@ export default function RegisterScreen({ navigation }: any) {
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+    const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
     const handleRegister = async () => {
+        setStatusMessage(null);
+
         // Validation
-        if (!fullName || !email || !password || !confirmPassword) {
-            Alert.alert('Error', 'Please fill in all required fields');
+        if (!fullName.trim() || !email.trim() || !password || !confirmPassword) {
+            const msg = 'Please fill in all required fields';
+            setStatusMessage({ type: 'error', text: msg });
+            Alert.alert('Registration Failed', msg);
             return;
         }
 
         if (password !== confirmPassword) {
-            Alert.alert('Error', 'Passwords do not match');
+            const msg = 'Passwords do not match. Please verify your passwords.';
+            setStatusMessage({ type: 'error', text: msg });
+            Alert.alert('Registration Failed', msg);
             return;
         }
 
         if (password.length < 6) {
-            Alert.alert('Error', 'Password must be at least 6 characters');
+            const msg = 'Password must be at least 6 characters long.';
+            setStatusMessage({ type: 'error', text: msg });
+            Alert.alert('Registration Failed', msg);
             return;
         }
 
@@ -52,29 +62,51 @@ export default function RegisterScreen({ navigation }: any) {
         try {
             // Register with backend (Backend handles Firebase Auth creation)
             const response = await authAPI.register({
-                email,
+                email: email.trim(),
                 password,
-                fullName,
-                phoneNumber,
+                fullName: fullName.trim(),
+                phoneNumber: phoneNumber.trim(),
                 role,
             });
 
-            if (role === 'vendor') {
-                // For vendors, navigate to profile completion screen
-                navigation.navigate('VendorProfileCompletion', {
-                    vendorId: response.data.user.uid,
-                    email: email,
-                });
-            } else {
-                // For clients, go directly to login
-                Alert.alert('Success', 'Account created successfully!', [
-                    { text: 'OK', onPress: () => navigation.navigate('Login') },
-                ]);
-            }
+            const successText = 'Account registered successfully! Redirecting you to login...';
+            setStatusMessage({ type: 'success', text: successText });
+
+            // Trigger local/device notification
+            try {
+                await scheduleLocalNotification(
+                    'Registration Successful 🎉',
+                    `Welcome to QIIRA, ${fullName.trim()}! Your account is ready.`
+                );
+            } catch (_) {}
+
+            // Themed in-app notification popup
+            let navigated = false;
+            const goToLogin = () => {
+                if (navigated) return;
+                navigated = true;
+                navigation.navigate('Login', { registeredEmail: email.trim() });
+            };
+
+            Alert.alert(
+                'Registration Successful 🎉',
+                `Welcome to QIIRA, ${fullName.trim()}!\n\nYour account has been created. Redirecting you to the login screen...`,
+                [{ text: 'Log In Now', onPress: goToLogin }]
+            );
+
+            // Automatic redirect after 1.8 seconds
+            setTimeout(goToLogin, 1800);
         } catch (error: any) {
             console.error('Registration error:', error);
             const errorMessage =
-                error.response?.data?.message || error.message || 'Please try again';
+                error.response?.data?.message || error.response?.data?.error || error.message || 'Registration failed. Please check your credentials and try again.';
+            
+            setStatusMessage({ type: 'error', text: errorMessage });
+
+            try {
+                await scheduleLocalNotification('Registration Failed ⚠️', errorMessage);
+            } catch (_) {}
+
             Alert.alert('Registration Failed', errorMessage);
         } finally {
             setLoading(false);
@@ -93,6 +125,29 @@ export default function RegisterScreen({ navigation }: any) {
                 </View>
 
                 <View style={styles.form}>
+                    {statusMessage && (
+                        <View
+                            style={[
+                                styles.statusBanner,
+                                statusMessage.type === 'success' ? styles.statusBannerSuccess : styles.statusBannerError,
+                            ]}
+                        >
+                            <Ionicons
+                                name={statusMessage.type === 'success' ? 'checkmark-circle' : 'alert-circle'}
+                                size={20}
+                                color={statusMessage.type === 'success' ? '#10B981' : '#EF4444'}
+                            />
+                            <Text
+                                style={[
+                                    styles.statusBannerText,
+                                    statusMessage.type === 'success' ? styles.statusBannerTextSuccess : styles.statusBannerTextError,
+                                ]}
+                            >
+                                {statusMessage.text}
+                            </Text>
+                        </View>
+                    )}
+
                     {/* Role Selection */}
                     <View style={styles.roleContainer}>
                         <TouchableOpacity
@@ -380,5 +435,34 @@ const getStyles = (colors: any) =>
             fontSize: FONT_SIZES.sm,
             color: colors.primary,
             fontWeight: 'bold',
+        },
+        statusBanner: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            padding: SPACING.md,
+            borderRadius: BORDER_RADIUS.md,
+            marginBottom: SPACING.md,
+            gap: SPACING.sm,
+            borderWidth: 1,
+        },
+        statusBannerSuccess: {
+            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            borderColor: 'rgba(16, 185, 129, 0.3)',
+        },
+        statusBannerError: {
+            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            borderColor: 'rgba(239, 68, 68, 0.3)',
+        },
+        statusBannerText: {
+            flex: 1,
+            fontSize: FONT_SIZES.sm,
+            fontWeight: '600',
+            lineHeight: 18,
+        },
+        statusBannerTextSuccess: {
+            color: '#10B981',
+        },
+        statusBannerTextError: {
+            color: '#EF4444',
         },
     });

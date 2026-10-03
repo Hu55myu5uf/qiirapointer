@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import {
     View,
     Text,
@@ -28,6 +28,8 @@ import { sharePost, shareVendorProfile } from '../services/shareService';
 import VerificationBadge, { AvatarVerificationBadge, VerificationBadgeInline } from '../components/VerificationBadge';
 import CartButton from '../components/CartButton';
 import SharePostModal from '../components/SharePostModal';
+import TabSwipeHandler from '../components/TabSwipeHandler';
+import ShowcaseFeed from '../components/ShowcaseFeed';
 import { auth } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
 import { useCartStore } from '../store/cartStore';
@@ -139,13 +141,22 @@ const CATEGORIES = [
     'Events',
 ];
 
-export default function ExploreScreen({ navigation }: any) {
+export default function ExploreScreen({ navigation, route }: any) {
     const { colors } = useTheme();
     const { userRole } = useAuthStore();
     const { addItem, isInCart } = useCartStore();
     const styles = getStyles(colors);
+    const isScreenFocused = useIsFocused();
 
     const [activeTab, setActiveTab] = useState<'feed' | 'reels'>('feed');
+
+    useEffect(() => {
+        if (route?.params?.subTab) {
+            setActiveTab(route.params.subTab);
+        } else if (route?.params?.initialSubTab) {
+            setActiveTab(route.params.initialSubTab);
+        }
+    }, [route?.params?.subTab, route?.params?.initialSubTab]);
     const [selectedCategory, setSelectedCategory] = useState<string>('All');
     const [searchQuery, setSearchQuery] = useState<string>('');
     const [posts, setPosts] = useState<any[]>([]);
@@ -733,8 +744,14 @@ export default function ExploreScreen({ navigation }: any) {
     };
 
     return (
-        <View style={styles.container}>
-            {/* Header */}
+        <TabSwipeHandler
+            currentTab="Explore"
+            navigation={navigation}
+            activeSubTab={activeTab}
+            onSubTabChange={(sub) => setActiveTab(sub)}
+        >
+            <View style={styles.container}>
+                {/* Header */}
             <View style={styles.header}>
                 <View style={styles.headerTitleRow}>
                     <Text style={styles.headerTitle}>Explore</Text>
@@ -851,6 +868,44 @@ export default function ExploreScreen({ navigation }: any) {
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={colors.primary} />
                 </View>
+            ) : activeTab === 'reels' ? (
+                <ShowcaseFeed
+                    posts={filteredPosts}
+                    isFocused={isScreenFocused}
+                    onLike={handleLike}
+                    onComment={handleOpenComments}
+                    onShare={handleShare}
+                    onChat={(item) =>
+                        navigation.navigate('Chat', {
+                            otherUserId: item.authorId || item.vendorId,
+                            otherUserName: item.vendorName,
+                            otherUserImage: item.vendorImage,
+                            receiverId: item.authorId || item.vendorId,
+                            receiverName: item.vendorName,
+                            receiverImage: item.vendorImage,
+                        })
+                    }
+                    onVendorPress={(vendorId) => navigation.navigate('VendorDetails', { vendorId })}
+                    onAddToCart={(item) => {
+                        addItem(
+                            {
+                                id: item.id,
+                                title: item.caption ? item.caption.substring(0, 45) : item.vendorName,
+                                caption: item.caption,
+                                mediaUrl: item.mediaUrl,
+                                price: item.price || 0,
+                                currency: item.currency || 'NGN',
+                                vendorId: item.vendorId,
+                                vendorName: item.vendorName,
+                            },
+                            currentUserId
+                        );
+                        Alert.alert('Saved to Cart 🛒', `Saved "${item.vendorName}" product to your Cart!`);
+                    }}
+                    isInCart={(id) => isInCart(id)}
+                    onRefresh={handleRefresh}
+                    refreshing={refreshing}
+                />
             ) : (
                 <FlatList
                     data={filteredPosts}
@@ -862,9 +917,7 @@ export default function ExploreScreen({ navigation }: any) {
                             <Ionicons name="images-outline" size={56} color={colors.textTertiary} />
                             <Text style={styles.emptyTitle}>No posts found</Text>
                             <Text style={styles.emptySubtitle}>
-                                {activeTab === 'feed'
-                                    ? 'Be the first to share a post, question, or showcase products in this category!'
-                                    : 'No showcase reels available in this category yet.'}
+                                Be the first to share a post, question, or showcase products in this category!
                             </Text>
                             {userRole === 'vendor' ? (
                                 <TouchableOpacity
@@ -1161,6 +1214,7 @@ export default function ExploreScreen({ navigation }: any) {
                 post={selectedPostToShare}
             />
         </View>
+        </TabSwipeHandler>
     );
 }
 
