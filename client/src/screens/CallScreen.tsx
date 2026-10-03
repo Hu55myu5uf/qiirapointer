@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { WebView } from 'react-native-webview';
-import { Audio } from 'expo-av';
+import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
 import { useCallStore } from '../store/callStore';
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../context/ThemeContext';
@@ -140,12 +140,12 @@ export default function CallScreen({ route, navigation }: any) {
     useEffect(() => {
         (async () => {
             try {
-                await Audio.requestPermissionsAsync();
-                await Audio.setAudioModeAsync({
-                    allowsRecordingIOS: true,
-                    playsInSilentModeIOS: true,
-                    staysActiveInBackground: true,
-                    playThroughEarpieceAndroid: !isSpeaker,
+                await requestRecordingPermissionsAsync();
+                await setAudioModeAsync({
+                    allowsRecording: true,
+                    playsInSilentMode: true,
+                    shouldPlayInBackground: true,
+                    shouldRouteThroughEarpiece: !isSpeaker,
                 });
             } catch (e) {
                 console.warn('Audio setup note:', e);
@@ -154,11 +154,11 @@ export default function CallScreen({ route, navigation }: any) {
     }, []);
 
     useEffect(() => {
-        Audio.setAudioModeAsync({
-            allowsRecordingIOS: true,
-            playsInSilentModeIOS: true,
-            staysActiveInBackground: true,
-            playThroughEarpieceAndroid: !isSpeaker,
+        setAudioModeAsync({
+            allowsRecording: true,
+            playsInSilentMode: true,
+            shouldPlayInBackground: true,
+            shouldRouteThroughEarpiece: !isSpeaker,
         }).catch(() => {});
     }, [isSpeaker]);
 

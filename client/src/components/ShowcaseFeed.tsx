@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
     View,
     Text,
@@ -11,7 +11,37 @@ import {
     ViewToken,
     Animated,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
+
+// Looping, chrome-less video player driven by play/mute props (expo-video)
+function ShowcaseVideo({ uri, shouldPlay, isMuted }: { uri: string; shouldPlay: boolean; isMuted: boolean }) {
+    const player = useVideoPlayer(uri, (p) => {
+        p.loop = true;
+        p.muted = isMuted;
+    });
+
+    useEffect(() => {
+        try {
+            player.muted = isMuted;
+        } catch (_) {}
+    }, [player, isMuted]);
+
+    useEffect(() => {
+        try {
+            if (shouldPlay) player.play();
+            else player.pause();
+        } catch (_) {}
+    }, [player, shouldPlay]);
+
+    return (
+        <VideoView
+            player={player}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            nativeControls={false}
+        />
+    );
+}
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
@@ -139,15 +169,10 @@ function ShowcaseItemCard({
                 style={StyleSheet.absoluteFill}
             >
                 {isVideo ? (
-                    <Video
-                        ref={videoRef}
-                        source={{ uri: mediaUri }}
-                        style={StyleSheet.absoluteFill}
-                        resizeMode={ResizeMode.COVER}
-                        isLooping
+                    <ShowcaseVideo
+                        uri={mediaUri}
                         shouldPlay={isActive && !isPaused}
                         isMuted={isMuted}
-                        useNativeControls={false}
                     />
                 ) : (
                     <Image

@@ -2,24 +2,18 @@
   "expo": {
     "name": "QIIRA",
     "slug": "qiira",
-    "version": "1.0.3",
-    "newArchEnabled": false,
+    "version": "1.0.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.qiira.pointer",
-      "buildNumber": "6"
+      "buildNumber": "7"
     },
     "android": {
       "package": "com.qiira.pointer",
-      "versionCode": 6,
+      "versionCode": 7,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -37,6 +31,15 @@
     "owner": "hussviin7",
     "plugins": [
       [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Allow QIIRA to access your photos to upload media."
@@ -47,7 +50,10 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow QIIRA to use your location to discover nearby businesses."
         }
-      ]
+      ],
+      "expo-video",
+      "expo-audio",
+      "expo-asset"
     ]
   }
 }
