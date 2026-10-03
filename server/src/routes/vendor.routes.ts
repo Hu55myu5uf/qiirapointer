@@ -622,6 +622,9 @@ router.put('/:id/profile', async (req: Request, res: Response) => {
             businessName,
             category,
             description,
+            aboutUs,
+            about_us,
+            bio,
             address,
             services,
             location,
@@ -640,7 +643,13 @@ router.put('/:id/profile', async (req: Request, res: Response) => {
             fsUpdate.business_name = businessName;
         }
         if (category !== undefined) fsUpdate.category = category;
-        if (description !== undefined) fsUpdate.description = description;
+        const resolvedDesc = description !== undefined ? description : (aboutUs !== undefined ? aboutUs : (about_us !== undefined ? about_us : bio));
+        if (resolvedDesc !== undefined) {
+            fsUpdate.description = resolvedDesc;
+            fsUpdate.aboutUs = resolvedDesc;
+            fsUpdate.about_us = resolvedDesc;
+            fsUpdate.bio = resolvedDesc;
+        }
         if (address !== undefined) fsUpdate.address = address;
         if (services !== undefined) fsUpdate.services = services;
         if (location !== undefined) fsUpdate.location = location;

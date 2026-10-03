@@ -16,8 +16,10 @@ import {
     Alert,
     Dimensions,
     StatusBar,
+    KeyboardAvoidingView,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { PLACEHOLDER_AVATARS } from '../assets';
@@ -159,6 +161,14 @@ export default function ExploreScreen({ navigation }: any) {
     const [submittingComment, setSubmittingComment] = useState<boolean>(false);
     const [selectedPostToShare, setSelectedPostToShare] = useState<any>(null);
 
+    // Client Community Post State
+    const [clientPostModalVisible, setClientPostModalVisible] = useState<boolean>(false);
+    const [clientPostText, setClientPostText] = useState<string>('');
+    const [clientPostFlair, setClientPostFlair] = useState<'update' | 'question' | 'shoutout'>('update');
+    const [clientPostImage, setClientPostImage] = useState<string>('');
+    const [clientTaggedVendor, setClientTaggedVendor] = useState<string>('');
+    const [postingClient, setPostingClient] = useState<boolean>(false);
+
     const currentUserId = auth.currentUser?.uid;
 
     const fetchPosts = useCallback(async () => {
@@ -193,6 +203,114 @@ export default function ExploreScreen({ navigation }: any) {
     const handleRefresh = () => {
         setRefreshing(true);
         fetchPosts();
+    };
+
+    const handlePickClientImage = () => {
+        Alert.alert(
+            'Add Photo to Post',
+            'Choose an option:',
+            [
+                {
+                    text: 'Snap with Camera',
+                    onPress: async () => {
+                        try {
+                            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+                            if (status !== 'granted') {
+                                Alert.alert('Permission Required', 'Camera permission is required.');
+                                return;
+                            }
+                            const res = await ImagePicker.launchCameraAsync({
+                                mediaTypes: ['images'],
+                                allowsEditing: true,
+                                quality: 0.8,
+                                base64: true,
+                            });
+                            if (!res.canceled && res.assets && res.assets[0]) {
+                                const asset = res.assets[0];
+                                const uri = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
+                                setClientPostImage(uri);
+                            }
+                        } catch (e) {
+                            console.error('Camera error:', e);
+                        }
+                    },
+                },
+                {
+                    text: 'Choose from Gallery',
+                    onPress: async () => {
+                        try {
+                            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                            if (status !== 'granted') {
+                                Alert.alert('Permission Required', 'Gallery permission is required.');
+                                return;
+                            }
+                            const res = await ImagePicker.launchImageLibraryAsync({
+                                mediaTypes: ['images'],
+                                allowsEditing: true,
+                                quality: 0.8,
+                                base64: true,
+                            });
+                            if (!res.canceled && res.assets && res.assets[0]) {
+                                const asset = res.assets[0];
+                                const uri = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
+                                setClientPostImage(uri);
+                            }
+                        } catch (e) {
+                            console.error('Gallery error:', e);
+                        }
+                    },
+                },
+                { text: 'Cancel', style: 'cancel' },
+            ]
+        );
+    };
+
+    const handlePublishClientPost = async () => {
+        if (!clientPostText.trim() && !clientPostImage) {
+            Alert.alert('Empty Post', 'Please write a message or add a photo to share with the community.');
+            return;
+        }
+
+        if (!currentUserId) {
+            Alert.alert('Sign In Required', 'Please sign in to publish a community post.');
+            return;
+        }
+
+        setPostingClient(true);
+        try {
+            const authUser = auth.currentUser;
+            const storeUser = useAuthStore.getState().user;
+            const authorName = authUser?.displayName || (storeUser as any)?.displayName || authUser?.email?.split('@')[0] || 'Community Member';
+            const authorAvatar = authUser?.photoURL || (storeUser as any)?.photoURL || (storeUser as any)?.profileImage || '';
+
+            const res = await postAPI.create({
+                userId: currentUserId,
+                authorId: currentUserId,
+                authorType: 'client',
+                authorName,
+                authorAvatar,
+                caption: clientPostText.trim(),
+                clientPostType: clientPostFlair,
+                taggedVendorName: clientTaggedVendor.trim() || undefined,
+                mediaUrl: clientPostImage || undefined,
+            });
+
+            if (res.data?.post) {
+                setPosts((prev) => [res.data.post, ...prev]);
+            }
+            setClientPostText('');
+            setClientPostImage('');
+            setClientTaggedVendor('');
+            setClientPostFlair('update');
+            setClientPostModalVisible(false);
+            Alert.alert('Published 🎉', 'Your post is now live in the QIIRA community feed!');
+        } catch (error: any) {
+            console.error('Client post error:', error);
+            const msg = error.response?.data?.error || error.message || 'Failed to publish post';
+            Alert.alert('Error', msg);
+        } finally {
+            setPostingClient(false);
+        }
     };
 
     const handleLike = async (postId: string) => {
@@ -321,56 +439,163 @@ export default function ExploreScreen({ navigation }: any) {
         );
     });
 
-    const renderPostItem = ({ item }: { item: any }) => {
-        const isReel = item.type === 'reel';
-        const canDelete = auth.currentUser?.uid === item.vendorId || userRole === 'admin';
-
+    const renderHeaderComposer = () => {
+        const authUser = auth.currentUser;
+        const storeUser = useAuthStore.getState().user;
+        const currentAvatar = authUser?.photoURL || (storeUser as any)?.photoURL || (storeUser as any)?.profileImage || '';
         return (
-            <View style={styles.postCard}>
-                {/* Vendor Header */}
-                <View style={styles.postHeader}>
+            <View style={styles.communityComposerCard}>
+                <View style={styles.composerTopRow}>
+                    <Image
+                        source={currentAvatar ? { uri: currentAvatar } : PLACEHOLDER_AVATARS.client}
+                        style={styles.composerAvatar}
+                    />
                     <TouchableOpacity
-                        style={styles.vendorInfoRow}
-                        onPress={() => navigation.navigate('VendorDetails', { vendorId: item.vendorId })}
+                        style={styles.composerInputButton}
+                        onPress={() => setClientPostModalVisible(true)}
                         activeOpacity={0.8}
                     >
-                        <View style={{ position: 'relative' }}>
-                            <Image
-                                source={{
-                                    uri: item.vendorImage || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
-                                }}
-                                style={styles.vendorAvatar}
-                            />
-                            <AvatarVerificationBadge
-                                isVerified={Boolean(item.isVerified || item.is_verified || item.isAdmin || item.role === 'admin' || item.vendorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2')}
-                                isAdmin={Boolean(item.isAdmin || item.role === 'admin' || item.vendorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2')}
-                                size={14}
-                            />
-                        </View>
-                        <View style={styles.vendorTextContainer}>
-                            <View style={styles.vendorNameRow}>
-                                <Text style={styles.vendorName} numberOfLines={1}>
-                                    {item.vendorName}
-                                </Text>
-                                <VerificationBadgeInline
-                                    isVerified={Boolean(item.isVerified || item.is_verified || item.isAdmin || item.role === 'admin' || item.vendorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2')}
-                                    isAdmin={Boolean(item.isAdmin || item.role === 'admin' || item.vendorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2')}
-                                    size={16}
-                                />
-                            </View>
-                            <Text style={styles.vendorCategory}>
-                                {item.vendorCategory || item.category}
-                            </Text>
-                        </View>
+                        <Text style={styles.composerPlaceholderText} numberOfLines={1}>
+                            Share an experience or ask the community...
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+                <View style={styles.composerBottomRow}>
+                    <TouchableOpacity
+                        style={styles.composerActionChip}
+                        onPress={() => {
+                            setClientPostFlair('question');
+                            setClientPostModalVisible(true);
+                        }}
+                    >
+                        <Ionicons name="help-circle-outline" size={16} color="#3B82F6" />
+                        <Text style={styles.composerActionText}>Ask Question</Text>
                     </TouchableOpacity>
 
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.xs }}>
+                    <TouchableOpacity
+                        style={styles.composerActionChip}
+                        onPress={() => {
+                            setClientPostFlair('shoutout');
+                            setClientPostModalVisible(true);
+                        }}
+                    >
+                        <Ionicons name="star-outline" size={16} color="#F59E0B" />
+                        <Text style={styles.composerActionText}>Vendor Review</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={styles.composerActionChip}
+                        onPress={() => {
+                            setClientPostFlair('update');
+                            setClientPostModalVisible(true);
+                        }}
+                    >
+                        <Ionicons name="image-outline" size={16} color="#10B981" />
+                        <Text style={styles.composerActionText}>Photo / Update</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        );
+    };
+
+    const renderPostItem = ({ item }: { item: any }) => {
+        const isReel = item.type === 'reel';
+        const isClientPost = item.authorType === 'client';
+        const canDelete = auth.currentUser?.uid === (item.authorId || item.vendorId) || userRole === 'admin';
+        const hasMedia = Boolean(item.mediaUrl || (item.mediaUrls && item.mediaUrls.length > 0));
+
+        return (
+            <View style={[styles.postCard, isClientPost && styles.clientPostCard]}>
+                {/* Header */}
+                <View style={styles.postHeader}>
+                    {isClientPost ? (
+                        /* Client Profile Header */
+                        <View style={styles.vendorInfoRow}>
+                            <View style={{ position: 'relative' }}>
+                                <Image
+                                    source={item.vendorImage ? { uri: item.vendorImage } : PLACEHOLDER_AVATARS.client}
+                                    style={styles.vendorAvatar}
+                                />
+                                <AvatarVerificationBadge
+                                    isVerified={Boolean(item.isVerified || item.is_verified || item.isAdmin)}
+                                    isAdmin={Boolean(item.isAdmin)}
+                                    size={14}
+                                />
+                            </View>
+                            <View style={styles.vendorTextContainer}>
+                                <View style={styles.vendorNameRow}>
+                                    <Text style={styles.vendorName} numberOfLines={1}>
+                                        {item.vendorName || 'Community Member'}
+                                    </Text>
+                                    <VerificationBadgeInline
+                                        isVerified={Boolean(item.isVerified || item.is_verified || item.isAdmin)}
+                                        isAdmin={Boolean(item.isAdmin)}
+                                        size={16}
+                                    />
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                                    <View style={styles.communityFlairBadge}>
+                                        <Text style={styles.communityFlairText}>
+                                            {item.clientPostType === 'question' ? '❓ Question' : item.clientPostType === 'shoutout' ? '⭐ Recommendation' : '💭 Community Post'}
+                                        </Text>
+                                    </View>
+                                    {item.taggedVendorName ? (
+                                        <View style={styles.taggedVendorBadge}>
+                                            <Text style={styles.taggedVendorText} numberOfLines={1}>
+                                                🛍️ @{item.taggedVendorName}
+                                            </Text>
+                                        </View>
+                                    ) : null}
+                                </View>
+                            </View>
+                        </View>
+                    ) : (
+                        /* Vendor Profile Header */
                         <TouchableOpacity
-                            style={styles.viewVendorButton}
+                            style={styles.vendorInfoRow}
                             onPress={() => navigation.navigate('VendorDetails', { vendorId: item.vendorId })}
+                            activeOpacity={0.8}
                         >
-                            <Text style={styles.viewVendorButtonText}>View Store</Text>
+                            <View style={{ position: 'relative' }}>
+                                <Image
+                                    source={{
+                                        uri: item.vendorImage || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
+                                    }}
+                                    style={styles.vendorAvatar}
+                                />
+                                <AvatarVerificationBadge
+                                    isVerified={Boolean(item.isVerified || item.is_verified || item.isAdmin || item.role === 'admin' || item.vendorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2')}
+                                    isAdmin={Boolean(item.isAdmin || item.role === 'admin' || item.vendorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2')}
+                                    size={14}
+                                />
+                            </View>
+                            <View style={styles.vendorTextContainer}>
+                                <View style={styles.vendorNameRow}>
+                                    <Text style={styles.vendorName} numberOfLines={1}>
+                                        {item.vendorName}
+                                    </Text>
+                                    <VerificationBadgeInline
+                                        isVerified={Boolean(item.isVerified || item.is_verified || item.isAdmin || item.role === 'admin' || item.vendorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2')}
+                                        isAdmin={Boolean(item.isAdmin || item.role === 'admin' || item.vendorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2')}
+                                        size={16}
+                                    />
+                                </View>
+                                <Text style={styles.vendorCategory}>
+                                    {item.vendorCategory || item.category}
+                                </Text>
+                            </View>
                         </TouchableOpacity>
+                    )}
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.xs }}>
+                        {!isClientPost && (
+                            <TouchableOpacity
+                                style={styles.viewVendorButton}
+                                onPress={() => navigation.navigate('VendorDetails', { vendorId: item.vendorId })}
+                            >
+                                <Text style={styles.viewVendorButtonText}>View Store</Text>
+                            </TouchableOpacity>
+                        )}
 
                         {canDelete && (
                             <TouchableOpacity
@@ -389,8 +614,10 @@ export default function ExploreScreen({ navigation }: any) {
                     </View>
                 </View>
 
-                {/* Media Image(s) / Reel */}
-                <PostMediaCarousel item={item} colors={colors} styles={styles} />
+                {/* Media Image(s) / Reel (if present) */}
+                {hasMedia ? (
+                    <PostMediaCarousel item={item} colors={colors} styles={styles} />
+                ) : null}
 
                 {/* Action Bar */}
                 <View style={styles.actionsBar}>
@@ -430,49 +657,50 @@ export default function ExploreScreen({ navigation }: any) {
                             <Ionicons name="share-social-outline" size={22} color={colors.textPrimary} />
                         </TouchableOpacity>
 
-                        {/* Add to Cart Button */}
-                        <TouchableOpacity
-                            style={styles.actionIconButton}
-                            onPress={() => {
-                                addItem({
-                                    id: item.id,
-                                    title: item.caption ? item.caption.substring(0, 45) : item.vendorName,
-                                    caption: item.caption,
-                                    mediaUrl: item.mediaUrl,
-                                    price: item.price || 0,
-                                    currency: item.currency || 'NGN',
-                                    vendorId: item.vendorId,
-                                    vendorName: item.vendorName,
-                                }, currentUserId);
-                                Alert.alert('Saved to Cart 🛒', `Saved "${item.vendorName}" product to your Cart!`);
-                            }}
-                            activeOpacity={0.7}
-                        >
-                            <Ionicons
-                                name={isInCart(item.id) ? 'cart' : 'cart-outline'}
-                                size={22}
-                                color={isInCart(item.id) ? colors.primary : colors.textPrimary}
-                            />
-                        </TouchableOpacity>
+                        {/* Add to Cart Button (Vendors only) */}
+                        {!isClientPost && (
+                            <TouchableOpacity
+                                style={styles.actionIconButton}
+                                onPress={() => {
+                                    addItem({
+                                        id: item.id,
+                                        title: item.caption ? item.caption.substring(0, 45) : item.vendorName,
+                                        caption: item.caption,
+                                        mediaUrl: item.mediaUrl,
+                                        price: item.price || 0,
+                                        currency: item.currency || 'NGN',
+                                        vendorId: item.vendorId,
+                                        vendorName: item.vendorName,
+                                    }, currentUserId);
+                                    Alert.alert('Saved to Cart 🛒', `Saved "${item.vendorName}" product to your Cart!`);
+                                }}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons
+                                    name={isInCart(item.id) ? 'cart' : 'cart-outline'}
+                                    size={22}
+                                    color={isInCart(item.id) ? colors.primary : colors.textPrimary}
+                                />
+                            </TouchableOpacity>
+                        )}
                     </View>
 
-                    {/* Chat with Vendor Button */}
+                    {/* Chat Button */}
                     <TouchableOpacity
                         style={styles.chatVendorButton}
                         onPress={() =>
                             navigation.navigate('Chat', {
-                                otherUserId: item.vendorId,
+                                otherUserId: item.authorId || item.vendorId,
                                 otherUserName: item.vendorName,
                                 otherUserImage: item.vendorImage,
-                                receiverId: item.vendorId,
+                                receiverId: item.authorId || item.vendorId,
                                 receiverName: item.vendorName,
                                 receiverImage: item.vendorImage,
-                                vendorId: item.vendorId,
                             })
                         }
                     >
-                        <Ionicons name="chatbubbles-outline" size={16} color={colors.primary} />
-                        <Text style={styles.chatVendorText}>Inquire</Text>
+                        <Ionicons name={isClientPost ? "chatbubble-ellipses-outline" : "chatbubbles-outline"} size={16} color={colors.primary} />
+                        <Text style={styles.chatVendorText}>{isClientPost ? "Reply" : "Inquire"}</Text>
                     </TouchableOpacity>
                 </View>
 
@@ -512,13 +740,21 @@ export default function ExploreScreen({ navigation }: any) {
                     <Text style={styles.headerTitle}>Explore</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.sm }}>
                         <CartButton />
-                        {userRole === 'vendor' && (
+                        {userRole === 'vendor' ? (
                             <TouchableOpacity
                                 style={styles.createPostHeaderButton}
                                 onPress={() => navigation.navigate('CreatePost')}
                             >
                                 <Ionicons name="add" size={20} color={colors.textInverse} />
                                 <Text style={styles.createPostHeaderText}>New Post</Text>
+                            </TouchableOpacity>
+                        ) : (
+                            <TouchableOpacity
+                                style={styles.createPostHeaderButton}
+                                onPress={() => setClientPostModalVisible(true)}
+                            >
+                                <Ionicons name="create-outline" size={18} color={colors.textInverse} />
+                                <Text style={styles.createPostHeaderText}>Share / Ask</Text>
                             </TouchableOpacity>
                         )}
                     </View>
@@ -615,27 +851,38 @@ export default function ExploreScreen({ navigation }: any) {
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={colors.primary} />
                 </View>
-            ) : filteredPosts.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                    <Ionicons name="images-outline" size={56} color={colors.textTertiary} />
-                    <Text style={styles.emptyTitle}>No posts found</Text>
-                    <Text style={styles.emptySubtitle}>
-                        Be the first vendor to share products and showcase in this category!
-                    </Text>
-                    {userRole === 'vendor' && (
-                        <TouchableOpacity
-                            style={styles.emptyCreateButton}
-                            onPress={() => navigation.navigate('CreatePost')}
-                        >
-                            <Text style={styles.emptyCreateButtonText}>Create Post</Text>
-                        </TouchableOpacity>
-                    )}
-                </View>
             ) : (
                 <FlatList
                     data={filteredPosts}
                     keyExtractor={(item) => item.id}
                     renderItem={renderPostItem}
+                    ListHeaderComponent={activeTab === 'feed' ? renderHeaderComposer : null}
+                    ListEmptyComponent={
+                        <View style={styles.emptyContainer}>
+                            <Ionicons name="images-outline" size={56} color={colors.textTertiary} />
+                            <Text style={styles.emptyTitle}>No posts found</Text>
+                            <Text style={styles.emptySubtitle}>
+                                {activeTab === 'feed'
+                                    ? 'Be the first to share a post, question, or showcase products in this category!'
+                                    : 'No showcase reels available in this category yet.'}
+                            </Text>
+                            {userRole === 'vendor' ? (
+                                <TouchableOpacity
+                                    style={styles.emptyCreateButton}
+                                    onPress={() => navigation.navigate('CreatePost')}
+                                >
+                                    <Text style={styles.emptyCreateButtonText}>Create Post</Text>
+                                </TouchableOpacity>
+                            ) : (
+                                <TouchableOpacity
+                                    style={styles.emptyCreateButton}
+                                    onPress={() => setClientPostModalVisible(true)}
+                                >
+                                    <Text style={styles.emptyCreateButtonText}>Share with Community</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                    }
                     contentContainerStyle={styles.listContent}
                     refreshControl={
                         <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
@@ -729,6 +976,183 @@ export default function ExploreScreen({ navigation }: any) {
                         </View>
                     </View>
                 </View>
+            </Modal>
+
+            {/* Client Community Post Modal */}
+            <Modal
+                visible={clientPostModalVisible}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setClientPostModalVisible(false)}
+            >
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                    style={styles.modalOverlay}
+                >
+                    <View style={styles.clientPostModalContent}>
+                        {/* Header */}
+                        <View style={styles.clientModalHeader}>
+                            <View>
+                                <Text style={styles.clientModalTitle}>Create Community Post</Text>
+                                <Text style={styles.clientModalSubtitle}>
+                                    Share questions, recommendations, or discoveries
+                                </Text>
+                            </View>
+                            <TouchableOpacity
+                                onPress={() => setClientPostModalVisible(false)}
+                                style={styles.modalCloseButton}
+                            >
+                                <Ionicons name="close" size={24} color={colors.textPrimary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+                            {/* Flair / Category Selector */}
+                            <Text style={styles.modalSectionLabel}>Post Type</Text>
+                            <View style={styles.flairSelectorRow}>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.flairTab,
+                                        clientPostFlair === 'update' && styles.flairTabActive,
+                                    ]}
+                                    onPress={() => setClientPostFlair('update')}
+                                >
+                                    <Ionicons
+                                        name="chatbubble-outline"
+                                        size={14}
+                                        color={clientPostFlair === 'update' ? '#fff' : colors.textSecondary}
+                                    />
+                                    <Text
+                                        style={[
+                                            styles.flairTabText,
+                                            clientPostFlair === 'update' && styles.flairTabTextActive,
+                                        ]}
+                                    >
+                                        Update / Story
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.flairTab,
+                                        clientPostFlair === 'question' && styles.flairTabActive,
+                                    ]}
+                                    onPress={() => setClientPostFlair('question')}
+                                >
+                                    <Ionicons
+                                        name="help-circle-outline"
+                                        size={14}
+                                        color={clientPostFlair === 'question' ? '#fff' : colors.textSecondary}
+                                    />
+                                    <Text
+                                        style={[
+                                            styles.flairTabText,
+                                            clientPostFlair === 'question' && styles.flairTabTextActive,
+                                        ]}
+                                    >
+                                        Ask Question
+                                    </Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.flairTab,
+                                        clientPostFlair === 'shoutout' && styles.flairTabActive,
+                                    ]}
+                                    onPress={() => setClientPostFlair('shoutout')}
+                                >
+                                    <Ionicons
+                                        name="star-outline"
+                                        size={14}
+                                        color={clientPostFlair === 'shoutout' ? '#fff' : colors.textSecondary}
+                                    />
+                                    <Text
+                                        style={[
+                                            styles.flairTabText,
+                                            clientPostFlair === 'shoutout' && styles.flairTabTextActive,
+                                        ]}
+                                    >
+                                        Recommendation
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Caption Text Input */}
+                            <TextInput
+                                style={styles.clientTextInput}
+                                placeholder={
+                                    clientPostFlair === 'question'
+                                        ? "Ask the QIIRA community (e.g., 'Where can I find the best bespoke shoes in Abuja?')..."
+                                        : clientPostFlair === 'shoutout'
+                                        ? "Write a review or recommendation for a vendor or product you loved..."
+                                        : "What's on your mind? Share your thoughts, styles, or tips..."
+                                }
+                                placeholderTextColor={colors.textTertiary}
+                                value={clientPostText}
+                                onChangeText={setClientPostText}
+                                multiline
+                                numberOfLines={4}
+                                textAlignVertical="top"
+                            />
+
+                            {/* Optional Tagged Vendor Input */}
+                            <View style={styles.clientTagVendorContainer}>
+                                <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
+                                <TextInput
+                                    style={styles.clientTagVendorInput}
+                                    placeholder="Tag a vendor name (optional, e.g. Royal Fabrics)"
+                                    placeholderTextColor={colors.textTertiary}
+                                    value={clientTaggedVendor}
+                                    onChangeText={setClientTaggedVendor}
+                                />
+                            </View>
+
+                            {/* Photo Preview if chosen */}
+                            {clientPostImage ? (
+                                <View style={styles.clientImagePreviewContainer}>
+                                    <Image source={{ uri: clientPostImage }} style={styles.clientImagePreview} />
+                                    <TouchableOpacity
+                                        style={styles.clientImageRemoveBtn}
+                                        onPress={() => setClientPostImage('')}
+                                    >
+                                        <Ionicons name="close" size={16} color="#fff" />
+                                    </TouchableOpacity>
+                                </View>
+                            ) : null}
+
+                            {/* Photo Picker Button */}
+                            <TouchableOpacity
+                                style={styles.clientAddMediaBtn}
+                                onPress={handlePickClientImage}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="camera-outline" size={20} color={colors.primary} />
+                                <Text style={styles.clientAddMediaBtnText}>
+                                    {clientPostImage ? 'Change Photo (Camera / Gallery)' : 'Add Photo (Snap or Gallery)'}
+                                </Text>
+                            </TouchableOpacity>
+                        </ScrollView>
+
+                        {/* Submit Button */}
+                        <TouchableOpacity
+                            style={[
+                                styles.clientPublishBtn,
+                                (!clientPostText.trim() && !clientPostImage) && { opacity: 0.5 },
+                            ]}
+                            onPress={handlePublishClientPost}
+                            disabled={(!clientPostText.trim() && !clientPostImage) || postingClient}
+                        >
+                            {postingClient ? (
+                                <ActivityIndicator size="small" color={colors.textInverse} />
+                            ) : (
+                                <>
+                                    <Ionicons name="paper-plane" size={18} color={colors.textInverse} />
+                                    <Text style={styles.clientPublishBtnText}>Publish to Community</Text>
+                                </>
+                            )}
+                        </TouchableOpacity>
+                    </View>
+                </KeyboardAvoidingView>
             </Modal>
 
             <SharePostModal
@@ -1144,6 +1568,249 @@ const getStyles = (colors: any) => {
         },
         sendCommentButton: {
             padding: SPACING.xs,
+        },
+
+        // Community Composer Card
+        communityComposerCard: {
+            backgroundColor: colors.surface,
+            marginHorizontal: SPACING.md,
+            marginBottom: SPACING.md,
+            borderRadius: BORDER_RADIUS.lg,
+            borderWidth: 1,
+            borderColor: colors.border,
+            padding: SPACING.md,
+            ...SHADOWS.small,
+        },
+        composerTopRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: SPACING.sm,
+            marginBottom: SPACING.sm,
+        },
+        composerAvatar: {
+            width: 38,
+            height: 38,
+            borderRadius: 19,
+            backgroundColor: colors.surfaceLight,
+        },
+        composerInputButton: {
+            flex: 1,
+            backgroundColor: colors.surfaceLight,
+            paddingHorizontal: SPACING.md,
+            paddingVertical: 10,
+            borderRadius: BORDER_RADIUS.round,
+            borderWidth: 1,
+            borderColor: colors.border,
+        },
+        composerPlaceholderText: {
+            fontSize: FONT_SIZES.sm,
+            color: colors.textTertiary,
+        },
+        composerBottomRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-around',
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            paddingTop: SPACING.xs,
+        },
+        composerActionChip: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 4,
+            paddingVertical: 6,
+            paddingHorizontal: 8,
+            borderRadius: BORDER_RADIUS.sm,
+        },
+        composerActionText: {
+            fontSize: FONT_SIZES.xs,
+            fontWeight: '600',
+            color: colors.textSecondary,
+        },
+
+        // Client Post Card & Badges
+        clientPostCard: {
+            borderLeftWidth: 3,
+            borderLeftColor: colors.primary,
+        },
+        communityFlairBadge: {
+            backgroundColor: 'rgba(178, 138, 69, 0.15)',
+            paddingHorizontal: 8,
+            paddingVertical: 2,
+            borderRadius: BORDER_RADIUS.round,
+            alignSelf: 'flex-start',
+        },
+        communityFlairText: {
+            fontSize: 10,
+            fontWeight: '700',
+            color: colors.primary,
+        },
+        taggedVendorBadge: {
+            backgroundColor: 'rgba(59, 130, 246, 0.12)',
+            paddingHorizontal: 8,
+            paddingVertical: 2,
+            borderRadius: BORDER_RADIUS.round,
+            maxWidth: 160,
+        },
+        taggedVendorText: {
+            fontSize: 10,
+            fontWeight: '600',
+            color: '#3B82F6',
+        },
+
+        // Client Modal Styles
+        clientPostModalContent: {
+            backgroundColor: colors.surface,
+            borderTopLeftRadius: BORDER_RADIUS.xl,
+            borderTopRightRadius: BORDER_RADIUS.xl,
+            padding: SPACING.lg,
+            maxHeight: '90%',
+        },
+        clientModalHeader: {
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: SPACING.md,
+            paddingBottom: SPACING.sm,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+        },
+        clientModalTitle: {
+            fontSize: FONT_SIZES.lg,
+            fontWeight: '800',
+            color: colors.textPrimary,
+        },
+        clientModalSubtitle: {
+            fontSize: FONT_SIZES.xs,
+            color: colors.textSecondary,
+            marginTop: 2,
+        },
+        modalCloseButton: {
+            padding: SPACING.xs,
+        },
+        modalSectionLabel: {
+            fontSize: FONT_SIZES.xs,
+            fontWeight: '700',
+            color: colors.textSecondary,
+            textTransform: 'uppercase',
+            letterSpacing: 0.5,
+            marginBottom: SPACING.xs,
+        },
+        flairSelectorRow: {
+            flexDirection: 'row',
+            gap: SPACING.xs,
+            marginBottom: SPACING.md,
+        },
+        flairTab: {
+            flex: 1,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 4,
+            paddingVertical: 8,
+            paddingHorizontal: 6,
+            borderRadius: BORDER_RADIUS.md,
+            backgroundColor: colors.surfaceLight,
+            borderWidth: 1,
+            borderColor: colors.border,
+        },
+        flairTabActive: {
+            backgroundColor: colors.primary,
+            borderColor: colors.primary,
+        },
+        flairTabText: {
+            fontSize: 11,
+            fontWeight: '600',
+            color: colors.textSecondary,
+        },
+        flairTabTextActive: {
+            color: colors.textInverse,
+            fontWeight: '700',
+        },
+        clientTextInput: {
+            backgroundColor: colors.surfaceLight,
+            borderWidth: 1,
+            borderColor: colors.border,
+            borderRadius: BORDER_RADIUS.md,
+            padding: SPACING.md,
+            fontSize: FONT_SIZES.sm,
+            color: colors.textPrimary,
+            minHeight: 110,
+            marginBottom: SPACING.md,
+        },
+        clientTagVendorContainer: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: colors.surfaceLight,
+            borderWidth: 1,
+            borderColor: colors.border,
+            borderRadius: BORDER_RADIUS.md,
+            paddingHorizontal: SPACING.md,
+            paddingVertical: SPACING.sm,
+            gap: SPACING.xs,
+            marginBottom: SPACING.md,
+        },
+        clientTagVendorInput: {
+            flex: 1,
+            fontSize: FONT_SIZES.sm,
+            color: colors.textPrimary,
+        },
+        clientImagePreviewContainer: {
+            position: 'relative',
+            borderRadius: BORDER_RADIUS.md,
+            overflow: 'hidden',
+            marginBottom: SPACING.md,
+            height: 180,
+            backgroundColor: colors.surfaceLight,
+        },
+        clientImagePreview: {
+            width: '100%',
+            height: '100%',
+            resizeMode: 'cover',
+        },
+        clientImageRemoveBtn: {
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            backgroundColor: 'rgba(0,0,0,0.65)',
+            width: 28,
+            height: 28,
+            borderRadius: 14,
+            justifyContent: 'center',
+            alignItems: 'center',
+        },
+        clientAddMediaBtn: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            backgroundColor: colors.surfaceLight,
+            borderWidth: 1,
+            borderColor: colors.border,
+            borderStyle: 'dashed',
+            borderRadius: BORDER_RADIUS.md,
+            paddingVertical: SPACING.md,
+            marginBottom: SPACING.md,
+        },
+        clientAddMediaBtnText: {
+            fontSize: FONT_SIZES.sm,
+            fontWeight: '600',
+            color: colors.primary,
+        },
+        clientPublishBtn: {
+            backgroundColor: colors.primary,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            paddingVertical: 14,
+            borderRadius: BORDER_RADIUS.round,
+            marginTop: SPACING.xs,
+        },
+        clientPublishBtnText: {
+            color: colors.textInverse,
+            fontWeight: '800',
+            fontSize: FONT_SIZES.md,
         },
     });
 };

@@ -182,10 +182,10 @@ export default function VendorProfileCompletionScreen({ route, navigation }: any
                         <Text style={styles.selectArrow}>▼</Text>
                     </TouchableOpacity>
 
-                    <Text style={styles.label}>Description</Text>
+                    <Text style={styles.label}>About us</Text>
                     <TextInput
                         style={[styles.input, styles.textArea]}
-                        placeholder="Tell customers about your business..."
+                        placeholder="Tell customers about your business, story, and specialties..."
                         placeholderTextColor={colors.textTertiary}
                         value={formData.description}
                         onChangeText={(text) => setFormData({ ...formData, description: text })}

@@ -173,10 +173,18 @@ export const postAPI = {
     getPost: (id: string, userId?: string) =>
         api.get(`/posts/${id}`, { params: { userId } }),
     createPost: (data: {
-        vendorId: string;
+        vendorId?: string;
+        userId?: string;
+        authorId?: string;
+        authorType?: 'vendor' | 'client';
+        authorName?: string;
+        authorAvatar?: string;
+        clientPostType?: 'update' | 'question' | 'shoutout';
+        taggedVendorName?: string;
+        taggedVendorId?: string;
         type?: 'post' | 'reel';
         caption: string;
-        mediaUrl: string;
+        mediaUrl?: string;
         mediaUrls?: string[];
         thumbnailUrl?: string;
         price?: number;
@@ -184,6 +192,7 @@ export const postAPI = {
         category?: string;
         tags?: string[] | string;
     }) => api.post('/posts', data),
+    create: (data: any) => api.post('/posts', data),
     likePost: (id: string, userId: string) =>
         api.post(`/posts/${id}/like`, { userId }),
     getComments: (id: string) =>

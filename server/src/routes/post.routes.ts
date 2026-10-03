@@ -120,6 +120,7 @@ async function getAllUnifiedPosts(): Promise<any[]> {
         uniqueVendorIds.forEach((id, idx) => vendorCache.set(id, metas[idx]));
 
         for (const p of allPosts) {
+            if (p.authorType === 'client') continue; // Preserve client author metadata
             if (p.vendorId && vendorCache.has(p.vendorId)) {
                 const meta = vendorCache.get(p.vendorId);
                 if (meta) {
@@ -260,23 +261,33 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 /**
  * @route   POST /api/posts
- * @desc    Create a new post or reel
- * @access  Vendor only
+ * @desc    Create a new post, reel, or client community post
+ * @access  Authenticated users (Vendors & Clients)
  */
 router.post('/', async (req: Request, res: Response) => {
     try {
         const {
             vendorId,
-            type = 'post', // 'post' | 'reel'
+            userId,
+            authorId,
+            authorType = 'vendor', // 'vendor' | 'client'
+            authorName: explicitAuthorName,
+            authorAvatar: explicitAuthorAvatar,
+            clientPostType = 'update', // 'update' | 'question' | 'shoutout'
+            taggedVendorId,
+            taggedVendorName,
+            type = 'post', // 'post' | 'reel' | 'community'
             caption,
             mediaUrl,
-            mediaUrls,   // NEW: array of media URLs for multi-media posts
+            mediaUrls,   // array of media URLs for multi-media posts
             thumbnailUrl,
             price,
             currency = 'NGN',
             category = 'General',
             tags = [],
         } = req.body;
+
+        const creatorId = vendorId || userId || authorId;
 
         // Build the final media array — supports both single and multi-media
         let finalMediaUrls: string[] = [];
@@ -286,39 +297,103 @@ router.post('/', async (req: Request, res: Response) => {
             finalMediaUrls = [mediaUrl];
         }
 
-        if (!vendorId || finalMediaUrls.length === 0) {
+        if (!creatorId) {
+            return res.status(400).json({ error: 'creatorId / vendorId / userId is required' });
+        }
+
+        // For vendors, at least one media URL is required; for clients, either caption or media is required
+        if (authorType !== 'client' && finalMediaUrls.length === 0) {
             return res.status(400).json({ error: 'vendorId and at least one media URL are required' });
         }
 
-        const vendorMeta = await getVendorMeta(vendorId);
-        const postId = `post_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        if (authorType === 'client' && !caption && finalMediaUrls.length === 0) {
+            return res.status(400).json({ error: 'Please provide either a message or a photo/video for your post' });
+        }
 
-        const newPost = {
-            id: postId,
-            vendorId,
-            vendorName: vendorMeta.vendorName,
-            vendorCategory: vendorMeta.vendorCategory,
-            vendorImage: vendorMeta.vendorImage,
-            vendorTier: vendorMeta.isVerified ? 'verified' : 'none',
-            isVerified: vendorMeta.isVerified,
-            isAdmin: Boolean(vendorMeta.isAdmin),
-            role: vendorMeta.role || (vendorMeta.isAdmin ? 'admin' : 'vendor'),
-            type: type === 'reel' ? 'reel' : 'post',
-            caption: caption || '',
-            mediaUrl: finalMediaUrls[0],                    // Primary media (backward compat)
-            mediaUrls: finalMediaUrls,                      // Full list of all media
-            thumbnailUrl: thumbnailUrl || finalMediaUrls[0],
-            mediaCount: finalMediaUrls.length,
-            price: (price !== undefined && price !== null && price !== '' && !isNaN(Number(price))) ? Number(price) : null,
-            currency,
-            category,
-            tags: Array.isArray(tags) ? tags : (typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : []),
-            likesCount: 0,
-            commentsCount: 0,
-            likedBy: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-        };
+        const postId = `post_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        let newPost: any;
+
+        if (authorType === 'client') {
+            // Fetch client details from users collection if not passed explicitly
+            let clientName = explicitAuthorName || 'Client';
+            let clientAvatar = explicitAuthorAvatar || '';
+            let isVerified = false;
+            let isAdmin = (creatorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2');
+
+            try {
+                const userDoc = await db.collection('users').doc(creatorId).get();
+                if (userDoc.exists) {
+                    const uData = userDoc.data()!;
+                    clientName = uData.displayName || uData.fullName || clientName;
+                    clientAvatar = uData.photoURL || uData.profileImage || uData.avatar || clientAvatar;
+                    if (uData.isVerified || uData.is_verified) isVerified = true;
+                    if (uData.role === 'admin') isAdmin = true;
+                }
+            } catch (_) {}
+
+            newPost = {
+                id: postId,
+                vendorId: creatorId,
+                authorId: creatorId,
+                authorType: 'client',
+                clientPostType: clientPostType || 'update',
+                taggedVendorId: taggedVendorId || null,
+                taggedVendorName: taggedVendorName || null,
+                vendorName: clientName,
+                vendorCategory: 'Community',
+                vendorImage: clientAvatar,
+                vendorTier: isVerified ? 'verified' : 'none',
+                isVerified: Boolean(isVerified || isAdmin),
+                isAdmin: Boolean(isAdmin),
+                role: isAdmin ? 'admin' : 'client',
+                type: 'community',
+                caption: caption || '',
+                mediaUrl: finalMediaUrls[0] || null,
+                mediaUrls: finalMediaUrls,
+                thumbnailUrl: thumbnailUrl || finalMediaUrls[0] || null,
+                mediaCount: finalMediaUrls.length,
+                price: null,
+                currency,
+                category: 'Community',
+                tags: Array.isArray(tags) ? tags : (typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : []),
+                likesCount: 0,
+                commentsCount: 0,
+                likedBy: [],
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            };
+        } else {
+            const vendorMeta = await getVendorMeta(creatorId);
+
+            newPost = {
+                id: postId,
+                vendorId: creatorId,
+                authorId: creatorId,
+                authorType: 'vendor',
+                vendorName: vendorMeta.vendorName,
+                vendorCategory: vendorMeta.vendorCategory,
+                vendorImage: vendorMeta.vendorImage,
+                vendorTier: vendorMeta.isVerified ? 'verified' : 'none',
+                isVerified: vendorMeta.isVerified,
+                isAdmin: Boolean(vendorMeta.isAdmin),
+                role: vendorMeta.role || (vendorMeta.isAdmin ? 'admin' : 'vendor'),
+                type: type === 'reel' ? 'reel' : 'post',
+                caption: caption || '',
+                mediaUrl: finalMediaUrls[0],                    // Primary media (backward compat)
+                mediaUrls: finalMediaUrls,                      // Full list of all media
+                thumbnailUrl: thumbnailUrl || finalMediaUrls[0],
+                mediaCount: finalMediaUrls.length,
+                price: (price !== undefined && price !== null && price !== '' && !isNaN(Number(price))) ? Number(price) : null,
+                currency,
+                category,
+                tags: Array.isArray(tags) ? tags : (typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : []),
+                likesCount: 0,
+                commentsCount: 0,
+                likedBy: [],
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            };
+        }
 
         // 1. Store in memory for instant availability
         MEMORY_POSTS.unshift(newPost);

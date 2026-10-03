@@ -81,6 +81,7 @@ export default function VendorProfileScreen({ navigation }: any) {
     const [isEditing, setIsEditing] = useState(false);
     const [showCategoryPicker, setShowCategoryPicker] = useState(false);
     const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+    const [settingsModalVisible, setSettingsModalVisible] = useState(false);
 
     // Form State
     const [businessName, setBusinessName] = useState('');
@@ -764,23 +765,13 @@ export default function VendorProfileScreen({ navigation }: any) {
                             >
                                 <Ionicons name="share-social-outline" size={16} color={colors.textPrimary} />
                             </TouchableOpacity>
+
                             <TouchableOpacity
                                 style={styles.actionButtonOutline}
-                                onPress={() => confirmAction('Logout', 'Are you sure you want to logout?', () => auth.signOut(), 'Logout')}
+                                onPress={() => setSettingsModalVisible(true)}
+                                activeOpacity={0.7}
                             >
-                                <Text style={styles.actionButtonOutlineText}>Logout</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.actionButtonOutline}
-                                onPress={() => setPasswordModalVisible(true)}
-                            >
-                                <Text style={styles.actionButtonOutlineText}>🔒</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.actionButtonOutline}
-                                onPress={toggleTheme}
-                            >
-                                <Text style={styles.actionButtonOutlineText}>{theme === 'dark' ? '☀️' : '🌙'}</Text>
+                                <Ionicons name="settings-outline" size={17} color={colors.textPrimary} />
                             </TouchableOpacity>
 
                             <TouchableOpacity
@@ -906,7 +897,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                                     }}
                                 >
                                     <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                                        {tab === 'posts' ? 'Posts' : tab === 'docs' ? '📄 Docs' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                                        {tab === 'posts' ? 'Posts' : tab === 'docs' ? '📄 Docs' : tab === 'about' ? 'About us' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                                     </Text>
                                 </TouchableOpacity>
                             ))}
@@ -915,7 +906,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                         {/* Content */}
                         <View style={styles.contentArea}>
                             {activeTab === 'about' && (
-                                <Text style={styles.bodyText}>{description || 'No description provided yet.'}</Text>
+                                <Text style={styles.bodyText}>{description || 'No about us information provided yet.'}</Text>
                             )}
                             {activeTab === 'services' && (
                                 <Text style={styles.bodyText}>{services || 'No services listed yet.'}</Text>
@@ -1267,6 +1258,94 @@ export default function VendorProfileScreen({ navigation }: any) {
                     </View>
                 </ScrollView>
 
+                {/* Vendor Settings Modal */}
+                <Modal
+                    visible={settingsModalVisible}
+                    animationType="fade"
+                    transparent={true}
+                    onRequestClose={() => setSettingsModalVisible(false)}
+                >
+                    <TouchableOpacity
+                        style={styles.modalOverlay}
+                        activeOpacity={1}
+                        onPress={() => setSettingsModalVisible(false)}
+                    >
+                        <View style={styles.settingsModalContent} onStartShouldSetResponder={() => true}>
+                            <View style={styles.settingsModalHeader}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    <Ionicons name="settings" size={20} color={colors.primary} />
+                                    <Text style={styles.settingsModalTitle}>Settings</Text>
+                                </View>
+                                <TouchableOpacity onPress={() => setSettingsModalVisible(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                                    <Ionicons name="close" size={22} color={colors.textSecondary} />
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Dark Mode Toggle */}
+                            <View style={styles.settingsItem}>
+                                <View style={styles.settingsItemLeft}>
+                                    <View style={styles.settingsIconCircle}>
+                                        <Ionicons name={theme === 'dark' ? 'moon' : 'sunny'} size={20} color={colors.primary} />
+                                    </View>
+                                    <View>
+                                        <Text style={styles.settingsItemTitle}>Dark Mode</Text>
+                                        <Text style={styles.settingsItemSub}>{theme === 'dark' ? 'Dark theme enabled' : 'Light theme enabled'}</Text>
+                                    </View>
+                                </View>
+                                <TouchableOpacity
+                                    style={[styles.settingsToggle, theme === 'dark' && styles.settingsToggleActive]}
+                                    onPress={toggleTheme}
+                                    activeOpacity={0.8}
+                                >
+                                    <View style={[styles.settingsToggleKnob, theme === 'dark' && styles.settingsToggleKnobActive]} />
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Change Password */}
+                            <TouchableOpacity
+                                style={styles.settingsItem}
+                                onPress={() => {
+                                    setSettingsModalVisible(false);
+                                    setTimeout(() => setPasswordModalVisible(true), 300);
+                                }}
+                                activeOpacity={0.7}
+                            >
+                                <View style={styles.settingsItemLeft}>
+                                    <View style={styles.settingsIconCircle}>
+                                        <Ionicons name="lock-closed-outline" size={20} color={colors.primary} />
+                                    </View>
+                                    <View>
+                                        <Text style={styles.settingsItemTitle}>Change Password</Text>
+                                        <Text style={styles.settingsItemSub}>Update your account password</Text>
+                                    </View>
+                                </View>
+                                <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                            </TouchableOpacity>
+
+                            {/* Logout */}
+                            <TouchableOpacity
+                                style={[styles.settingsItem, { borderBottomWidth: 0, marginTop: SPACING.sm }]}
+                                onPress={() => {
+                                    setSettingsModalVisible(false);
+                                    confirmAction('Logout', 'Are you sure you want to logout of your vendor account?', () => auth.signOut(), 'Logout');
+                                }}
+                                activeOpacity={0.7}
+                            >
+                                <View style={styles.settingsItemLeft}>
+                                    <View style={[styles.settingsIconCircle, { backgroundColor: 'rgba(239, 68, 68, 0.12)' }]}>
+                                        <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+                                    </View>
+                                    <View>
+                                        <Text style={[styles.settingsItemTitle, { color: '#EF4444' }]}>Log Out</Text>
+                                        <Text style={styles.settingsItemSub}>Sign out of this device</Text>
+                                    </View>
+                                </View>
+                                <Ionicons name="chevron-forward" size={18} color="#EF4444" />
+                            </TouchableOpacity>
+                        </View>
+                    </TouchableOpacity>
+                </Modal>
+
                 {/* Change Password Modal */}
                 <ChangePasswordModal
                     visible={passwordModalVisible}
@@ -1435,12 +1514,13 @@ export default function VendorProfileScreen({ navigation }: any) {
                 </View>
 
                 <View style={styles.inputGroup}>
-                    <Text style={styles.label}>Bio</Text>
+                    <Text style={styles.label}>About us</Text>
                     <TextInput
                         style={[styles.input, styles.textArea]}
                         value={description}
                         onChangeText={setDescription}
-                        placeholder="Business Description"
+                        placeholder="About us (Tell customers about your business, story, and specialties...)"
+                        placeholderTextColor={colors.textTertiary}
                         multiline
                         numberOfLines={4}
                     />
@@ -2106,6 +2186,88 @@ const getStyles = (colors: any) => {
     },
     sendCommentButton: {
         padding: SPACING.xs,
+    },
+    // Vendor Settings Modal
+    settingsModalContent: {
+        backgroundColor: colors.surface,
+        borderRadius: BORDER_RADIUS.xl,
+        padding: SPACING.lg,
+        width: '90%',
+        maxWidth: 380,
+        borderWidth: 1,
+        borderColor: colors.border,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.35,
+        shadowRadius: 16,
+        elevation: 10,
+    },
+    settingsModalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingBottom: SPACING.md,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+        marginBottom: SPACING.sm,
+    },
+    settingsModalTitle: {
+        fontSize: FONT_SIZES.lg,
+        fontWeight: 'bold',
+        color: colors.textPrimary,
+    },
+    settingsItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: SPACING.md,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+    },
+    settingsItemLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING.md,
+        flex: 1,
+    },
+    settingsIconCircle: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        backgroundColor: 'rgba(178, 138, 69, 0.12)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    settingsItemTitle: {
+        fontSize: FONT_SIZES.md,
+        fontWeight: '700',
+        color: colors.textPrimary,
+    },
+    settingsItemSub: {
+        fontSize: FONT_SIZES.xs,
+        color: colors.textSecondary,
+        marginTop: 2,
+    },
+    settingsToggle: {
+        width: 48,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: colors.border,
+        justifyContent: 'center',
+        paddingHorizontal: 3,
+    },
+    settingsToggleActive: {
+        backgroundColor: colors.primary,
+    },
+    settingsToggleKnob: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: '#FFFFFF',
+        alignSelf: 'flex-start',
+    },
+    settingsToggleKnobActive: {
+        alignSelf: 'flex-end',
     },
 });
 };

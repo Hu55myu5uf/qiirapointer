@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
     View,
     Text,
@@ -10,7 +10,10 @@ import {
     Image,
     Platform,
     StatusBar,
+    ScrollView,
+    Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import supabase from '../config/supabase';
 import { chatAPI } from '../services/api';
@@ -32,6 +35,8 @@ interface Conversation {
     lastMessageAt: any;
 }
 
+type ChatCategory = 'all' | 'unread' | 'read' | 'archived';
+
 export default function ConversationsScreen({ navigation }: any) {
     const { colors } = useTheme();
     const styles = getStyles(colors);
@@ -41,6 +46,27 @@ export default function ConversationsScreen({ navigation }: any) {
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [activeCategory, setActiveCategory] = useState<ChatCategory>('all');
+    const [archivedIds, setArchivedIds] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (!user?.uid) return;
+        AsyncStorage.getItem(`@qiira_archived_chats_${user.uid}`).then((stored) => {
+            if (stored) {
+                try {
+                    setArchivedIds(JSON.parse(stored));
+                } catch (_) {}
+            }
+        });
+    }, [user?.uid]);
+
+    const toggleArchive = async (convId: string) => {
+        if (!user?.uid) return;
+        const isArchived = archivedIds.includes(convId);
+        const next = isArchived ? archivedIds.filter((id) => id !== convId) : [...archivedIds, convId];
+        setArchivedIds(next);
+        await AsyncStorage.setItem(`@qiira_archived_chats_${user.uid}`, JSON.stringify(next));
+    };
 
     useEffect(() => {
         loadReadTimestamps();
@@ -160,9 +186,23 @@ export default function ConversationsScreen({ navigation }: any) {
         return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
     };
 
+    const archivedSet = useMemo(() => new Set(archivedIds), [archivedIds]);
+    const activeChats = useMemo(() => conversations.filter((c) => !archivedSet.has(c.id)), [conversations, archivedSet]);
+    const archivedChats = useMemo(() => conversations.filter((c) => archivedSet.has(c.id)), [conversations, archivedSet]);
+    const unreadChats = useMemo(() => activeChats.filter((c) => isConversationUnread(c)), [activeChats, readTimestamps]);
+    const readChats = useMemo(() => activeChats.filter((c) => !isConversationUnread(c)), [activeChats, readTimestamps]);
+
+    const displayConversations = useMemo(() => {
+        if (activeCategory === 'archived') return archivedChats;
+        if (activeCategory === 'unread') return unreadChats;
+        if (activeCategory === 'read') return readChats;
+        return activeChats;
+    }, [activeCategory, archivedChats, unreadChats, readChats, activeChats]);
+
     const renderConversation = ({ item }: { item: Conversation }) => {
         const { otherId, otherName, otherImage, isVerified, isAdmin } = getOtherParticipant(item);
         const unread = isConversationUnread(item);
+        const isArchived = archivedSet.has(item.id);
 
         return (
             <TouchableOpacity
@@ -178,6 +218,34 @@ export default function ConversationsScreen({ navigation }: any) {
                         isAdmin,
                     });
                 }}
+                onLongPress={() => {
+                    Alert.alert(
+                        otherName,
+                        'Manage Conversation',
+                        [
+                            {
+                                text: isArchived ? '📥 Unarchive Chat' : '📦 Archive Chat',
+                                onPress: () => toggleArchive(item.id),
+                            },
+                            {
+                                text: unread ? '✓ Mark as Read' : '✉ Mark as Unread',
+                                onPress: () => {
+                                    if (unread) {
+                                        markAsRead(item.id);
+                                    } else {
+                                        useChatStore.setState((state) => {
+                                            const updated = { ...state.readTimestamps };
+                                            delete updated[item.id];
+                                            return { readTimestamps: updated };
+                                        });
+                                    }
+                                },
+                            },
+                            { text: 'Cancel', style: 'cancel' },
+                        ]
+                    );
+                }}
+                activeOpacity={0.7}
             >
                 <View style={{ position: 'relative', marginRight: SPACING.md }}>
                     <View style={styles.avatarContainer}>
@@ -224,17 +292,54 @@ export default function ConversationsScreen({ navigation }: any) {
                 <Text style={styles.headerTitle}>Messages</Text>
             </View>
 
-            {conversations.length === 0 ? (
+            {/* Top Category Tabs: All chats, Unread, Read, Archived */}
+            <View style={styles.categoryBar}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryContent}>
+                    {[
+                        { key: 'all', label: 'All chats', count: activeChats.length },
+                        { key: 'unread', label: 'Unread', count: unreadChats.length },
+                        { key: 'read', label: 'Read', count: readChats.length },
+                        { key: 'archived', label: 'Archived', count: archivedChats.length },
+                    ].map((tab) => {
+                        const isActive = activeCategory === tab.key;
+                        return (
+                            <TouchableOpacity
+                                key={tab.key}
+                                style={[styles.categoryPill, isActive && styles.categoryPillActive]}
+                                onPress={() => setActiveCategory(tab.key as ChatCategory)}
+                                activeOpacity={0.7}
+                            >
+                                <Text style={[styles.categoryPillText, isActive && styles.categoryPillTextActive]}>
+                                    {tab.label}
+                                </Text>
+                                {tab.count > 0 ? (
+                                    <View style={[styles.categoryBadge, isActive && styles.categoryBadgeActive]}>
+                                        <Text style={[styles.categoryBadgeText, isActive && styles.categoryBadgeTextActive]}>
+                                            {tab.count}
+                                        </Text>
+                                    </View>
+                                ) : null}
+                            </TouchableOpacity>
+                        );
+                    })}
+                </ScrollView>
+            </View>
+
+            {displayConversations.length === 0 ? (
                 <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyIcon}>💬</Text>
-                    <Text style={styles.emptyText}>No conversations yet</Text>
+                    <Text style={styles.emptyIcon}>
+                        {activeCategory === 'archived' ? '📦' : activeCategory === 'unread' ? '✉️' : '💬'}
+                    </Text>
+                    <Text style={styles.emptyText}>
+                        {activeCategory === 'archived' ? 'No archived chats' : activeCategory === 'unread' ? 'No unread messages' : activeCategory === 'read' ? 'No read messages' : 'No conversations yet'}
+                    </Text>
                     <Text style={styles.emptySubtext}>
-                        Start chatting with vendors from their profile page
+                        {activeCategory === 'archived' ? 'Long press any conversation to archive it' : 'Start chatting with vendors and clients'}
                     </Text>
                 </View>
             ) : (
                 <FlatList
-                    data={conversations}
+                    data={displayConversations}
                     keyExtractor={(item) => item.id}
                     renderItem={renderConversation}
                     contentContainerStyle={styles.listContent}
@@ -268,6 +373,59 @@ const getStyles = (colors: any) => {
             fontSize: FONT_SIZES.xxl,
             fontWeight: 'bold',
             color: colors.textInverse,
+        },
+        categoryBar: {
+            backgroundColor: colors.surface,
+            borderBottomWidth: 1,
+            borderBottomColor: colors.border,
+            paddingVertical: SPACING.sm,
+        },
+        categoryContent: {
+            paddingHorizontal: SPACING.md,
+            gap: SPACING.sm,
+            flexDirection: 'row',
+            alignItems: 'center',
+        },
+        categoryPill: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingVertical: 7,
+            paddingHorizontal: SPACING.md,
+            borderRadius: BORDER_RADIUS.round,
+            backgroundColor: colors.surfaceLight,
+            borderWidth: 1,
+            borderColor: colors.border,
+            gap: 6,
+        },
+        categoryPillActive: {
+            backgroundColor: colors.primary,
+            borderColor: colors.primary,
+        },
+        categoryPillText: {
+            fontSize: FONT_SIZES.sm,
+            fontWeight: '600',
+            color: colors.textSecondary,
+        },
+        categoryPillTextActive: {
+            color: colors.textInverse,
+            fontWeight: 'bold',
+        },
+        categoryBadge: {
+            paddingHorizontal: 6,
+            paddingVertical: 1,
+            borderRadius: 10,
+            backgroundColor: 'rgba(255, 255, 255, 0.15)',
+        },
+        categoryBadgeActive: {
+            backgroundColor: colors.textInverse,
+        },
+        categoryBadgeText: {
+            fontSize: 10,
+            fontWeight: '700',
+            color: colors.textSecondary,
+        },
+        categoryBadgeTextActive: {
+            color: colors.primary,
         },
         loadingContainer: {
             flex: 1,

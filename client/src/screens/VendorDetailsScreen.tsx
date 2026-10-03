@@ -448,7 +448,7 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                 }}
                             >
                                 <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                                    {tab === 'posts' ? 'Posts' : tab === 'docs' ? '📄 Docs' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                                    {tab === 'posts' ? 'Posts' : tab === 'docs' ? '📄 Docs' : tab === 'about' ? 'About us' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                                 </Text>
                             </TouchableOpacity>
                         ))}
@@ -458,7 +458,7 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                     <View style={styles.contentArea}>
                         {activeTab === 'about' && (
                             <View>
-                                <Text style={styles.bodyText}>{vendor.description || 'No description available.'}</Text>
+                                <Text style={styles.bodyText}>{vendor.aboutUs || vendor.about_us || vendor.description || vendor.bio || 'No about us information available.'}</Text>
 
                                 {/* Business Hours Section */}
                                 <View style={styles.hoursSection}>
