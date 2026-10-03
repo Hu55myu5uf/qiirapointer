@@ -2,16 +2,18 @@
   "expo": {
     "name": "QIIRA",
     "slug": "qiira",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.qiira.pointer"
+      "bundleIdentifier": "com.qiira.pointer",
+      "buildNumber": "2"
     },
     "android": {
       "package": "com.qiira.pointer",
+      "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
