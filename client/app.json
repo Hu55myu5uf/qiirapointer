@@ -2,19 +2,24 @@
   "expo": {
     "name": "QIIRA",
     "slug": "qiira",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "newArchEnabled": false,
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.qiira.pointer",
-      "buildNumber": "5"
+      "buildNumber": "6"
     },
     "android": {
       "package": "com.qiira.pointer",
-      "versionCode": 5,
+      "versionCode": 6,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -31,16 +36,6 @@
     },
     "owner": "hussviin7",
     "plugins": [
-      "expo-font",
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/splash-icon.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
-        }
-      ],
       [
         "expo-image-picker",
         {

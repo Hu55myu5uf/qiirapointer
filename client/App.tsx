@@ -6,7 +6,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { onAuthStateChanged } from 'firebase/auth';
-import { ActivityIndicator, View, Text, Alert, Platform } from 'react-native';
+import { ActivityIndicator, View, Text, Alert, Platform, TouchableOpacity } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { auth } from './src/config/firebase';
@@ -886,12 +886,70 @@ function MainApp() {
   );
 }
 
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, ErrorBoundaryState> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('RootErrorBoundary caught an error:', error, errorInfo);
+  }
+
+  handleRestart = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: '#FAF8F5' }}>
+          <Text style={{ fontSize: 28, fontWeight: 'bold', color: '#B28A45', marginBottom: 12 }}>
+            QIIRA
+          </Text>
+          <Text style={{ fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 8, textAlign: 'center' }}>
+            Application Error
+          </Text>
+          <Text style={{ fontSize: 13, color: '#666666', marginBottom: 20, textAlign: 'center' }}>
+            {this.state.error?.message || 'An unexpected issue occurred while starting the app.'}
+          </Text>
+          <TouchableOpacity
+            onPress={this.handleRestart}
+            activeOpacity={0.8}
+            style={{
+              backgroundColor: '#B28A45',
+              paddingVertical: 12,
+              paddingHorizontal: 28,
+              borderRadius: 8,
+            }}
+          >
+            <Text style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: 14 }}>Restart App</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemeProvider>
-        <MainApp />
-      </ThemeProvider>
+      <RootErrorBoundary>
+        <ThemeProvider>
+          <MainApp />
+        </ThemeProvider>
+      </RootErrorBoundary>
     </GestureHandlerRootView>
   );
 }
+
