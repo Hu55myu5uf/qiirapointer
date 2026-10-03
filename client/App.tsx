@@ -630,6 +630,40 @@ function VendorTabs() {
   );
 }
 
+// Admin Dashboard Stack (includes Chat and Profile view for Support Queue)
+function AdminDashboardStack() {
+  const { colors } = useTheme();
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: colors.primary },
+        headerTintColor: colors.textInverse,
+      }}
+    >
+      <Stack.Screen
+        name="AdminDashboardMain"
+        component={AdminDashboardScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Chat"
+        component={ChatScreen}
+        options={{ title: 'Chat' }}
+      />
+      <Stack.Screen
+        name="UserProfileView"
+        component={UserProfileViewScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="VendorDetails"
+        component={VendorDetailsScreen}
+        options={{ title: 'Vendor Details' }}
+      />
+    </Stack.Navigator>
+  );
+}
+
 // Admin Tabs
 function AdminTabs() {
   const { theme, colors } = useTheme();
@@ -701,7 +735,7 @@ function AdminTabs() {
     >
       <Tab.Screen
         name="Dashboard"
-        component={AdminDashboardScreen}
+        component={AdminDashboardStack}
         options={{
           tabBarLabel: 'Dashboard',
         }}

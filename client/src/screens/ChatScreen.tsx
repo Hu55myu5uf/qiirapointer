@@ -14,6 +14,7 @@ import {
     PanResponder,
     Alert,
     Linking,
+    ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -73,7 +74,18 @@ interface ChatScreenParams {
     initialMessage?: string;
     isVerified?: boolean;
     isAdmin?: boolean;
+    isSupport?: boolean;
+    senderAsSupport?: boolean;
 }
+
+export const SUPPORT_ISSUE_TAGS = [
+    { id: 'order', icon: 'cube-outline', label: 'Order & Delivery', prompt: 'Hi Support, I have an inquiry regarding my order / delivery: ' },
+    { id: 'verify', icon: 'shield-checkmark-outline', label: 'Vendor Verification', prompt: 'Hello Qiira Team, I have a question about vendor badge verification: ' },
+    { id: 'payment', icon: 'card-outline', label: 'Payment & Escrow', prompt: 'Hello, I need assistance with a payment or billing transaction: ' },
+    { id: 'report', icon: 'alert-circle-outline', label: 'Report Issue / Scam', prompt: 'I want to report an issue or suspicious account: ' },
+    { id: 'feature', icon: 'bulb-outline', label: 'Feature Request', prompt: 'Hi Qiira team, I would like to request or suggest: ' },
+    { id: 'agent', icon: 'headset-outline', label: 'Live Agent', prompt: 'Hello, I would like to connect directly with a customer care specialist.' },
+];
 
 // WhatsApp-style Swipe to Reply message component
 function SwipeableMessageRow({
@@ -193,11 +205,27 @@ export default function ChatScreen({ route, navigation }: any) {
     const [loading, setLoading] = useState(true);
     const [sending, setSending] = useState(false);
     const [conversationId, setConversationId] = useState(existingConvId || '');
-    const isActuallyAdmin = Boolean(initialIsAdmin || otherUserId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2' || initialOtherUserName?.toLowerCase().includes('admin'));
-    const [otherUserName, setOtherUserName] = useState(initialOtherUserName || 'Chat');
-    const [otherUserImage, setOtherUserImage] = useState(initialOtherUserImage || '');
-    const [otherUserIsVerified, setOtherUserIsVerified] = useState(Boolean(initialIsVerified || isActuallyAdmin));
-    const [otherUserIsAdmin, setOtherUserIsAdmin] = useState(isActuallyAdmin);
+    const isSupportChat = Boolean(
+        params.isSupport ||
+        otherUserId === 'qiira_official_support' ||
+        params.receiverId === 'qiira_official_support' ||
+        (initialOtherUserName && initialOtherUserName.toLowerCase().includes('support')) ||
+        (existingConvId && existingConvId.includes('qiira_official_support'))
+    );
+    const isActuallyAdmin = Boolean(
+        isSupportChat ||
+        initialIsAdmin ||
+        otherUserId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2' ||
+        initialOtherUserName?.toLowerCase().includes('admin')
+    );
+    const [otherUserName, setOtherUserName] = useState(
+        isSupportChat ? 'QIIRA Official Support' : (initialOtherUserName || 'Chat')
+    );
+    const [otherUserImage, setOtherUserImage] = useState(
+        isSupportChat ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500' : (initialOtherUserImage || '')
+    );
+    const [otherUserIsVerified, setOtherUserIsVerified] = useState(Boolean(isSupportChat || initialIsVerified || isActuallyAdmin));
+    const [otherUserIsAdmin, setOtherUserIsAdmin] = useState(Boolean(isSupportChat || isActuallyAdmin));
     const [headerImageError, setHeaderImageError] = useState(false);
 
     // Reply & Attachment states
@@ -237,6 +265,17 @@ export default function ChatScreen({ route, navigation }: any) {
     // Reset state and fetch latest live name and avatar when target user changes
     useEffect(() => {
         if (!otherUserId) return;
+
+        if (otherUserId === 'qiira_official_support' || isSupportChat) {
+            setOtherUserName('QIIRA Official Support');
+            setOtherUserImage('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500');
+            setOtherUserIsAdmin(true);
+            setOtherUserIsVerified(true);
+            setHeaderImageError(false);
+            setMessages([]);
+            setLoading(true);
+            return;
+        }
 
         setOtherUserName(initialOtherUserName || 'Chat');
         setOtherUserImage(initialOtherUserImage || '');
@@ -298,6 +337,13 @@ export default function ChatScreen({ route, navigation }: any) {
             headerTitle: () => (
                 <TouchableOpacity
                     onPress={() => {
+                        if (isSupportChat) {
+                            Alert.alert(
+                                'Qiira Official Support',
+                                'This is the verified customer service desk for Qiira. You can submit inquiries about orders, vendor verifications, payments, and account safety anytime 24/7.'
+                            );
+                            return;
+                        }
                         if (otherUserId) {
                             navigation.navigate('UserProfileView', {
                                 userId: otherUserId,
@@ -310,17 +356,34 @@ export default function ChatScreen({ route, navigation }: any) {
                     activeOpacity={0.7}
                 >
                     <View style={{ position: 'relative', marginRight: 10 }}>
-                        <Image
-                            source={headerAvatarSource}
-                            onError={() => setHeaderImageError(true)}
-                            style={{
-                                width: 36,
-                                height: 36,
-                                borderRadius: 18,
-                                backgroundColor: 'rgba(255,255,255,0.2)',
-                            }}
-                        />
-                        <AvatarVerificationBadge isVerified={otherUserIsVerified} isAdmin={otherUserIsAdmin} size={14} />
+                        {isSupportChat ? (
+                            <View
+                                style={{
+                                    width: 38,
+                                    height: 38,
+                                    borderRadius: 19,
+                                    backgroundColor: colors.primary,
+                                    justifyContent: 'center',
+                                    alignItems: 'center',
+                                    borderWidth: 2,
+                                    borderColor: '#10B981',
+                                }}
+                            >
+                                <Ionicons name="headset" size={20} color="#FFFFFF" />
+                            </View>
+                        ) : (
+                            <Image
+                                source={headerAvatarSource}
+                                onError={() => setHeaderImageError(true)}
+                                style={{
+                                    width: 36,
+                                    height: 36,
+                                    borderRadius: 18,
+                                    backgroundColor: 'rgba(255,255,255,0.2)',
+                                }}
+                            />
+                        )}
+                        <AvatarVerificationBadge isVerified={isSupportChat || otherUserIsVerified} isAdmin={isSupportChat || otherUserIsAdmin} size={14} />
                     </View>
                     <View>
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -332,50 +395,79 @@ export default function ChatScreen({ route, navigation }: any) {
                                 }}
                                 numberOfLines={1}
                             >
-                                {otherUserName || 'Chat'}
+                                {isSupportChat ? 'QIIRA Official Support' : (otherUserName || 'Chat')}
                             </Text>
-                            <VerificationBadgeInline isVerified={otherUserIsVerified} isAdmin={otherUserIsAdmin} size={16} />
+                            <VerificationBadgeInline isVerified={isSupportChat || otherUserIsVerified} isAdmin={isSupportChat || otherUserIsAdmin} size={16} />
                         </View>
-                        <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11 }}>
-                            Tap to view profile ↗
-                        </Text>
+                        {isSupportChat ? (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981' }} />
+                                <Text style={{ color: '#A7F3D0', fontSize: 11, fontWeight: '600' }}>
+                                    Live 24/7 Agent Desk · Online
+                                </Text>
+                            </View>
+                        ) : (
+                            <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11 }}>
+                                Tap to view profile ↗
+                            </Text>
+                        )}
                     </View>
                 </TouchableOpacity>
             ),
             headerRight: () => (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginRight: 16 }}>
-                    {/* Quick review action directly from chat */}
-                    {otherUserId && (
-                        <TouchableOpacity
-                            onPress={() => navigation.navigate('WriteReview', {
-                                vendorId: otherUserId,
-                                businessName: otherUserName,
-                                isVerified: otherUserIsVerified,
-                            })}
-                            style={{ padding: 4 }}
-                            activeOpacity={0.7}
+                    {isSupportChat ? (
+                        <View
+                            style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                                paddingHorizontal: 9,
+                                paddingVertical: 4,
+                                borderRadius: 12,
+                                borderWidth: 1,
+                                borderColor: 'rgba(16, 185, 129, 0.45)',
+                                gap: 4,
+                            }}
                         >
-                            <Ionicons name="star" size={20} color="#F59E0B" />
-                        </TouchableOpacity>
+                            <Ionicons name="shield-checkmark" size={14} color="#10B981" />
+                            <Text style={{ color: colors.textInverse, fontSize: 11, fontWeight: '700' }}>Official</Text>
+                        </View>
+                    ) : (
+                        <>
+                            {otherUserId && (
+                                <TouchableOpacity
+                                    onPress={() => navigation.navigate('WriteReview', {
+                                        vendorId: otherUserId,
+                                        businessName: otherUserName,
+                                        isVerified: otherUserIsVerified,
+                                    })}
+                                    style={{ padding: 4 }}
+                                    activeOpacity={0.7}
+                                >
+                                    <Ionicons name="star" size={20} color="#F59E0B" />
+                                </TouchableOpacity>
+                            )}
+                            <TouchableOpacity
+                                onPress={() => handleInitiateCall('voice')}
+                                style={{ padding: 4 }}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="call-outline" size={21} color={colors.textInverse} />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={() => handleInitiateCall('video')}
+                                style={{ padding: 4 }}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="videocam-outline" size={23} color={colors.textInverse} />
+                            </TouchableOpacity>
+                        </>
                     )}
-                    <TouchableOpacity
-                        onPress={() => handleInitiateCall('voice')}
-                        style={{ padding: 4 }}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons name="call-outline" size={21} color={colors.textInverse} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        onPress={() => handleInitiateCall('video')}
-                        style={{ padding: 4 }}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons name="videocam-outline" size={23} color={colors.textInverse} />
-                    </TouchableOpacity>
                 </View>
             ),
         });
-    }, [navigation, otherUserId, otherUserName, otherUserImage, headerAvatarSource, colors, user, otherUserIsVerified, otherUserIsAdmin]);
+    }, [navigation, otherUserId, otherUserName, otherUserImage, headerAvatarSource, colors, user, otherUserIsVerified, otherUserIsAdmin, isSupportChat]);
 
     const fetchMessages = useCallback(async (convId: string, showSpinner = false) => {
         if (!convId) return;
@@ -801,10 +893,39 @@ export default function ChatScreen({ route, navigation }: any) {
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
             >
                 {messages.length === 0 ? (
-                    <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyText}>No messages yet</Text>
-                        <Text style={styles.emptySubtext}>Swipe right on any message to reply!</Text>
-                    </View>
+                    isSupportChat ? (
+                        <View style={styles.supportWelcomeCard}>
+                            <View style={styles.supportWelcomeIconCircle}>
+                                <Ionicons name="headset" size={36} color={colors.primary} />
+                            </View>
+                            <Text style={styles.supportWelcomeTitle}>Welcome to Qiira Support</Text>
+                            <Text style={styles.supportWelcomeDesc}>
+                                Have a question about an order, payment, or vendor verification? Our verified customer support desk is available 24/7.
+                            </Text>
+                            <View style={styles.supportWelcomeBadgesRow}>
+                                <View style={styles.supportFeaturePill}>
+                                    <Ionicons name="flash" size={12} color="#10B981" />
+                                    <Text style={styles.supportFeaturePillText}>Fast Replies</Text>
+                                </View>
+                                <View style={styles.supportFeaturePill}>
+                                    <Ionicons name="shield-checkmark" size={12} color="#F59E0B" />
+                                    <Text style={styles.supportFeaturePillText}>Verified Team</Text>
+                                </View>
+                                <View style={styles.supportFeaturePill}>
+                                    <Ionicons name="lock-closed" size={12} color="#3B82F6" />
+                                    <Text style={styles.supportFeaturePillText}>Secure</Text>
+                                </View>
+                            </View>
+                            <Text style={styles.supportWelcomeHint}>
+                                💡 Tap any quick issue tag below or type your inquiry directly.
+                            </Text>
+                        </View>
+                    ) : (
+                        <View style={styles.emptyContainer}>
+                            <Text style={styles.emptyText}>No messages yet</Text>
+                            <Text style={styles.emptySubtext}>Swipe right on any message to reply!</Text>
+                        </View>
+                    )
                 ) : (
                     <FlatList
                         ref={flatListRef}
@@ -867,6 +988,36 @@ export default function ChatScreen({ route, navigation }: any) {
                         >
                             <Ionicons name="close-circle" size={22} color={colors.textSecondary} />
                         </TouchableOpacity>
+                    </View>
+                )}
+
+                {/* Quick Issue Selector for Official Support */}
+                {isSupportChat && (
+                    <View style={styles.quickTagsSection}>
+                        <View style={styles.quickTagsHeader}>
+                            <Ionicons name="flash" size={13} color={colors.primary} />
+                            <Text style={styles.quickTagsHeaderText}>QUICK ISSUE TAGS</Text>
+                        </View>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.quickTagsScroll}
+                            keyboardShouldPersistTaps="handled"
+                        >
+                            {SUPPORT_ISSUE_TAGS.map((tag) => (
+                                <TouchableOpacity
+                                    key={tag.id}
+                                    style={styles.quickTagChip}
+                                    onPress={() => {
+                                        setNewMessage((prev: string) => (prev ? `${prev} ${tag.prompt}` : tag.prompt));
+                                    }}
+                                    activeOpacity={0.7}
+                                >
+                                    <Ionicons name={tag.icon as any} size={14} color={colors.primary} style={{ marginRight: 5 }} />
+                                    <Text style={styles.quickTagChipText}>{tag.label}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
                     </View>
                 )}
 
@@ -1219,5 +1370,116 @@ const getStyles = (colors: any) =>
         sendButtonDisabled: {
             backgroundColor: colors.border,
             opacity: 0.6,
+        },
+        // Support Welcome Card
+        supportWelcomeCard: {
+            alignItems: 'center',
+            paddingHorizontal: SPACING.xl,
+            paddingVertical: SPACING.xl,
+            marginHorizontal: SPACING.lg,
+            marginTop: SPACING.xl,
+            backgroundColor: colors.surface,
+            borderRadius: BORDER_RADIUS.xl,
+            borderWidth: 1,
+            borderColor: colors.border,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.08,
+            shadowRadius: 10,
+            elevation: 3,
+        },
+        supportWelcomeIconCircle: {
+            width: 72,
+            height: 72,
+            borderRadius: 36,
+            backgroundColor: `${colors.primary}18`,
+            justifyContent: 'center',
+            alignItems: 'center',
+            marginBottom: SPACING.md,
+            borderWidth: 2,
+            borderColor: `${colors.primary}35`,
+        },
+        supportWelcomeTitle: {
+            fontSize: FONT_SIZES.xl,
+            fontWeight: 'bold',
+            color: colors.textPrimary,
+            textAlign: 'center',
+            marginBottom: SPACING.xs,
+        },
+        supportWelcomeDesc: {
+            fontSize: FONT_SIZES.sm,
+            color: colors.textSecondary,
+            textAlign: 'center',
+            lineHeight: 20,
+            marginBottom: SPACING.md,
+        },
+        supportWelcomeBadgesRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            marginBottom: SPACING.md,
+            flexWrap: 'wrap',
+        },
+        supportFeaturePill: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: colors.surfaceLight,
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+            borderRadius: BORDER_RADIUS.round,
+            gap: 5,
+            borderWidth: 1,
+            borderColor: colors.border,
+        },
+        supportFeaturePillText: {
+            fontSize: 11,
+            fontWeight: '600',
+            color: colors.textPrimary,
+        },
+        supportWelcomeHint: {
+            fontSize: 12,
+            color: colors.textTertiary,
+            textAlign: 'center',
+            fontStyle: 'italic',
+        },
+        // Quick Issue Tags Section
+        quickTagsSection: {
+            backgroundColor: colors.surface,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+            paddingVertical: 8,
+        },
+        quickTagsHeader: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 5,
+            paddingHorizontal: SPACING.md,
+            marginBottom: 6,
+        },
+        quickTagsHeaderText: {
+            fontSize: 10,
+            fontWeight: '800',
+            letterSpacing: 0.8,
+            color: colors.primary,
+        },
+        quickTagsScroll: {
+            paddingHorizontal: SPACING.md,
+            gap: 8,
+        },
+        quickTagChip: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: colors.surfaceLight,
+            paddingHorizontal: 12,
+            paddingVertical: 7,
+            borderRadius: BORDER_RADIUS.round,
+            borderWidth: 1,
+            borderColor: `${colors.primary}30`,
+        },
+        quickTagChipText: {
+            fontSize: 12,
+            fontWeight: '600',
+            color: colors.textPrimary,
         },
     });

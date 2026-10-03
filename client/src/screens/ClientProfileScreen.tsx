@@ -386,6 +386,30 @@ export default function ClientProfileScreen() {
                             thumbColor={theme === 'dark' ? colors.primary : colors.surface}
                         />
                     </View>
+
+                    {/* Customer Support */}
+                    <TouchableOpacity
+                        style={styles.settingRow}
+                        onPress={() =>
+                            navigation.navigate('Chat', {
+                                otherUserId: 'qiira_official_support',
+                                otherUserName: 'QIIRA Customer Support',
+                                otherUserImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
+                                receiverId: 'qiira_official_support',
+                                receiverName: 'QIIRA Customer Support',
+                                receiverImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
+                                isSupport: true,
+                            })
+                        }
+                    >
+                        <View style={styles.settingInfo}>
+                            <Text style={styles.settingTitle}>🎧 Help & Customer Support</Text>
+                            <Text style={styles.settingDescription}>
+                                Chat with QIIRA Care 24/7 or report an issue
+                            </Text>
+                        </View>
+                        <Text style={styles.chevron}>›</Text>
+                    </TouchableOpacity>
                 </View>
 
                 {/* Logout Button */}

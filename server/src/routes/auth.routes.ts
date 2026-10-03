@@ -6,6 +6,20 @@ const router = Router();
 
 // Resilient user profile retriever (checks Firestore, Supabase, and Firebase Auth)
 async function getUserProfile(uid: string) {
+    if (uid === 'qiira_official_support') {
+        return {
+            uid: 'qiira_official_support',
+            email: 'support@qiira.com',
+            fullName: 'QIIRA Customer Support',
+            displayName: 'QIIRA Customer Support',
+            role: 'support',
+            isVerified: true,
+            isAdmin: true,
+            isSupport: true,
+            profileImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
+        };
+    }
+
     let rawData: any = null;
 
     // 1. Fast check in Firestore (primary working database)

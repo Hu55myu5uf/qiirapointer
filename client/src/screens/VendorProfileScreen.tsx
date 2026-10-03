@@ -1324,6 +1324,35 @@ export default function VendorProfileScreen({ navigation }: any) {
                                 <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
                             </TouchableOpacity>
 
+                            {/* Help & Customer Support */}
+                            <TouchableOpacity
+                                style={styles.settingsItem}
+                                onPress={() => {
+                                    setSettingsModalVisible(false);
+                                    navigation.navigate('Chat', {
+                                        otherUserId: 'qiira_official_support',
+                                        otherUserName: 'QIIRA Customer Support',
+                                        otherUserImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
+                                        receiverId: 'qiira_official_support',
+                                        receiverName: 'QIIRA Customer Support',
+                                        receiverImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
+                                        isSupport: true,
+                                    });
+                                }}
+                                activeOpacity={0.7}
+                            >
+                                <View style={styles.settingsItemLeft}>
+                                    <View style={styles.settingsIconCircle}>
+                                        <Ionicons name="headset-outline" size={20} color={colors.primary} />
+                                    </View>
+                                    <View>
+                                        <Text style={styles.settingsItemTitle}>Help & Support</Text>
+                                        <Text style={styles.settingsItemSub}>Chat 24/7 with QIIRA Care</Text>
+                                    </View>
+                                </View>
+                                <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                            </TouchableOpacity>
+
                             {/* Logout */}
                             <TouchableOpacity
                                 style={[styles.settingsItem, { borderBottomWidth: 0, marginTop: SPACING.sm }]}

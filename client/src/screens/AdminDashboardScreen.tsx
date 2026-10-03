@@ -17,7 +17,7 @@ import {
     StatusBar,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { adminAPI } from '../services/api';
+import { adminAPI, chatAPI } from '../services/api';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { auth } from '../config/firebase';
 import { useTheme } from '../context/ThemeContext';
@@ -25,6 +25,13 @@ import { confirmAction } from '../utils/alert';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 import { useAuthStore } from '../store/authStore';
 import Ionicons from '@expo/vector-icons/Ionicons';
+
+const SUPPORT_QUICK_RESPONSES = [
+    'Hello! We are currently looking into this and will assist you immediately.',
+    'Thank you for reaching out. Your vendor verification has been reviewed and approved!',
+    'We have forwarded your transaction query to our escrow & payments department.',
+    'Please provide your order number or reference code so we can resolve this quickly.',
+];
 
 export default function AdminDashboardScreen({ navigation }: any) {
     const { colors, theme, toggleTheme } = useTheme();
@@ -37,6 +44,20 @@ export default function AdminDashboardScreen({ navigation }: any) {
     const [refreshing, setRefreshing] = useState(false);
     const [analytics, setAnalytics] = useState<any>(null);
     const [pendingVendors, setPendingVendors] = useState<any[]>([]);
+
+    // Navigation Sub-tab: 'overview' | 'support'
+    const [adminActiveTab, setAdminActiveTab] = useState<'overview' | 'support'>('overview');
+
+    // Support Queue states
+    const [supportConversations, setSupportConversations] = useState<any[]>([]);
+    const [loadingSupport, setLoadingSupport] = useState(false);
+    const [supportFilter, setSupportFilter] = useState<'all' | 'pending' | 'resolved'>('all');
+    const [supportSearchQuery, setSupportSearchQuery] = useState('');
+    const [replyModalVisible, setReplyModalVisible] = useState(false);
+    const [selectedSupportConv, setSelectedSupportConv] = useState<any | null>(null);
+    const [replyText, setReplyText] = useState('');
+    const [sendingReply, setSendingReply] = useState(false);
+    const [resolvedTicketIds, setResolvedTicketIds] = useState<Record<string, boolean>>({});
 
     // Reviews modal state
     const [reviewsModalVisible, setReviewsModalVisible] = useState(false);
@@ -60,8 +81,21 @@ export default function AdminDashboardScreen({ navigation }: any) {
         businessImage: '',
     });
 
+    const fetchSupportConversations = async (silent = false) => {
+        if (!silent) setLoadingSupport(true);
+        try {
+            const res = await chatAPI.getConversations('qiira_official_support');
+            setSupportConversations(res.data?.conversations || []);
+        } catch (err) {
+            console.error('Error fetching support queue:', err);
+        } finally {
+            if (!silent) setLoadingSupport(false);
+        }
+    };
+
     useEffect(() => {
         fetchData();
+        fetchSupportConversations(true);
     }, []);
 
     const fetchData = async () => {
@@ -84,6 +118,84 @@ export default function AdminDashboardScreen({ navigation }: any) {
     const onRefresh = () => {
         setRefreshing(true);
         fetchData();
+        fetchSupportConversations(true);
+    };
+
+    const handleOpenSupportChat = (item: any) => {
+        const otherId = (item.participants || []).find((p: string) => p !== 'qiira_official_support') || '';
+        const otherName = item.participantNames?.[otherId] || 'User';
+        const otherImage = item.participantImages?.[otherId] || '';
+        const isVerified = Boolean(item.participantVerified?.[otherId]);
+
+        navigation.navigate('Chat', {
+            conversationId: item.id,
+            otherUserId: otherId,
+            otherUserName: otherName,
+            otherUserImage: otherImage,
+            isVerified,
+            isSupport: true,
+            senderAsSupport: true,
+        });
+    };
+
+    const handleOpenQuickReplyModal = (item: any) => {
+        setSelectedSupportConv(item);
+        setReplyText('');
+        setReplyModalVisible(true);
+    };
+
+    const handleSendQuickReply = async () => {
+        if (!selectedSupportConv || !replyText.trim()) return;
+        const otherId = (selectedSupportConv.participants || []).find((p: string) => p !== 'qiira_official_support') || '';
+        if (!otherId) return;
+
+        setSendingReply(true);
+        try {
+            await chatAPI.sendMessage({
+                conversationId: selectedSupportConv.id,
+                senderId: 'qiira_official_support',
+                receiverId: otherId,
+                text: replyText.trim(),
+                receiverName: selectedSupportConv.participantNames?.[otherId] || 'User',
+                receiverImage: selectedSupportConv.participantImages?.[otherId] || undefined,
+            });
+            Alert.alert('Sent', 'Official support response sent successfully.');
+            setReplyModalVisible(false);
+            setReplyText('');
+            fetchSupportConversations(true);
+        } catch (err: any) {
+            console.error('Error sending support reply:', err);
+            Alert.alert('Error', err.response?.data?.message || 'Failed to send response');
+        } finally {
+            setSendingReply(false);
+        }
+    };
+
+    const handleResolveTicket = (item: any) => {
+        const otherId = (item.participants || []).find((p: string) => p !== 'qiira_official_support') || '';
+        const otherName = item.participantNames?.[otherId] || 'User';
+        confirmAction(
+            'Mark Ticket Resolved',
+            `Are you sure you want to mark the support inquiry from ${otherName} as resolved? This will send an automated resolution notice.`,
+            async () => {
+                try {
+                    await chatAPI.sendMessage({
+                        conversationId: item.id,
+                        senderId: 'qiira_official_support',
+                        receiverId: otherId,
+                        text: '✅ [Ticket Resolved]: Thank you for contacting Qiira Customer Support. Your inquiry has been marked as resolved. If you need any further help, simply reply to this chat!',
+                        receiverName: otherName,
+                        receiverImage: item.participantImages?.[otherId] || undefined,
+                    });
+                    setResolvedTicketIds((prev) => ({ ...prev, [item.id]: true }));
+                    Alert.alert('Resolved', `Support inquiry for ${otherName} marked as resolved.`);
+                    fetchSupportConversations(true);
+                } catch (err) {
+                    console.error('Error resolving support ticket:', err);
+                    setResolvedTicketIds((prev) => ({ ...prev, [item.id]: true }));
+                }
+            }
+        );
     };
 
     const openReviewsModal = async () => {
@@ -331,6 +443,25 @@ export default function AdminDashboardScreen({ navigation }: any) {
         );
     };
 
+    const pendingInquiriesCount = supportConversations.filter(
+        (c) => !resolvedTicketIds[c.id] && !c.lastMessage?.includes('[Ticket Resolved]')
+    ).length;
+    const resolvedInquiriesCount = supportConversations.length - pendingInquiriesCount;
+
+    const filteredSupportConvs = supportConversations.filter((conv) => {
+        const otherId = (conv.participants || []).find((p: string) => p !== 'qiira_official_support') || '';
+        const name = conv.participantNames?.[otherId] || '';
+        const msg = conv.lastMessage || '';
+        const query = supportSearchQuery.toLowerCase();
+        const matchesQuery = !query || name.toLowerCase().includes(query) || msg.toLowerCase().includes(query);
+        if (!matchesQuery) return false;
+
+        const isResolved = Boolean(resolvedTicketIds[conv.id] || msg.includes('[Ticket Resolved]'));
+        if (supportFilter === 'pending') return !isResolved;
+        if (supportFilter === 'resolved') return isResolved;
+        return true;
+    });
+
     if (loading) {
         return (
             <View style={styles.loadingContainer}>
@@ -380,13 +511,80 @@ export default function AdminDashboardScreen({ navigation }: any) {
                 </View>
             </View>
 
-            <ScrollView
-                ref={scrollViewRef}
-                contentContainerStyle={styles.scrollContent}
-                refreshControl={
-                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-                }
-            >
+            {/* Top Admin Section Switcher: Overview vs Support Desk Queue */}
+            <View style={styles.topSegmentBar}>
+                <TouchableOpacity
+                    style={[
+                        styles.topSegmentBtn,
+                        adminActiveTab === 'overview' && styles.topSegmentBtnActive,
+                    ]}
+                    onPress={() => setAdminActiveTab('overview')}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons
+                        name="grid-outline"
+                        size={16}
+                        color={adminActiveTab === 'overview' ? colors.primary : colors.textSecondary}
+                    />
+                    <Text
+                        style={[
+                            styles.topSegmentText,
+                            adminActiveTab === 'overview' && styles.topSegmentTextActive,
+                        ]}
+                    >
+                        Overview & Approvals
+                    </Text>
+                    {pendingVendors.length > 0 && (
+                        <View style={styles.segmentBadge}>
+                            <Text style={styles.segmentBadgeText}>{pendingVendors.length}</Text>
+                        </View>
+                    )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={[
+                        styles.topSegmentBtn,
+                        adminActiveTab === 'support' && styles.topSegmentBtnActive,
+                    ]}
+                    onPress={() => {
+                        setAdminActiveTab('support');
+                        fetchSupportConversations();
+                    }}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons
+                        name="headset"
+                        size={16}
+                        color={adminActiveTab === 'support' ? colors.primary : colors.textSecondary}
+                    />
+                    <Text
+                        style={[
+                            styles.topSegmentText,
+                            adminActiveTab === 'support' && styles.topSegmentTextActive,
+                        ]}
+                    >
+                        Support Queue
+                    </Text>
+                    {pendingInquiriesCount > 0 ? (
+                        <View style={[styles.segmentBadge, { backgroundColor: '#F59E0B' }]}>
+                            <Text style={styles.segmentBadgeText}>{pendingInquiriesCount}</Text>
+                        </View>
+                    ) : supportConversations.length > 0 ? (
+                        <View style={[styles.segmentBadge, { backgroundColor: '#10B981' }]}>
+                            <Text style={styles.segmentBadgeText}>{supportConversations.length}</Text>
+                        </View>
+                    ) : null}
+                </TouchableOpacity>
+            </View>
+
+            {adminActiveTab === 'overview' ? (
+                <ScrollView
+                    ref={scrollViewRef}
+                    contentContainerStyle={styles.scrollContent}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+                    }
+                >
                 {/* Switch Experience Mode Section */}
                 <Text style={styles.sectionTitle}>👁️ Switch Experience Mode</Text>
                 <View style={styles.viewModeContainer}>
@@ -498,15 +696,241 @@ export default function AdminDashboardScreen({ navigation }: any) {
                     ))
                 )}
             </ScrollView>
+            ) : (
+                <ScrollView
+                    contentContainerStyle={styles.scrollContent}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+                    }
+                >
+                    {/* Support Desk Title & Actions */}
+                    <View style={styles.supportHeaderRow}>
+                        <View style={{ flex: 1 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                                <Text style={styles.sectionTitle}>🎧 Support Desk Queue</Text>
+                                <View style={styles.livePulseDot} />
+                            </View>
+                            <Text style={styles.supportSubText}>
+                                Live customer desk. Answer inquiries, provide assistance, and resolve tickets.
+                            </Text>
+                        </View>
+                        <TouchableOpacity
+                            style={styles.refreshQueueBtn}
+                            onPress={() => fetchSupportConversations()}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons name="refresh" size={15} color={colors.primary} />
+                            <Text style={[styles.refreshQueueBtnText, { color: colors.primary }]}>Refresh</Text>
+                        </TouchableOpacity>
+                    </View>
 
-            {/* Floating Action Button */}
-            <TouchableOpacity
-                style={styles.fab}
-                onPress={() => setModalVisible(true)}
-                activeOpacity={0.8}
-            >
-                <Text style={styles.fabIcon}>+</Text>
-            </TouchableOpacity>
+                    {/* Support Metrics Cards */}
+                    <View style={styles.supportStatsRow}>
+                        <View style={[styles.supportStatCard, { borderLeftColor: colors.primary, borderLeftWidth: 4 }]}>
+                            <Text style={styles.supportStatNumber}>{supportConversations.length}</Text>
+                            <Text style={styles.supportStatLabel}>Total Inquiries</Text>
+                        </View>
+                        <View style={[styles.supportStatCard, { borderLeftColor: '#F59E0B', borderLeftWidth: 4 }]}>
+                            <Text style={[styles.supportStatNumber, { color: '#F59E0B' }]}>{pendingInquiriesCount}</Text>
+                            <Text style={styles.supportStatLabel}>Needs Action</Text>
+                        </View>
+                        <View style={[styles.supportStatCard, { borderLeftColor: '#10B981', borderLeftWidth: 4 }]}>
+                            <Text style={[styles.supportStatNumber, { color: '#10B981' }]}>{resolvedInquiriesCount}</Text>
+                            <Text style={styles.supportStatLabel}>Resolved</Text>
+                        </View>
+                    </View>
+
+                    {/* Search and Filters */}
+                    <View style={styles.supportSearchContainer}>
+                        <Ionicons name="search" size={18} color={colors.textTertiary} style={{ marginRight: 8 }} />
+                        <TextInput
+                            style={styles.supportSearchInput}
+                            placeholder="Search by user name or inquiry content..."
+                            placeholderTextColor={colors.textTertiary}
+                            value={supportSearchQuery}
+                            onChangeText={setSupportSearchQuery}
+                        />
+                        {supportSearchQuery.length > 0 && (
+                            <TouchableOpacity onPress={() => setSupportSearchQuery('')}>
+                                <Ionicons name="close-circle" size={18} color={colors.textTertiary} />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+
+                    {/* Status Filter Chips */}
+                    <View style={styles.supportFilterRow}>
+                        {(['all', 'pending', 'resolved'] as const).map((filterKey) => (
+                            <TouchableOpacity
+                                key={filterKey}
+                                style={[
+                                    styles.supportFilterChip,
+                                    supportFilter === filterKey && styles.supportFilterChipActive,
+                                ]}
+                                onPress={() => setSupportFilter(filterKey)}
+                                activeOpacity={0.7}
+                            >
+                                <Text
+                                    style={[
+                                        styles.supportFilterChipText,
+                                        supportFilter === filterKey && styles.supportFilterChipTextActive,
+                                    ]}
+                                >
+                                    {filterKey === 'all'
+                                        ? `All (${supportConversations.length})`
+                                        : filterKey === 'pending'
+                                        ? `Needs Action (${pendingInquiriesCount})`
+                                        : `Resolved (${resolvedInquiriesCount})`}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+
+                    {/* Support Queue Cards */}
+                    {loadingSupport ? (
+                        <View style={{ paddingVertical: 40, alignItems: 'center' }}>
+                            <ActivityIndicator size="large" color={colors.primary} />
+                            <Text style={{ marginTop: 12, color: colors.textSecondary, fontSize: 13 }}>
+                                Loading support queue...
+                            </Text>
+                        </View>
+                    ) : filteredSupportConvs.length === 0 ? (
+                        <View style={styles.emptySupportCard}>
+                            <View style={styles.emptySupportIconBox}>
+                                <Ionicons name="chatbubbles-outline" size={38} color={colors.textTertiary} />
+                            </View>
+                            <Text style={styles.emptySupportTitle}>No support tickets found</Text>
+                            <Text style={styles.emptySupportSubtitle}>
+                                {supportSearchQuery
+                                    ? 'No conversations match your search filter.'
+                                    : 'All client and vendor tickets have been attended to! 🎉'}
+                            </Text>
+                        </View>
+                    ) : (
+                        filteredSupportConvs.map((conv) => {
+                            const otherId = (conv.participants || []).find((p: string) => p !== 'qiira_official_support') || '';
+                            const otherName = conv.participantNames?.[otherId] || 'User';
+                            const otherImage = conv.participantImages?.[otherId] || '';
+                            const isVerified = Boolean(conv.participantVerified?.[otherId]);
+                            const isResolved = Boolean(resolvedTicketIds[conv.id] || conv.lastMessage?.includes('[Ticket Resolved]'));
+                            const lastMsg = conv.lastMessage || 'No message content';
+                            const timeText = conv.lastMessageAt ? new Date(conv.lastMessageAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+
+                            // Detect issue tag in message
+                            let detectedTag = '';
+                            if (lastMsg.toLowerCase().includes('order') || lastMsg.toLowerCase().includes('deliver')) detectedTag = '📦 Order';
+                            else if (lastMsg.toLowerCase().includes('verif') || lastMsg.toLowerCase().includes('badge')) detectedTag = '🛡️ Verification';
+                            else if (lastMsg.toLowerCase().includes('pay') || lastMsg.toLowerCase().includes('escrow') || lastMsg.toLowerCase().includes('bill')) detectedTag = '💳 Payment';
+                            else if (lastMsg.toLowerCase().includes('report') || lastMsg.toLowerCase().includes('scam') || lastMsg.toLowerCase().includes('suspicious')) detectedTag = '⚠️ Report Issue';
+                            else if (lastMsg.toLowerCase().includes('feature') || lastMsg.toLowerCase().includes('suggest')) detectedTag = '💡 Feature Request';
+                            else if (lastMsg.toLowerCase().includes('agent')) detectedTag = '🎧 Live Agent Desk';
+
+                            return (
+                                <View key={conv.id} style={styles.supportTicketCard}>
+                                    <View style={styles.supportTicketHeader}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                            <Image
+                                                source={otherImage ? { uri: otherImage } : { uri: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=500' }}
+                                                style={styles.ticketAvatar}
+                                            />
+                                            <View style={{ marginLeft: 10, flex: 1 }}>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                                                    <Text style={styles.ticketUserName} numberOfLines={1}>{otherName}</Text>
+                                                    {isVerified && (
+                                                        <Ionicons name="checkmark-circle" size={14} color="#10B981" />
+                                                    )}
+                                                </View>
+                                                <Text style={styles.ticketTimestamp}>{timeText}</Text>
+                                            </View>
+                                        </View>
+
+                                        {/* Status Pill */}
+                                        <View
+                                            style={[
+                                                styles.ticketStatusPill,
+                                                isResolved
+                                                    ? styles.ticketStatusResolved
+                                                    : styles.ticketStatusPending,
+                                            ]}
+                                        >
+                                            <View
+                                                style={[
+                                                    styles.ticketStatusDot,
+                                                    { backgroundColor: isResolved ? '#10B981' : '#F59E0B' },
+                                                ]}
+                                            />
+                                            <Text
+                                                style={[
+                                                    styles.ticketStatusText,
+                                                    { color: isResolved ? '#10B981' : '#F59E0B' },
+                                                ]}
+                                            >
+                                                {isResolved ? 'Resolved' : 'Needs Action'}
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    {/* Issue Tag if present */}
+                                    {detectedTag ? (
+                                        <View style={styles.detectedTagPill}>
+                                            <Text style={styles.detectedTagText}>{detectedTag}</Text>
+                                        </View>
+                                    ) : null}
+
+                                    {/* Message snippet */}
+                                    <View style={styles.ticketMessageContainer}>
+                                        <Text style={styles.ticketMessageText} numberOfLines={3}>
+                                            "{lastMsg}"
+                                        </Text>
+                                    </View>
+
+                                    {/* Ticket Actions */}
+                                    <View style={styles.ticketActionsRow}>
+                                        <TouchableOpacity
+                                            style={[styles.ticketActionBtn, styles.ticketActionBtnChat]}
+                                            onPress={() => handleOpenSupportChat(conv)}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Ionicons name="chatbubble-ellipses" size={15} color="#fff" />
+                                            <Text style={styles.ticketActionBtnChatText}>Live Chat</Text>
+                                        </TouchableOpacity>
+
+                                        <TouchableOpacity
+                                            style={[styles.ticketActionBtn, styles.ticketActionBtnReply]}
+                                            onPress={() => handleOpenQuickReplyModal(conv)}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Ionicons name="flash-outline" size={15} color={colors.primary} />
+                                            <Text style={[styles.ticketActionBtnReplyText, { color: colors.primary }]}>Quick Reply</Text>
+                                        </TouchableOpacity>
+
+                                        {!isResolved && (
+                                            <TouchableOpacity
+                                                style={[styles.ticketActionBtn, styles.ticketActionBtnResolve]}
+                                                onPress={() => handleResolveTicket(conv)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <Ionicons name="checkmark-done" size={15} color="#10B981" />
+                                                <Text style={styles.ticketActionBtnResolveText}>Resolve</Text>
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+                                </View>
+                            );
+                        })
+                    )}
+                </ScrollView>
+            )}
+
+            {/* Floating Action Button (Only on Overview) */}
+            {adminActiveTab === 'overview' && (
+                <TouchableOpacity
+                    style={styles.fab}
+                    onPress={() => setModalVisible(true)}
+                    activeOpacity={0.8}
+                >
+                    <Text style={styles.fabIcon}>+</Text>
+                </TouchableOpacity>
+            )}
 
             {/* Create Vendor Modal */}
             <Modal
@@ -704,6 +1128,85 @@ export default function AdminDashboardScreen({ navigation }: any) {
                         />
                     )}
                 </View>
+            </Modal>
+
+            {/* Quick Reply Modal */}
+            <Modal
+                animationType="fade"
+                transparent={true}
+                visible={replyModalVisible}
+                onRequestClose={() => setReplyModalVisible(false)}
+            >
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                    style={styles.replyModalBackdrop}
+                >
+                    <View style={styles.replyModalCard}>
+                        <View style={styles.replyModalHeader}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                                <View style={styles.supportHeadsetIcon}>
+                                    <Ionicons name="headset" size={20} color="#10B981" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.replyModalTitle}>Support Quick Response</Text>
+                                    <Text style={styles.replyModalSubtitle} numberOfLines={1}>
+                                        Replying to {selectedSupportConv ? selectedSupportConv.participantNames?.[(selectedSupportConv.participants || []).find((p: string) => p !== 'qiira_official_support') || ''] || 'User' : 'User'}
+                                    </Text>
+                                </View>
+                            </View>
+                            <TouchableOpacity onPress={() => setReplyModalVisible(false)} style={{ padding: 4 }}>
+                                <Ionicons name="close" size={22} color={colors.textSecondary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {/* Fast Canned Templates */}
+                        <Text style={styles.cannedHeader}>Choose Quick Response Template:</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 6 }}>
+                            {SUPPORT_QUICK_RESPONSES.map((tmpl, idx) => (
+                                <TouchableOpacity
+                                    key={idx}
+                                    style={styles.cannedChip}
+                                    onPress={() => setReplyText(tmpl)}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={styles.cannedChipText} numberOfLines={1}>{tmpl}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+
+                        {/* Reply Input */}
+                        <Text style={[styles.modalLabel, { marginTop: 10 }]}>Response Message *</Text>
+                        <TextInput
+                            style={[styles.modalInput, styles.replyTextInput]}
+                            placeholder="Type official support message..."
+                            placeholderTextColor={colors.textTertiary}
+                            value={replyText}
+                            onChangeText={setReplyText}
+                            multiline
+                        />
+
+                        {/* Send Action */}
+                        <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+                            <TouchableOpacity
+                                style={[styles.modalButton, { flex: 1, backgroundColor: colors.surfaceLight, borderWidth: 1, borderColor: colors.border }]}
+                                onPress={() => setReplyModalVisible(false)}
+                            >
+                                <Text style={[styles.modalButtonText, { color: colors.textPrimary }]}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.modalButton, { flex: 2, backgroundColor: '#10B981' }, (!replyText.trim() || sendingReply) && { opacity: 0.6 }]}
+                                onPress={handleSendQuickReply}
+                                disabled={!replyText.trim() || sendingReply}
+                            >
+                                {sendingReply ? (
+                                    <ActivityIndicator size="small" color="#fff" />
+                                ) : (
+                                    <Text style={styles.modalButtonText}>Send Official Reply 🚀</Text>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </KeyboardAvoidingView>
             </Modal>
 
             {/* Change Password Modal */}
@@ -1075,6 +1578,357 @@ const getStyles = (colors: any) => {
         color: colors.textInverse,
         fontSize: FONT_SIZES.md,
         fontWeight: 'bold',
+    },
+    // Top Segment Bar
+    topSegmentBar: {
+        flexDirection: 'row',
+        backgroundColor: colors.surface,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 6,
+        gap: 10,
+    },
+    topSegmentBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: SPACING.md,
+        paddingVertical: 8,
+        borderRadius: BORDER_RADIUS.md,
+        gap: 6,
+        backgroundColor: 'transparent',
+    },
+    topSegmentBtnActive: {
+        backgroundColor: `${colors.primary}18`,
+    },
+    topSegmentText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: colors.textSecondary,
+    },
+    topSegmentTextActive: {
+        color: colors.primary,
+        fontWeight: 'bold',
+    },
+    segmentBadge: {
+        backgroundColor: colors.warning,
+        paddingHorizontal: 6,
+        paddingVertical: 1,
+        borderRadius: 10,
+    },
+    segmentBadgeText: {
+        fontSize: 10,
+        fontWeight: 'bold',
+        color: '#fff',
+    },
+    // Support Desk Queue Styles
+    supportHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: SPACING.md,
+    },
+    livePulseDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#10B981',
+    },
+    supportSubText: {
+        fontSize: 12,
+        color: colors.textSecondary,
+        marginTop: 3,
+        maxWidth: '85%',
+        lineHeight: 17,
+    },
+    refreshQueueBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: BORDER_RADIUS.sm,
+        backgroundColor: `${colors.primary}15`,
+    },
+    refreshQueueBtnText: {
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    supportStatsRow: {
+        flexDirection: 'row',
+        gap: 10,
+        marginBottom: SPACING.md,
+    },
+    supportStatCard: {
+        flex: 1,
+        backgroundColor: colors.surface,
+        borderRadius: BORDER_RADIUS.md,
+        padding: SPACING.sm + 2,
+        ...SHADOWS.small,
+    },
+    supportStatNumber: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: colors.textPrimary,
+    },
+    supportStatLabel: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: colors.textSecondary,
+        marginTop: 2,
+        textTransform: 'uppercase',
+    },
+    supportSearchContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: colors.surface,
+        borderRadius: BORDER_RADIUS.md,
+        paddingHorizontal: SPACING.md,
+        paddingVertical: Platform.OS === 'ios' ? 10 : 6,
+        borderWidth: 1,
+        borderColor: colors.border,
+        marginBottom: SPACING.sm,
+    },
+    supportSearchInput: {
+        flex: 1,
+        fontSize: FONT_SIZES.sm,
+        color: colors.textPrimary,
+    },
+    supportFilterRow: {
+        flexDirection: 'row',
+        gap: 8,
+        marginBottom: SPACING.md,
+        flexWrap: 'wrap',
+    },
+    supportFilterChip: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: BORDER_RADIUS.round,
+        backgroundColor: colors.surface,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    supportFilterChipActive: {
+        backgroundColor: colors.primary,
+        borderColor: colors.primary,
+    },
+    supportFilterChipText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: colors.textSecondary,
+    },
+    supportFilterChipTextActive: {
+        color: colors.textInverse,
+    },
+    emptySupportCard: {
+        alignItems: 'center',
+        paddingVertical: 45,
+        backgroundColor: colors.surface,
+        borderRadius: BORDER_RADIUS.lg,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    emptySupportIconBox: {
+        width: 68,
+        height: 68,
+        borderRadius: 34,
+        backgroundColor: colors.surfaceLight,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: SPACING.md,
+    },
+    emptySupportTitle: {
+        fontSize: FONT_SIZES.md,
+        fontWeight: 'bold',
+        color: colors.textPrimary,
+        marginBottom: SPACING.xs,
+    },
+    emptySupportSubtitle: {
+        fontSize: FONT_SIZES.xs,
+        color: colors.textSecondary,
+        textAlign: 'center',
+        maxWidth: '75%',
+    },
+    // Ticket Card
+    supportTicketCard: {
+        backgroundColor: colors.surface,
+        borderRadius: BORDER_RADIUS.lg,
+        padding: SPACING.md,
+        marginBottom: SPACING.md,
+        borderWidth: 1,
+        borderColor: colors.border,
+        ...SHADOWS.small,
+    },
+    supportTicketHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    ticketAvatar: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        backgroundColor: colors.surfaceLight,
+    },
+    ticketUserName: {
+        fontSize: 14,
+        fontWeight: 'bold',
+        color: colors.textPrimary,
+        maxWidth: 160,
+    },
+    ticketTimestamp: {
+        fontSize: 10,
+        color: colors.textTertiary,
+        marginTop: 1,
+    },
+    ticketStatusPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 10,
+    },
+    ticketStatusPending: {
+        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    },
+    ticketStatusResolved: {
+        backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    },
+    ticketStatusDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+    },
+    ticketStatusText: {
+        fontSize: 10,
+        fontWeight: '700',
+    },
+    detectedTagPill: {
+        alignSelf: 'flex-start',
+        backgroundColor: `${colors.primary}18`,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 4,
+        marginBottom: 6,
+    },
+    detectedTagText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: colors.primary,
+    },
+    ticketMessageContainer: {
+        backgroundColor: colors.surfaceLight,
+        borderRadius: BORDER_RADIUS.sm,
+        padding: SPACING.sm,
+        marginBottom: 10,
+    },
+    ticketMessageText: {
+        fontSize: 12,
+        color: colors.textPrimary,
+        lineHeight: 18,
+    },
+    ticketActionsRow: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    ticketActionBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 7,
+        paddingHorizontal: 12,
+        borderRadius: BORDER_RADIUS.sm,
+        gap: 4,
+    },
+    ticketActionBtnChat: {
+        flex: 1,
+        backgroundColor: colors.primary,
+    },
+    ticketActionBtnChatText: {
+        color: colors.textInverse,
+        fontSize: 12,
+        fontWeight: 'bold',
+    },
+    ticketActionBtnReply: {
+        flex: 1,
+        backgroundColor: `${colors.primary}15`,
+    },
+    ticketActionBtnReplyText: {
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    ticketActionBtnResolve: {
+        backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    },
+    ticketActionBtnResolveText: {
+        fontSize: 12,
+        fontWeight: 'bold',
+        color: '#10B981',
+    },
+    // Quick Reply Modal Styles
+    replyModalBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        justifyContent: 'center',
+        padding: SPACING.lg,
+    },
+    replyModalCard: {
+        backgroundColor: colors.surface,
+        borderRadius: BORDER_RADIUS.xl,
+        padding: SPACING.lg,
+        ...SHADOWS.large,
+    },
+    replyModalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: SPACING.md,
+        paddingBottom: SPACING.sm,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+    },
+    supportHeadsetIcon: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        backgroundColor: 'rgba(16, 185, 129, 0.18)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    replyModalTitle: {
+        fontSize: 15,
+        fontWeight: 'bold',
+        color: colors.textPrimary,
+    },
+    replyModalSubtitle: {
+        fontSize: 11,
+        color: colors.textSecondary,
+        marginTop: 1,
+    },
+    cannedHeader: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: colors.textSecondary,
+        marginBottom: 6,
+    },
+    cannedChip: {
+        backgroundColor: colors.surfaceLight,
+        borderRadius: BORDER_RADIUS.sm,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        maxWidth: 220,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    cannedChipText: {
+        fontSize: 11,
+        color: colors.textPrimary,
+    },
+    replyTextInput: {
+        minHeight: 85,
+        textAlignVertical: 'top',
     },
 });
 };

@@ -14,6 +14,7 @@ import chatRoutes from './routes/chat.routes';
 import postRoutes from './routes/post.routes';
 import cartRoutes from './routes/cart.routes';
 import callRoutes from './routes/call.routes';
+import { ensureSupportAccount } from './scripts/seedSupport';
 
 // Initialize Express app
 const app: Application = express();
@@ -88,6 +89,7 @@ app.listen(PORT as number, '0.0.0.0', () => {
     }
 
     console.log(`🌐 Access from network: http://${localIP}:${PORT}`);
+    ensureSupportAccount().catch(e => console.warn('Support seed note:', e.message));
 });
 
 export default app;

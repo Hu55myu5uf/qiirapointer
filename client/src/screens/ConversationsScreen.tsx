@@ -24,6 +24,7 @@ import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 import TabSwipeHandler from '../components/TabSwipeHandler';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 interface Conversation {
     id: string;
@@ -327,6 +328,51 @@ export default function ConversationsScreen({ navigation }: any) {
                 </ScrollView>
             </View>
 
+            {/* Pinned Official Support Tile */}
+            {activeCategory === 'all' && (
+                <TouchableOpacity
+                    style={styles.pinnedSupportCard}
+                    onPress={() =>
+                        navigation.navigate('Chat', {
+                            otherUserId: 'qiira_official_support',
+                            otherUserName: 'QIIRA Customer Support',
+                            otherUserImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
+                            receiverId: 'qiira_official_support',
+                            receiverName: 'QIIRA Customer Support',
+                            receiverImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
+                            isSupport: true,
+                        })
+                    }
+                    activeOpacity={0.8}
+                >
+                    <View style={styles.pinnedSupportAvatarContainer}>
+                        <Image
+                            source={{ uri: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500' }}
+                            style={styles.pinnedSupportAvatar}
+                        />
+                        <View style={styles.pinnedSupportBadge}>
+                            <Ionicons name="headset" size={10} color="#FFFFFF" />
+                        </View>
+                    </View>
+
+                    <View style={styles.pinnedSupportTextContainer}>
+                        <View style={styles.pinnedSupportHeaderRow}>
+                            <Text style={styles.pinnedSupportTitle}>QIIRA Customer Support</Text>
+                            <View style={styles.officialPill}>
+                                <Text style={styles.officialPillText}>OFFICIAL</Text>
+                            </View>
+                        </View>
+                        <Text style={styles.pinnedSupportSubtitle} numberOfLines={1}>
+                            Need assistance? Chat 24/7 with QIIRA Care
+                        </Text>
+                    </View>
+
+                    <View style={styles.pinnedSupportAction}>
+                        <Ionicons name="chatbubble-ellipses" size={20} color={colors.primary} />
+                    </View>
+                </TouchableOpacity>
+            )}
+
             {displayConversations.length === 0 ? (
                 <View style={styles.emptyContainer}>
                     <Text style={styles.emptyIcon}>
@@ -403,6 +449,76 @@ const getStyles = (colors: any) => {
         categoryPillActive: {
             backgroundColor: colors.primary,
             borderColor: colors.primary,
+        },
+        pinnedSupportCard: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: colors.surface,
+            marginHorizontal: SPACING.md,
+            marginTop: SPACING.sm,
+            marginBottom: SPACING.xs,
+            padding: SPACING.md,
+            borderRadius: BORDER_RADIUS.lg,
+            borderWidth: 1.5,
+            borderColor: colors.primary,
+            ...SHADOWS.small,
+        },
+        pinnedSupportAvatarContainer: {
+            position: 'relative',
+            marginRight: SPACING.md,
+        },
+        pinnedSupportAvatar: {
+            width: 46,
+            height: 46,
+            borderRadius: 23,
+            borderWidth: 2,
+            borderColor: colors.primary,
+        },
+        pinnedSupportBadge: {
+            position: 'absolute',
+            bottom: -2,
+            right: -2,
+            backgroundColor: colors.primary,
+            width: 18,
+            height: 18,
+            borderRadius: 9,
+            justifyContent: 'center',
+            alignItems: 'center',
+            borderWidth: 1.5,
+            borderColor: colors.surface,
+        },
+        pinnedSupportTextContainer: {
+            flex: 1,
+        },
+        pinnedSupportHeaderRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            marginBottom: 2,
+        },
+        pinnedSupportTitle: {
+            fontSize: FONT_SIZES.sm,
+            fontWeight: '800',
+            color: colors.textPrimary,
+        },
+        officialPill: {
+            backgroundColor: 'rgba(178, 138, 69, 0.18)',
+            paddingHorizontal: 6,
+            paddingVertical: 1,
+            borderRadius: BORDER_RADIUS.round,
+        },
+        officialPillText: {
+            fontSize: 9,
+            fontWeight: '800',
+            color: colors.primary,
+            letterSpacing: 0.5,
+        },
+        pinnedSupportSubtitle: {
+            fontSize: FONT_SIZES.xs,
+            color: colors.textSecondary,
+        },
+        pinnedSupportAction: {
+            padding: SPACING.xs,
         },
         categoryPillText: {
             fontSize: FONT_SIZES.sm,

@@ -24,6 +24,16 @@ async function getParticipantProfile(uid: string): Promise<{ name: string; avata
         return { name: 'User', avatar: DEFAULT_AVATARS.client, role: 'client', isVerified: false, isAdmin: false };
     }
 
+    if (uid === 'qiira_official_support') {
+        return {
+            name: 'QIIRA Customer Support',
+            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
+            role: 'support',
+            isVerified: true,
+            isAdmin: true,
+        };
+    }
+
     const cached = PARTICIPANT_CACHE.get(uid);
     if (cached && (Date.now() - cached.timestamp < 10000)) {
         return cached.data;
