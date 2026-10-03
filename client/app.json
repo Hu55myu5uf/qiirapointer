@@ -3,17 +3,18 @@
     "name": "QIIRA",
     "slug": "qiira",
     "version": "1.0.1",
+    "newArchEnabled": false,
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.qiira.pointer",
-      "buildNumber": "3"
+      "buildNumber": "4"
     },
     "android": {
       "package": "com.qiira.pointer",
-      "versionCode": 3,
+      "versionCode": 4,
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyB8rHvWpp6SgCXvxxfmSQeGfX2vAdWfcBs"
