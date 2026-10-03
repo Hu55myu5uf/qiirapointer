@@ -107,21 +107,50 @@ export const useAlertStore = create<AlertStoreState>((set) => ({
 let isPatched = false;
 export function initGlobalAlertPatch() {
     if (isPatched) return;
-    isPatched = true;
+    try {
+        isPatched = true;
 
-    RNAlert.alert = (
-        title: string,
-        message?: string,
-        buttons?: ThemedAlertButton[] | any[],
-        options?: any
-    ) => {
-        useAlertStore.getState().showAlert(title, message, buttons, options);
-    };
+        if (RNAlert && typeof RNAlert === 'object') {
+            try {
+                RNAlert.alert = (
+                    title: string,
+                    message?: string,
+                    buttons?: ThemedAlertButton[] | any[],
+                    options?: any
+                ) => {
+                    useAlertStore.getState().showAlert(title, message, buttons, options);
+                };
+            } catch {
+                try {
+                    Object.defineProperty(RNAlert, 'alert', {
+                        value: (
+                            title: string,
+                            message?: string,
+                            buttons?: ThemedAlertButton[] | any[],
+                            options?: any
+                        ) => {
+                            useAlertStore.getState().showAlert(title, message, buttons, options);
+                        },
+                        configurable: true,
+                        writable: true,
+                    });
+                } catch (e2) {
+                    console.warn('Could not override RNAlert.alert:', e2);
+                }
+            }
+        }
 
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        // Also intercept window.alert so web fallback calls use QIIRA theme
-        window.alert = (message?: any) => {
-            useAlertStore.getState().showAlert('Notification', String(message || ''));
-        };
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            // Also intercept window.alert so web fallback calls use QIIRA theme
+            try {
+                window.alert = (message?: any) => {
+                    useAlertStore.getState().showAlert('Notification', String(message || ''));
+                };
+            } catch (e3) {
+                console.warn('Could not override window.alert:', e3);
+            }
+        }
+    } catch (e) {
+        console.warn('initGlobalAlertPatch error:', e);
     }
 }

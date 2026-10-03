@@ -19,15 +19,24 @@ const app = initializeApp(firebaseConfig);
 
 // Initialize Firebase Auth with proper persistence per platform
 let auth: any;
-if (Platform.OS === 'web' || typeof (FirebaseAuth as any).getReactNativePersistence !== 'function') {
-    auth = FirebaseAuth.getAuth(app);
-} else {
-    try {
-        auth = FirebaseAuth.initializeAuth(app, {
-            persistence: (FirebaseAuth as any).getReactNativePersistence(AsyncStorage)
-        });
-    } catch (e) {
+try {
+    if (Platform.OS === 'web' || typeof (FirebaseAuth as any).getReactNativePersistence !== 'function') {
         auth = FirebaseAuth.getAuth(app);
+    } else {
+        try {
+            auth = FirebaseAuth.initializeAuth(app, {
+                persistence: (FirebaseAuth as any).getReactNativePersistence(AsyncStorage)
+            });
+        } catch (e) {
+            auth = FirebaseAuth.getAuth(app);
+        }
+    }
+} catch (err) {
+    console.warn('Firebase auth initialization fallback:', err);
+    try {
+        auth = FirebaseAuth.getAuth(app);
+    } catch (e2) {
+        console.error('Critical firebase auth init error:', e2);
     }
 }
 

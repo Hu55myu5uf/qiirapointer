@@ -9,11 +9,16 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.qiira.pointer",
-      "buildNumber": "2"
+      "buildNumber": "3"
     },
     "android": {
       "package": "com.qiira.pointer",
-      "versionCode": 2,
+      "versionCode": 3,
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyB8rHvWpp6SgCXvxxfmSQeGfX2vAdWfcBs"
+        }
+      },
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -38,6 +43,24 @@
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow QIIRA to access your camera to capture profile and post photos."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow QIIRA to access your photos to upload media."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow QIIRA to use your location to discover nearby businesses."
         }
       ]
     ]

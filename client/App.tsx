@@ -42,9 +42,6 @@ import AdminPreviewBanner from './src/components/AdminPreviewBanner';
 import { useCallStore } from './src/store/callStore';
 import { initGlobalAlertPatch } from './src/store/alertStore';
 
-// Initialize global alert patch so all Alert.alert() calls automatically render with QIIRA app theme
-initGlobalAlertPatch();
-
 export const navigationRef = createNavigationContainerRef<any>();
 
 const Stack = createStackNavigator();
@@ -775,9 +772,23 @@ function MainApp() {
     }
   }, [user]);
 
+  // Initialize themed alert patch safely inside component lifecycle
+  useEffect(() => {
+    try {
+      initGlobalAlertPatch();
+    } catch (e) {
+      console.warn('initGlobalAlertPatch failed:', e);
+    }
+  }, []);
+
   // Listen for Firebase auth state changes
   useEffect(() => {
+    const safetyTimeout = setTimeout(() => {
+      setInitializing(false);
+    }, 3500);
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      clearTimeout(safetyTimeout);
       try {
         if (firebaseUser) {
           const response = await authAPI.getUser(firebaseUser.uid);

@@ -20,16 +20,20 @@ if (!isExpoGo) {
 }
 
 // Configure how notifications appear when app is in foreground
-if (Notifications) {
-    Notifications.setNotificationHandler({
-        handleNotification: async () => ({
-            shouldShowAlert: true,
-            shouldPlaySound: true,
-            shouldSetBadge: true,
-            shouldShowBanner: true,
-            shouldShowList: true,
-        }),
-    });
+if (Notifications && typeof Notifications.setNotificationHandler === 'function') {
+    try {
+        Notifications.setNotificationHandler({
+            handleNotification: async () => ({
+                shouldShowAlert: true,
+                shouldPlaySound: true,
+                shouldSetBadge: true,
+                shouldShowBanner: true,
+                shouldShowList: true,
+            }),
+        });
+    } catch (e) {
+        console.warn('Failed to set notification handler:', e);
+    }
 }
 
 /**
