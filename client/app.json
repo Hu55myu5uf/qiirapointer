@@ -2,7 +2,7 @@
   "expo": {
     "name": "QIIRA",
     "slug": "qiira",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "newArchEnabled": false,
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,16 +10,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.qiira.pointer",
-      "buildNumber": "4"
+      "buildNumber": "5"
     },
     "android": {
       "package": "com.qiira.pointer",
-      "versionCode": 4,
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyB8rHvWpp6SgCXvxxfmSQeGfX2vAdWfcBs"
-        }
-      },
+      "versionCode": 5,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -44,12 +39,6 @@
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
-        }
-      ],
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Allow QIIRA to access your camera to capture profile and post photos."
         }
       ],
       [

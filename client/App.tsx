@@ -14,6 +14,7 @@ import { useAuthStore } from './src/store/authStore';
 import { useChatStore } from './src/store/chatStore';
 import { authAPI } from './src/services/api';
 import { registerForPushNotifications, savePushToken, addNotificationListeners } from './src/services/notifications';
+import * as SplashScreen from 'expo-splash-screen';
 
 // Screens
 import LoginScreen from './src/screens/LoginScreen';
@@ -847,6 +848,13 @@ function MainApp() {
 
     return unsubscribe;
   }, []);
+
+  // Hide native splash screen once initial load finishes
+  useEffect(() => {
+    if (!initializing) {
+      SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [initializing]);
 
   if (initializing) {
     return (
