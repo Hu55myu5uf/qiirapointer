@@ -25,11 +25,12 @@ import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme'
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { POPULAR_CATEGORIES } from '../constants/categories';
 import CategoryPickerModal from '../components/CategoryPickerModal';
-import { postAPI } from '../services/api';
+import { postAPI, moderationAPI } from '../services/api';
 import { sharePost, shareVendorProfile } from '../services/shareService';
 import VerificationBadge, { AvatarVerificationBadge, VerificationBadgeInline } from '../components/VerificationBadge';
 import CartButton from '../components/CartButton';
 import SharePostModal from '../components/SharePostModal';
+import ReportModal from '../components/ReportModal';
 import TabSwipeHandler from '../components/TabSwipeHandler';
 import ShowcaseFeed from '../components/ShowcaseFeed';
 import { auth } from '../config/firebase';
@@ -166,6 +167,13 @@ export default function ExploreScreen({ navigation, route }: any) {
     const [loadingComments, setLoadingComments] = useState<boolean>(false);
     const [submittingComment, setSubmittingComment] = useState<boolean>(false);
     const [selectedPostToShare, setSelectedPostToShare] = useState<any>(null);
+    const [reportModalData, setReportModalData] = useState<{
+        visible: boolean;
+        targetType: 'post' | 'comment' | 'user' | 'vendor';
+        targetId: string;
+        targetUserId?: string;
+        targetTitle?: string;
+    } | null>(null);
 
     // Client Community Post State
     const [clientPostModalVisible, setClientPostModalVisible] = useState<boolean>(false);
@@ -511,6 +519,58 @@ export default function ExploreScreen({ navigation, route }: any) {
         );
     };
 
+    const handlePostMoreOptions = (item: any) => {
+        const isSelf = auth.currentUser?.uid === (item.authorId || item.vendorId);
+        const targetUserId = item.authorId || item.vendorId;
+        const targetName = item.vendorName || 'Creator';
+
+        Alert.alert(
+            'Post Options',
+            'Safety & community options for this post:',
+            [
+                {
+                    text: '🛡️ Report Post',
+                    onPress: () => {
+                        setReportModalData({
+                            visible: true,
+                            targetType: 'post',
+                            targetId: item.id,
+                            targetUserId,
+                            targetTitle: item.caption || `Post by ${targetName}`,
+                        });
+                    }
+                },
+                !isSelf && targetUserId ? {
+                    text: `🚫 Block @${targetName}`,
+                    style: 'destructive',
+                    onPress: () => {
+                        Alert.alert(
+                            'Block User',
+                            `Are you sure you want to block ${targetName}? Their posts will be hidden from your feed and they will not be able to message you.`,
+                            [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                    text: 'Block',
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                        try {
+                                            await moderationAPI.blockUser(targetUserId, targetName);
+                                            setPosts(prev => prev.filter(p => p.authorId !== targetUserId && p.vendorId !== targetUserId));
+                                            Alert.alert('Blocked', `${targetName} has been blocked.`);
+                                        } catch (err: any) {
+                                            Alert.alert('Error', err.response?.data?.message || 'Failed to block user.');
+                                        }
+                                    }
+                                }
+                            ]
+                        );
+                    }
+                } : null,
+                { text: 'Cancel', style: 'cancel' }
+            ].filter(Boolean) as any
+        );
+    };
+
     const renderPostItem = ({ item }: { item: any }) => {
         const isReel = item.type === 'reel';
         const isClientPost = item.authorType === 'client';
@@ -629,6 +689,14 @@ export default function ExploreScreen({ navigation, route }: any) {
                                 <Ionicons name="trash-outline" size={16} color={colors.error} />
                             </TouchableOpacity>
                         )}
+
+                        <TouchableOpacity
+                            style={{ padding: 6 }}
+                            onPress={() => handlePostMoreOptions(item)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                            <Ionicons name="ellipsis-vertical" size={16} color={colors.textSecondary} />
+                        </TouchableOpacity>
                     </View>
                 </View>
 
@@ -1241,6 +1309,17 @@ export default function ExploreScreen({ navigation, route }: any) {
                 onClose={() => setSelectedPostToShare(null)}
                 post={selectedPostToShare}
             />
+
+            {reportModalData && (
+                <ReportModal
+                    visible={reportModalData.visible}
+                    onClose={() => setReportModalData(null)}
+                    targetType={reportModalData.targetType}
+                    targetId={reportModalData.targetId}
+                    targetUserId={reportModalData.targetUserId}
+                    targetTitle={reportModalData.targetTitle}
+                />
+            )}
         </View>
         </TabSwipeHandler>
     );

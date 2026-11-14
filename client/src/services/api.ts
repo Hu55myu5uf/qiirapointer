@@ -80,6 +80,7 @@ export const authAPI = {
     updateProfile: (uid: string, data: any) => api.put(`/auth/user/${uid}`, data),
     changePassword: (data: { newPassword: string; currentPassword?: string; uid?: string }) =>
         api.post('/auth/change-password', data),
+    deleteAccount: () => api.delete('/auth/delete-account'),
 };
 
 export const vendorAPI = {
@@ -263,4 +264,27 @@ export const callAPI = {
         api.post(`/calls/${callId}/end`, { durationSeconds }),
     getHistory: (userId: string) =>
         api.get(`/calls/history/${userId}`),
+};
+
+export const moderationAPI = {
+    reportContent: (data: {
+        targetType: 'post' | 'comment' | 'user' | 'vendor';
+        targetId: string;
+        targetUserId?: string;
+        targetTitle?: string;
+        reason: string;
+        details?: string;
+        reporterId?: string;
+        reporterEmail?: string;
+    }) => api.post('/moderation/report', data),
+    blockUser: (blockedUserId: string, blockedUserName?: string) =>
+        api.post('/moderation/block', { blockedUserId, blockedUserName }),
+    unblockUser: (blockedUserId: string) =>
+        api.post('/moderation/unblock', { blockedUserId }),
+    getBlockedUsers: () =>
+        api.get('/moderation/blocked'),
+    getReports: () =>
+        api.get('/moderation/reports'),
+    resolveReport: (reportId: string, action: 'dismiss' | 'remove_content' | 'suspend_user', notes?: string) =>
+        api.put(`/moderation/reports/${reportId}/resolve`, { action, notes }),
 };

@@ -15,7 +15,7 @@ import {
     TextInput,
     FlatList,
 } from 'react-native';
-import { vendorAPI, clientAPI, postAPI } from '../services/api';
+import { vendorAPI, clientAPI, postAPI, moderationAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -31,6 +31,7 @@ import CartButton from '../components/CartButton';
 import CallOptionModal from '../components/CallOptionModal';
 import SharePostModal from '../components/SharePostModal';
 import PlaceOrderModal from '../components/PlaceOrderModal';
+import ReportModal from '../components/ReportModal';
 
 const { width } = Dimensions.get('window');
 
@@ -53,7 +54,52 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
     const [loading, setLoading] = useState(true);
     const [isFavorite, setIsFavorite] = useState(false);
     const [callModalVisible, setCallModalVisible] = useState(false);
+    const [reportModalVisible, setReportModalVisible] = useState(false);
     const [activeTab, setActiveTab] = useState<'posts' | 'catalog' | 'about' | 'services' | 'reviews' | 'docs'>(route.params?.initialTab || 'posts');
+
+    const handleMoreOptions = () => {
+        if (!vendor) return;
+        const vendorUid = vendor.uid || vendor.id;
+        const isSelf = user?.uid === vendorUid;
+
+        Alert.alert(
+            vendor.businessName || 'Store Options',
+            'Community safety options for this business:',
+            [
+                {
+                    text: '🛡️ Report Business',
+                    onPress: () => setReportModalVisible(true),
+                },
+                !isSelf ? {
+                    text: `🚫 Block Business`,
+                    style: 'destructive',
+                    onPress: () => {
+                        Alert.alert(
+                            'Block Business',
+                            `Are you sure you want to block ${vendor.businessName}? You will no longer see their posts or products.`,
+                            [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                    text: 'Block',
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                        try {
+                                            await moderationAPI.blockUser(vendorUid, vendor.businessName);
+                                            Alert.alert('Blocked', `${vendor.businessName} has been blocked.`);
+                                            navigation.goBack();
+                                        } catch (err: any) {
+                                            Alert.alert('Error', err.response?.data?.message || 'Failed to block business.');
+                                        }
+                                    }
+                                }
+                            ]
+                        );
+                    }
+                } : null,
+                { text: 'Cancel', style: 'cancel' }
+            ].filter(Boolean) as any
+        );
+    };
     const [reviews, setReviews] = useState<any[]>([]);
     const [reviewsLoading, setReviewsLoading] = useState(false);
     const [posts, setPosts] = useState<any[]>([]);
@@ -364,6 +410,14 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                             activeOpacity={0.7}
                         >
                             <Ionicons name="share-social-outline" size={17} color={colors.textPrimary} />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.utilityIconButton}
+                            onPress={handleMoreOptions}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons name="ellipsis-vertical" size={17} color={colors.textPrimary} />
                         </TouchableOpacity>
                     </View>
 
@@ -1077,6 +1131,16 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                     navigation={navigation}
                 />
             )}
+
+            {/* Safety & UGC Moderation Report Modal */}
+            <ReportModal
+                visible={reportModalVisible}
+                onClose={() => setReportModalVisible(false)}
+                targetType="vendor"
+                targetId={vendor?.uid || vendor?.id || vendorId}
+                targetUserId={vendor?.uid || vendor?.id || vendorId}
+                targetTitle={vendor?.businessName}
+            />
         </View>
     );
 }

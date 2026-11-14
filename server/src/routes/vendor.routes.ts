@@ -2,6 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import supabase from '../config/supabase';
 import { db, auth } from '../config/firebase';
 import { authenticateUser, requireSelfOrAdmin, MASTER_ADMIN_UID } from '../utils/authMiddleware';
+import { uploadBase64ToStorage } from '../utils/supabaseStorage';
+import * as path from 'path';
 
 const router = Router();
 
@@ -825,43 +827,22 @@ router.post('/upload-image', authenticateUser, async (req: Request, res: Respons
         const allowedImageTypes = ['profile', 'banner', 'post', 'document'];
         const safeImageType = allowedImageTypes.includes(imageType) ? imageType : 'image';
 
-        const fs = require('fs');
-        const path = require('path');
-
-        const baseUploadsDir = path.resolve(__dirname, '../../uploads/vendors');
-        const uploadsDir = path.resolve(baseUploadsDir, safeUserId);
-
-        // Path containment check
-        if (!uploadsDir.startsWith(baseUploadsDir)) {
-            return res.status(400).json({ error: 'Invalid upload directory path' });
-        }
-
-        if (!fs.existsSync(uploadsDir)) {
-            fs.mkdirSync(uploadsDir, { recursive: true });
-        }
-
-        // Validate base64 image and detect extension
         const mimeMatch = imageData.match(/^data:image\/(jpeg|jpg|png|webp);base64,/i);
         const ext = mimeMatch ? `.${mimeMatch[1].toLowerCase() === 'jpeg' ? 'jpg' : mimeMatch[1].toLowerCase()}` : '.jpg';
-
-        // Generate safe unique filename
-        const filename = `${safeImageType}_${Date.now()}${ext}`;
-        const filepath = path.resolve(uploadsDir, filename);
-
-        if (!filepath.startsWith(uploadsDir)) {
-            return res.status(400).json({ error: 'Invalid destination file path' });
-        }
-
-        // Decode Base64 and save
-        const base64Data = imageData.replace(/^data:image\/\w+;base64,/, '');
-        fs.writeFileSync(filepath, base64Data, 'base64');
-
-        // Return accessible URL using the host from the request
         const protocol = req.protocol || 'http';
         const host = req.get('host') || 'localhost:5000';
-        const imageUrl = `${protocol}://${host}/uploads/vendors/${safeUserId}/${filename}`;
 
-        res.status(200).json({ imageUrl });
+        // Upload to permanent Supabase Storage with local fallback
+        const uploadResult = await uploadBase64ToStorage({
+            folder: `vendors/${safeUserId}`,
+            filenamePrefix: safeImageType,
+            base64Data: imageData,
+            preferredExtension: ext,
+            reqHost: host,
+            protocol: protocol,
+        });
+
+        res.status(200).json({ imageUrl: uploadResult.url });
     } catch (error: any) {
         console.error('Upload image error:', error);
         res.status(500).json({ error: 'Failed to upload image', message: error.message });
@@ -870,7 +851,7 @@ router.post('/upload-image', authenticateUser, async (req: Request, res: Respons
 
 /**
  * @route   POST /api/vendors/upload-document
- * @desc    Upload document/PDF (Base64) and save locally
+ * @desc    Upload document/PDF (Base64) to Supabase Storage
  * @access  Private (Vendor only)
  */
 router.post('/upload-document', authenticateUser, async (req: Request, res: Response) => {
@@ -892,49 +873,30 @@ router.post('/upload-document', authenticateUser, async (req: Request, res: Resp
             return res.status(400).json({ error: 'Invalid userId' });
         }
 
-        const fs = require('fs');
-        const path = require('path');
-
-        const baseUploadsDir = path.resolve(__dirname, '../../uploads/vendors');
-        const uploadsDir = path.resolve(baseUploadsDir, safeUserId, 'documents');
-
-        // Path containment check
-        if (!uploadsDir.startsWith(baseUploadsDir)) {
-            return res.status(400).json({ error: 'Invalid upload directory path' });
-        }
-
-        if (!fs.existsSync(uploadsDir)) {
-            fs.mkdirSync(uploadsDir, { recursive: true });
-        }
-
         // Strict extension allowlist: only pdf, jpg, jpeg, png, webp
         const rawExt = path.extname(fileName || '').toLowerCase();
         const allowedExts = ['.pdf', '.jpg', '.jpeg', '.png', '.webp'];
         const ext = allowedExts.includes(rawExt) ? rawExt : '.pdf';
-
         const safeBaseName = path.basename(fileName || 'document', rawExt).replace(/[^a-zA-Z0-9_-]/g, '_');
-        const uniqueFilename = `${safeBaseName}_${Date.now()}${ext}`;
-        const filepath = path.resolve(uploadsDir, uniqueFilename);
 
-        if (!filepath.startsWith(uploadsDir)) {
-            return res.status(400).json({ error: 'Invalid destination file path' });
-        }
-
-        // Decode Base64 and save
-        const base64Data = fileData.replace(/^data:[^;]+;base64,/, '');
-        const buffer = Buffer.from(base64Data, 'base64');
-        fs.writeFileSync(filepath, buffer);
-
-        // Return accessible URL
         const protocol = req.protocol || 'http';
         const host = req.get('host') || 'localhost:5000';
-        const fileUrl = `${protocol}://${host}/uploads/vendors/${safeUserId}/documents/${uniqueFilename}`;
+
+        // Upload to permanent Supabase Storage with local fallback
+        const uploadResult = await uploadBase64ToStorage({
+            folder: `vendors/${safeUserId}/documents`,
+            filenamePrefix: safeBaseName,
+            base64Data: fileData,
+            preferredExtension: ext,
+            reqHost: host,
+            protocol: protocol,
+        });
 
         res.status(200).json({
-            fileUrl,
+            fileUrl: uploadResult.url,
             fileName: `${safeBaseName}${ext}`,
-            fileSize: buffer.length,
-            fileType: fileType || 'application/pdf',
+            fileSize: uploadResult.size,
+            fileType: fileType || uploadResult.contentType || 'application/pdf',
         });
     } catch (error: any) {
         console.error('Upload document error:', error);

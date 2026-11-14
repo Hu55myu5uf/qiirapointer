@@ -45,6 +45,16 @@
   - Seamlessly migrated all "Reels" references to "Showcase" across client tabs, feeds, uploads, and backend routes.
 - ✅ **Share Posts to DM**:
   - Direct sharing of feed and showcase posts into active conversation DMs with rich interactive preview cards.
+- ✅ **Cloud Storage Migration (Supabase Storage)**:
+  - Permanent file storage using public Supabase bucket `qiira-uploads` for vendor verification documents, business logos/banners, post media/reels, and chat media attachments (ensuring files persist safely across cloud deployments like Render).
+- ✅ **Account Deletion (App Store Guideline 5.1.1 & Google Play Compliance)**:
+  - In-app self-service account deletion in `SettingsScreen` with safety confirmation modal.
+  - Cascading backend cleanup (`DELETE /api/auth/delete-account`) removing user data across Supabase tables (`users`, `vendors`, `reviews`, `favorites`, `cart_items`), Firestore collections (`users`, `vendors`, `posts`), and Firebase Authentication credentials.
+- ✅ **UGC Safety & Moderation (App Store Guideline 1.2 & Google Play Compliance)**:
+  - **Content & User Reporting**: Universal `ReportModal` accessible from post menus, user profile headers, vendor detail pages, and direct chat headers with predefined violation categories (harassment, spam, scam, hate speech, inappropriate media).
+  - **User Blocking**: Immediate mutual blocking across the platform (`POST /api/moderation/block` & `unblock`), filtering blocked users' posts from feeds and preventing direct messages.
+  - **Blocked Users Management**: Dedicated modal in `SettingsScreen` allowing users to view and unblock accounts at any time.
+  - **Admin Moderation Desk**: Integrated into `AdminDashboardScreen` with real-time incident queues, automated post removal, report dismissal, and one-click user suspension.
 
 ---
 
@@ -53,14 +63,16 @@
 | Module | Status | Details |
 | :--- | :--- | :--- |
 | **Backend API & Data Layer** | ✅ 100% | Dual Supabase/Firestore support, PostGIS/Haversine distance, verified badge resolution |
-| **Authentication & Auth Store** | ✅ 100% | Role persistence, guest/user session recovery |
+| **Cloud Storage** | ✅ 100% | Supabase Storage bucket `qiira-uploads` active with local disk fallback |
+| **Authentication & Auth Store** | ✅ 100% | Role persistence, guest/user session recovery, account deletion |
 | **Home & Discovery** | ✅ 100% | Filters, sorting, search, category chips, responsive vendor cards |
 | **Interactive Map View** | ✅ 100% | Leaflet OpenStreetMap for web + native maps for mobile with gold pins |
-| **Vendor Details & Reviews** | ✅ 100% | Business hours, post showcase, write review form, verified reviews |
+| **Vendor Details & Reviews** | ✅ 100% | Business hours, post showcase, write review form, verified reviews, report & block |
 | **Vendor Profile & Verification**| ✅ 100% | Document upload, payment ref, verification fee flow |
-| **Social / Explore Feed** | ✅ 100% | Posts, reels, likes, comments with verified badges |
-| **Messaging & Calling** | ✅ 100% | Chat conversations, voice & video calls, incoming call alerts |
-| **Admin Control Center** | ✅ 100% | Pending queue alerts, badge management, user moderation, role switching |
+| **Social / Explore Feed** | ✅ 100% | Posts, showcase reels, likes, comments with badges, report & block actions |
+| **Messaging & Calling** | ✅ 100% | Chat conversations, voice & video calls, incoming call alerts, report & block |
+| **UGC Safety & Moderation** | ✅ 100% | Reporting modal, user blocking, feeds/chat filtering, admin moderation desk |
+| **Admin Control Center** | ✅ 100% | Verification queue, reports & moderation queue, conversions, adverts, badge management |
 | **Verification Badge System** | ✅ 100% | Golden `#B28A45` badge across all avatars, headers, and name rows |
 
 ---
@@ -69,3 +81,4 @@
 1. **Push Notifications**: Firebase Cloud Messaging (FCM) integration for real-time push alerts on background mobile devices.
 2. **Paystack Inline Webview**: In-app automated Paystack popup checkout modal for automated verification fee settlement.
 3. **Turn/Stun Media Relay**: Dedicated TURN server credentials for video calls across restrictive NAT/firewall networks.
+

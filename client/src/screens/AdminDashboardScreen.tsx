@@ -18,7 +18,7 @@ import {
     Linking,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { adminAPI, chatAPI } from '../services/api';
+import { adminAPI, chatAPI, moderationAPI } from '../services/api';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { auth } from '../config/firebase';
 import { useTheme } from '../context/ThemeContext';
@@ -47,14 +47,18 @@ export default function AdminDashboardScreen({ navigation }: any) {
     const [analytics, setAnalytics] = useState<any>(null);
     const [pendingVendors, setPendingVendors] = useState<any[]>([]);
 
-    // Navigation Sub-tab: 'overview' | 'support' | 'conversions' | 'adverts'
-    const [adminActiveTab, setAdminActiveTab] = useState<'overview' | 'support' | 'conversions' | 'adverts'>('overview');
+    // Navigation Sub-tab: 'overview' | 'support' | 'conversions' | 'adverts' | 'reports'
+    const [adminActiveTab, setAdminActiveTab] = useState<'overview' | 'support' | 'conversions' | 'adverts' | 'reports'>('overview');
 
     // Conversions & Adverts state
     const [pendingConversions, setPendingConversions] = useState<any[]>([]);
     const [loadingConversions, setLoadingConversions] = useState(false);
     const [pendingAdverts, setPendingAdverts] = useState<any[]>([]);
     const [loadingAdverts, setLoadingAdverts] = useState(false);
+
+    // Moderation & Reports state
+    const [reportsList, setReportsList] = useState<any[]>([]);
+    const [loadingReports, setLoadingReports] = useState(false);
 
     // Support Queue states
     const [supportConversations, setSupportConversations] = useState<any[]>([]);
@@ -164,11 +168,48 @@ export default function AdminDashboardScreen({ navigation }: any) {
         );
     };
 
+    const fetchReports = async (silent = false) => {
+        if (!silent) setLoadingReports(true);
+        try {
+            const res = await moderationAPI.getReports();
+            setReportsList(res.data?.reports || []);
+        } catch (err) {
+            console.error('Error fetching reports:', err);
+        } finally {
+            setLoadingReports(false);
+        }
+    };
+
+    const handleResolveReport = (report: any, action: 'dismiss' | 'remove_content' | 'suspend_user') => {
+        const actionLabel = action === 'dismiss' ? 'Dismiss' : action === 'remove_content' ? 'Remove Content' : 'Suspend User';
+        Alert.alert(
+            `${actionLabel} Report`,
+            `Are you sure you want to take action: "${actionLabel}" on this report?`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: actionLabel,
+                    style: action === 'dismiss' ? 'default' : 'destructive',
+                    onPress: async () => {
+                        try {
+                            await moderationAPI.resolveReport(report.id, action);
+                            setReportsList(prev => prev.map(r => r.id === report.id ? { ...r, status: action === 'dismiss' ? 'dismissed' : 'actioned', actionTaken: action } : r));
+                            Alert.alert('Action Taken', `Report has been processed: ${actionLabel}`);
+                        } catch (err: any) {
+                            Alert.alert('Error', err.response?.data?.message || 'Failed to resolve report.');
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     useEffect(() => {
         fetchData();
         fetchSupportConversations(true);
         fetchConversionRequests();
         fetchAdvertRequests();
+        fetchReports(true);
     }, []);
 
     const fetchData = async () => {
@@ -752,6 +793,40 @@ export default function AdminDashboardScreen({ navigation }: any) {
                         </View>
                     ) : null}
                 </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={[
+                        styles.topSegmentBtn,
+                        adminActiveTab === 'reports' && styles.topSegmentBtnActive,
+                        { flex: 1, minWidth: 100 }
+                    ]}
+                    onPress={() => {
+                        setAdminActiveTab('reports');
+                        fetchReports();
+                    }}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons
+                        name="shield-outline"
+                        size={15}
+                        color={adminActiveTab === 'reports' ? colors.primary : colors.textSecondary}
+                    />
+                    <Text
+                        style={[
+                            styles.topSegmentText,
+                            adminActiveTab === 'reports' && styles.topSegmentTextActive,
+                        ]}
+                    >
+                        Reports
+                    </Text>
+                    {reportsList.filter(r => r.status === 'pending').length > 0 && (
+                        <View style={[styles.segmentBadge, { backgroundColor: '#D9534F' }]}>
+                            <Text style={styles.segmentBadgeText}>
+                                {reportsList.filter(r => r.status === 'pending').length}
+                            </Text>
+                        </View>
+                    )}
+                </TouchableOpacity>
             </View>
 
             {adminActiveTab === 'overview' ? (
@@ -1045,7 +1120,7 @@ export default function AdminDashboardScreen({ navigation }: any) {
                         ))
                     )}
                 </ScrollView>
-            ) : (
+            ) : adminActiveTab === 'support' ? (
                 <ScrollView
                     contentContainerStyle={styles.scrollContent}
                     refreshControl={
@@ -1263,6 +1338,115 @@ export default function AdminDashboardScreen({ navigation }: any) {
                                             </TouchableOpacity>
                                         )}
                                     </View>
+                                </View>
+                            );
+                        })
+                    )}
+                </ScrollView>
+            ) : (
+                /* Moderation & Safety Reports View */
+                <ScrollView
+                    contentContainerStyle={styles.scrollContent}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={() => { fetchReports(); }} />
+                    }
+                >
+                    <View style={styles.supportHeaderRow}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.sectionTitle}>🛡️ Moderation & Safety Reports</Text>
+                            <Text style={styles.supportSubText}>
+                                Review flagged content, abusive users, and community guideline violations (Apple 1.2 & Google UGC compliance).
+                            </Text>
+                        </View>
+                        <TouchableOpacity
+                            style={styles.refreshQueueBtn}
+                            onPress={() => fetchReports()}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons name="refresh" size={15} color={colors.primary} />
+                            <Text style={[styles.refreshQueueBtnText, { color: colors.primary }]}>Refresh</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {loadingReports ? (
+                        <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: SPACING.xl }} />
+                    ) : reportsList.length === 0 ? (
+                        <View style={styles.emptySupportCard}>
+                            <Ionicons name="shield-checkmark-outline" size={48} color="#10B981" />
+                            <Text style={styles.emptySupportTitle}>Clean Community! No Reports</Text>
+                            <Text style={styles.emptySupportSubtitle}>
+                                All content is currently compliant. Flagged posts, comments, and reported users will appear here.
+                            </Text>
+                        </View>
+                    ) : (
+                        reportsList.map((rep) => {
+                            const isPending = rep.status === 'pending';
+                            return (
+                                <View key={rep.id} style={[styles.vendorCard, { marginBottom: SPACING.md }]}>
+                                    <View style={styles.vendorHeader}>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.vendorName}>
+                                                🚩 {rep.targetType?.toUpperCase()}: {rep.targetTitle || rep.targetId}
+                                            </Text>
+                                            <Text style={[styles.vendorCategory, { color: '#D9534F', fontWeight: 'bold' }]}>
+                                                Reason: {rep.reason}
+                                            </Text>
+                                        </View>
+                                        <View style={[styles.statusBadge, { backgroundColor: isPending ? '#EF4444' : '#10B981' }]}>
+                                            <Text style={styles.statusText}>{rep.status?.toUpperCase()}</Text>
+                                        </View>
+                                    </View>
+
+                                    {rep.details ? (
+                                        <Text style={[styles.vendorDescription, { marginTop: 4, fontStyle: 'italic' }]}>
+                                            "{rep.details}"
+                                        </Text>
+                                    ) : null}
+
+                                    <Text style={[styles.vendorInfo, { marginTop: 6 }]}>
+                                        🆔 Target ID: {rep.targetId} {rep.targetUserId ? `(User: ${rep.targetUserId})` : ''}
+                                    </Text>
+                                    <Text style={styles.vendorInfo}>
+                                        👤 Reported By: {rep.reporterUid || 'Anonymous'} ({rep.reporterEmail || 'No email'})
+                                    </Text>
+                                    <Text style={styles.vendorInfo}>
+                                        🕒 Submitted: {rep.createdAt ? new Date(rep.createdAt).toLocaleString() : 'N/A'}
+                                    </Text>
+
+                                    {rep.actionTaken ? (
+                                        <Text style={[styles.vendorInfo, { color: '#10B981', fontWeight: 'bold', marginTop: 4 }]}>
+                                            ✅ Action taken: {rep.actionTaken}
+                                        </Text>
+                                    ) : null}
+
+                                    {isPending && (
+                                        <View style={[styles.actionButtons, { marginTop: 12 }]}>
+                                            <TouchableOpacity
+                                                style={[styles.actionButton, { backgroundColor: '#6B7280' }]}
+                                                onPress={() => handleResolveReport(rep, 'dismiss')}
+                                            >
+                                                <Text style={[styles.actionButtonText, { color: '#fff' }]}>Dismiss</Text>
+                                            </TouchableOpacity>
+
+                                            {rep.targetType === 'post' && (
+                                                <TouchableOpacity
+                                                    style={[styles.actionButton, { backgroundColor: '#F59E0B' }]}
+                                                    onPress={() => handleResolveReport(rep, 'remove_content')}
+                                                >
+                                                    <Text style={[styles.actionButtonText, { color: '#fff' }]}>Delete Post</Text>
+                                                </TouchableOpacity>
+                                            )}
+
+                                            {rep.targetUserId && (
+                                                <TouchableOpacity
+                                                    style={[styles.actionButton, styles.rejectButton]}
+                                                    onPress={() => handleResolveReport(rep, 'suspend_user')}
+                                                >
+                                                    <Text style={[styles.actionButtonText, { color: '#fff' }]}>Suspend User</Text>
+                                                </TouchableOpacity>
+                                            )}
+                                        </View>
+                                    )}
                                 </View>
                             );
                         })

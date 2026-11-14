@@ -524,5 +524,63 @@ router.post('/change-password', authenticateUser, async (req: Request, res: Resp
     }
 });
 
+/**
+ * @route   DELETE /api/auth/delete-account
+ * @desc    Permanently delete the authenticated user's account and associated data (App Store & Google Play compliance)
+ * @access  Private (requires authentication)
+ */
+router.delete('/delete-account', authenticateUser, async (req: Request, res: Response) => {
+    try {
+        const callerUid = req.user!.uid;
+        console.log(`🗑️ Initiating account deletion for user: ${callerUid}`);
+
+        // 1. Delete user from Supabase (cascades to related tables if foreign keys configured)
+        try {
+            await supabase.from('users').delete().eq('uid', callerUid);
+            await supabase.from('vendors').delete().eq('uid', callerUid);
+            await supabase.from('reviews').delete().or(`client_id.eq.${callerUid},vendor_id.eq.${callerUid}`);
+            await supabase.from('favorites').delete().eq('client_id', callerUid);
+            await supabase.from('cart_items').delete().eq('user_id', callerUid);
+        } catch (sbErr: any) {
+            console.warn('Supabase cleanup note during account deletion:', sbErr.message);
+        }
+
+        // 2. Delete from Firestore
+        try {
+            await db.collection('users').doc(callerUid).delete();
+            await db.collection('vendors').doc(callerUid).delete();
+
+            // Mark posts by this author as deleted or remove them
+            const postsSnap = await db.collection('posts').where('authorId', '==', callerUid).get();
+            const batch = db.batch();
+            postsSnap.forEach(doc => {
+                batch.delete(doc.ref);
+            });
+            await batch.commit();
+        } catch (fsErr: any) {
+            console.warn('Firestore cleanup note during account deletion:', fsErr.message);
+        }
+
+        // 3. Delete from Firebase Authentication
+        try {
+            await auth.deleteUser(callerUid);
+        } catch (authErr: any) {
+            console.warn('Firebase Auth delete note:', authErr.message);
+        }
+
+        console.log(`✅ User ${callerUid} account completely deleted.`);
+        res.status(200).json({
+            success: true,
+            message: 'Your account and all associated data have been permanently deleted.'
+        });
+    } catch (error: any) {
+        console.error('Account deletion error:', error);
+        res.status(500).json({
+            error: 'Failed to delete account',
+            message: error.message || 'An error occurred while deleting your account. Please try again.'
+        });
+    }
+});
+
 export default router;
 

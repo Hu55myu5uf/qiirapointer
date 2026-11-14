@@ -14,6 +14,7 @@ import chatRoutes from './routes/chat.routes';
 import postRoutes from './routes/post.routes';
 import cartRoutes from './routes/cart.routes';
 import callRoutes from './routes/call.routes';
+import moderationRoutes from './routes/moderation.routes';
 import { ensureSupportAccount } from './scripts/seedSupport';
 
 // Initialize Express app
@@ -61,6 +62,7 @@ app.use('/api/chats', chatRoutes);
 app.use('/api/posts', postRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/calls', callRoutes);
+app.use('/api/moderation', moderationRoutes);
 
 // Serve uploaded images statically with security flags
 const path = require('path');

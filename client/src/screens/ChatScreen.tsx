@@ -20,7 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import supabase from '../config/supabase';
-import { chatAPI, vendorAPI, authAPI } from '../services/api';
+import { chatAPI, vendorAPI, authAPI, moderationAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
@@ -30,6 +30,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallStore } from '../store/callStore';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 import MediaAttachmentModal, { SelectedAttachment } from '../components/MediaAttachmentModal';
+import ReportModal from '../components/ReportModal';
 
 interface Message {
     id: string;
@@ -231,8 +232,50 @@ export default function ChatScreen({ route, navigation }: any) {
     const [replyingTo, setReplyingTo] = useState<Message | null>(null);
     const [attachmentModalVisible, setAttachmentModalVisible] = useState(false);
     const [pendingAttachment, setPendingAttachment] = useState<SelectedAttachment | null>(null);
+    const [reportModalVisible, setReportModalVisible] = useState(false);
 
     const flatListRef = useRef<FlatList>(null);
+
+    const handleMoreOptions = () => {
+        if (isSupportChat) return;
+        Alert.alert(
+            otherUserName || 'User Options',
+            'Manage safety and options for this conversation:',
+            [
+                {
+                    text: '🛡️ Report User',
+                    onPress: () => setReportModalVisible(true),
+                },
+                {
+                    text: '🚫 Block User',
+                    style: 'destructive',
+                    onPress: () => {
+                        Alert.alert(
+                            'Block User',
+                            `Are you sure you want to block ${otherUserName}? They will no longer be able to message you and their content will be hidden.`,
+                            [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                    text: 'Block',
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                        try {
+                                            await moderationAPI.blockUser(otherUserId, otherUserName);
+                                            Alert.alert('User Blocked', `${otherUserName} has been blocked.`);
+                                            navigation.goBack();
+                                        } catch (err: any) {
+                                            Alert.alert('Error', err.response?.data?.message || 'Failed to block user.');
+                                        }
+                                    }
+                                }
+                            ]
+                        );
+                    }
+                },
+                { text: 'Cancel', style: 'cancel' }
+            ]
+        );
+    };
 
     const handleInitiateCall = async (callType: 'voice' | 'video') => {
         if (!user || !otherUserId) return;
@@ -461,12 +504,19 @@ export default function ChatScreen({ route, navigation }: any) {
                             >
                                 <Ionicons name="videocam-outline" size={23} color={colors.textInverse} />
                             </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={handleMoreOptions}
+                                style={{ padding: 4 }}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="ellipsis-vertical" size={20} color={colors.textInverse} />
+                            </TouchableOpacity>
                         </>
                     )}
                 </View>
             ),
         });
-    }, [navigation, otherUserId, otherUserName, otherUserImage, headerAvatarSource, colors, user, otherUserIsVerified, otherUserIsAdmin, isSupportChat]);
+    }, [navigation, otherUserId, otherUserName, otherUserImage, headerAvatarSource, colors, user, otherUserIsVerified, otherUserIsAdmin, isSupportChat, handleMoreOptions]);
 
     const fetchMessages = useCallback(async (convId: string, showSpinner = false) => {
         if (!convId) return;
@@ -1078,6 +1128,16 @@ export default function ChatScreen({ route, navigation }: any) {
                 title="Send in Chat"
                 allowVideo={true}
                 allowDocuments={true}
+            />
+
+            {/* Safety & UGC Moderation Report Modal */}
+            <ReportModal
+                visible={reportModalVisible}
+                onClose={() => setReportModalVisible(false)}
+                targetType="user"
+                targetId={otherUserId || ''}
+                targetUserId={otherUserId}
+                targetTitle={otherUserName}
             />
         </SafeAreaView>
     );

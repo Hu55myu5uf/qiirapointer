@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { db } from '../config/firebase';
 import supabase from '../config/supabase';
 import { authenticateUser, requireSelfOrAdmin, MASTER_ADMIN_UID } from '../utils/authMiddleware';
+import { uploadBase64ToStorage } from '../utils/supabaseStorage';
+import * as path from 'path';
 
 const router = Router();
 
@@ -315,48 +317,31 @@ router.post('/upload-attachment', authenticateUser, async (req: Request, res: Re
             return res.status(400).json({ error: 'Invalid userId' });
         }
 
-        const fs = require('fs');
-        const path = require('path');
-
-        const baseUploadsDir = path.resolve(__dirname, '../../uploads/chats');
-        const uploadsDir = path.resolve(baseUploadsDir, safeUserId);
-
-        // Path containment check
-        if (!uploadsDir.startsWith(baseUploadsDir)) {
-            return res.status(400).json({ error: 'Invalid upload directory path' });
-        }
-
-        if (!fs.existsSync(uploadsDir)) {
-            fs.mkdirSync(uploadsDir, { recursive: true });
-        }
-
         // Strict extension allowlist
         const rawExt = path.extname(fileName || '').toLowerCase();
         const allowedExts = ['.jpg', '.jpeg', '.png', '.webp', '.mp4', '.mov', '.pdf', '.doc', '.docx'];
         const fallbackExt = fileType?.includes('video') ? '.mp4' : fileType?.includes('image') ? '.jpg' : '.pdf';
         const ext = allowedExts.includes(rawExt) ? rawExt : fallbackExt;
-
         const safeBaseName = path.basename(fileName || 'attachment', rawExt).replace(/[^a-zA-Z0-9_-]/g, '_');
-        const uniqueFilename = `${safeBaseName}_${Date.now()}${ext}`;
-        const filepath = path.resolve(uploadsDir, uniqueFilename);
-
-        if (!filepath.startsWith(uploadsDir)) {
-            return res.status(400).json({ error: 'Invalid destination file path' });
-        }
-
-        const base64Data = fileData.replace(/^data:[^;]+;base64,/, '');
-        const buffer = Buffer.from(base64Data, 'base64');
-        fs.writeFileSync(filepath, buffer);
 
         const protocol = req.protocol || 'http';
         const host = req.get('host') || 'localhost:5000';
-        const url = `${protocol}://${host}/uploads/chats/${safeUserId}/${uniqueFilename}`;
+
+        // Upload to permanent Supabase Storage with local fallback
+        const uploadResult = await uploadBase64ToStorage({
+            folder: `chats/${safeUserId}`,
+            filenamePrefix: safeBaseName,
+            base64Data: fileData,
+            preferredExtension: ext,
+            reqHost: host,
+            protocol: protocol,
+        });
 
         res.status(200).json({
-            url,
+            url: uploadResult.url,
             fileName: `${safeBaseName}${ext}`,
-            fileType: fileType || 'application/octet-stream',
-            fileSize: buffer.length
+            fileType: fileType || uploadResult.contentType || 'application/octet-stream',
+            fileSize: uploadResult.size
         });
     } catch (error: any) {
         console.error('Upload chat attachment error:', error);
@@ -409,6 +394,27 @@ router.post('/messages', authenticateUser, async (req: Request, res: Response) =
         if (!senderId || !receiverId) {
             return res.status(400).json({ error: 'Missing required fields: senderId or receiverId' });
         }
+
+        // Block check: Verify neither participant has blocked the other (Apple & Google UGC compliance)
+        try {
+            const receiverSnap = await db.collection('users').doc(receiverId).get();
+            const receiverBlocked: string[] = receiverSnap.data()?.blockedUserIds || [];
+            if (receiverBlocked.includes(senderId)) {
+                return res.status(403).json({
+                    error: 'Cannot Send Message',
+                    message: 'You cannot send messages to this user.'
+                });
+            }
+
+            const senderSnap = await db.collection('users').doc(senderId).get();
+            const senderBlocked: string[] = senderSnap.data()?.blockedUserIds || [];
+            if (senderBlocked.includes(receiverId)) {
+                return res.status(403).json({
+                    error: 'Cannot Send Message',
+                    message: 'You have blocked this user. Unblock them in Settings to send a message.'
+                });
+            }
+        } catch (_) {}
 
         const convId = conversationId || [senderId, receiverId].sort().join('_');
         const now = new Date().toISOString();

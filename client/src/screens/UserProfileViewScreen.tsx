@@ -12,13 +12,15 @@ import {
     StatusBar,
     Alert,
 } from 'react-native';
-import { authAPI, vendorAPI } from '../services/api';
+import { authAPI, vendorAPI, moderationAPI } from '../services/api';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
+import ReportModal from '../components/ReportModal';
+import { auth } from '../config/firebase';
 
 export default function UserProfileViewScreen({ route, navigation }: any) {
     const { colors } = useTheme();
@@ -122,6 +124,49 @@ export default function UserProfileViewScreen({ route, navigation }: any) {
     const avatarUri = profile.profileImage && !avatarError ? { uri: profile.profileImage } : defaultAvatarSource;
 
     const isVendor = profile.role === 'vendor';
+    const [reportModalVisible, setReportModalVisible] = useState(false);
+    const isSelf = auth.currentUser?.uid === userId;
+
+    const handleMoreOptions = () => {
+        if (isSelf) return;
+        Alert.alert(
+            profile.fullName || 'User Options',
+            'Community safety options for this account:',
+            [
+                {
+                    text: '🛡️ Report Profile',
+                    onPress: () => setReportModalVisible(true),
+                },
+                {
+                    text: '🚫 Block User',
+                    style: 'destructive',
+                    onPress: () => {
+                        Alert.alert(
+                            'Block Account',
+                            `Are you sure you want to block ${profile.fullName}? You will no longer see their posts or receive messages from them.`,
+                            [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                    text: 'Block',
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                        try {
+                                            await moderationAPI.blockUser(userId, profile.fullName);
+                                            Alert.alert('Blocked', `${profile.fullName} has been blocked.`);
+                                            navigation.goBack();
+                                        } catch (err: any) {
+                                            Alert.alert('Error', err.response?.data?.message || 'Failed to block user.');
+                                        }
+                                    }
+                                }
+                            ]
+                        );
+                    }
+                },
+                { text: 'Cancel', style: 'cancel' }
+            ]
+        );
+    };
 
     return (
         <View style={styles.container}>
@@ -134,7 +179,16 @@ export default function UserProfileViewScreen({ route, navigation }: any) {
                     <Ionicons name="arrow-back" size={22} color={colors.textPrimary} />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Profile</Text>
-                <View style={{ width: 40 }} />
+                {!isSelf ? (
+                    <TouchableOpacity
+                        style={styles.backButton}
+                        onPress={handleMoreOptions}
+                    >
+                        <Ionicons name="ellipsis-vertical" size={20} color={colors.textPrimary} />
+                    </TouchableOpacity>
+                ) : (
+                    <View style={{ width: 40 }} />
+                )}
             </View>
 
             <ScrollView
@@ -303,6 +357,15 @@ export default function UserProfileViewScreen({ route, navigation }: any) {
                     </>
                 )}
             </ScrollView>
+
+            <ReportModal
+                visible={reportModalVisible}
+                onClose={() => setReportModalVisible(false)}
+                targetType={profile.role === 'vendor' ? 'vendor' : 'user'}
+                targetId={userId || ''}
+                targetUserId={userId}
+                targetTitle={profile.fullName}
+            />
         </View>
     );
 }

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { db } from '../config/firebase';
 import supabase from '../config/supabase';
 import { authenticateUser } from '../utils/authMiddleware';
+import { uploadBase64ToStorage } from '../utils/supabaseStorage';
 
 const router = Router();
 
@@ -150,7 +151,19 @@ router.get('/feed', async (req: Request, res: Response) => {
         const { type, category, limit = '30', userId } = req.query;
         const allPosts = await getAllUnifiedPosts();
 
+        // Fetch blocked users if userId is provided
+        let blockedUserIds: string[] = [];
+        if (userId) {
+            try {
+                const uSnap = await db.collection('users').doc(userId as string).get();
+                blockedUserIds = uSnap.data()?.blockedUserIds || [];
+            } catch (_) {}
+        }
+
         let filtered = allPosts.filter(p => {
+            if (blockedUserIds.length > 0 && (blockedUserIds.includes(p.authorId) || blockedUserIds.includes(p.vendorId))) {
+                return false;
+            }
             if (type && type !== 'all' && p.type !== type) return false;
             if (category && category !== 'All') {
                 const catStr = String(category).toLowerCase();
@@ -189,10 +202,20 @@ router.get(['/reels', '/showcase'], async (req: Request, res: Response) => {
         const { userId } = req.query;
         const allPosts = await getAllUnifiedPosts();
 
-        const showcaseList = allPosts.filter(p => p.type === 'reel' || p.type === 'showcase').map(p => ({
-            ...p,
-            isLiked: userId ? (p.likedBy || []).includes(userId as string) : false,
-        }));
+        let blockedUserIds: string[] = [];
+        if (userId) {
+            try {
+                const uSnap = await db.collection('users').doc(userId as string).get();
+                blockedUserIds = uSnap.data()?.blockedUserIds || [];
+            } catch (_) {}
+        }
+
+        const showcaseList = allPosts
+            .filter(p => (p.type === 'reel' || p.type === 'showcase') && (!blockedUserIds.includes(p.authorId) && !blockedUserIds.includes(p.vendorId)))
+            .map(p => ({
+                ...p,
+                isLiked: userId ? (p.likedBy || []).includes(userId as string) : false,
+            }));
 
         res.status(200).json({
             showcase: showcaseList,
@@ -312,6 +335,28 @@ router.post('/', authenticateUser, async (req: Request, res: Response) => {
         if (authorType === 'client' && !caption && finalMediaUrls.length === 0) {
             return res.status(400).json({ error: 'Please provide either a message or a photo/video for your post' });
         }
+
+        // Convert any Base64 data URIs to permanent Supabase Storage URLs
+        const reqHost = req.get('host') || 'localhost:5000';
+        const reqProtocol = req.protocol || 'http';
+        finalMediaUrls = await Promise.all(finalMediaUrls.map(async (u, idx) => {
+            if (u && typeof u === 'string' && u.startsWith('data:')) {
+                try {
+                    const upRes = await uploadBase64ToStorage({
+                        folder: `posts/${creatorId}`,
+                        filenamePrefix: `media_${idx}`,
+                        base64Data: u,
+                        reqHost,
+                        protocol: reqProtocol,
+                    });
+                    return upRes.url;
+                } catch (e) {
+                    console.warn('Post media upload note:', e);
+                    return u;
+                }
+            }
+            return u;
+        }));
 
         const postId = `post_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
         let newPost: any;
