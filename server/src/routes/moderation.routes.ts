@@ -1,18 +1,21 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../config/firebase';
 import supabase from '../config/supabase';
-import { authenticateUser, optionalAuthenticateUser, requireAdmin } from '../utils/authMiddleware';
+import crypto from 'crypto';
+import { authenticateUser, requireAdmin } from '../utils/authMiddleware';
+import { reportLimiter } from '../utils/rateLimiter';
 
 const router = Router();
 
+// Must match the labels in client/src/components/ReportModal.tsx
 export const REPORT_REASONS = [
-    'Inappropriate or Offensive Content',
-    'Spam or Scam',
-    'Harassment or Hate Speech',
-    'Fake Profile or Impersonation',
-    'Misleading or Fraudulent Business',
-    'Intellectual Property Violation',
-    'Other'
+    'Inappropriate or offensive content',
+    'Spam, scam, or misleading information',
+    'Harassment, bullying, or hate speech',
+    'Fake profile, store, or impersonation',
+    'Fraudulent transaction or payment issue',
+    'Intellectual property or copyright violation',
+    'Other violation',
 ];
 
 /**
@@ -20,7 +23,7 @@ export const REPORT_REASONS = [
  * @desc    Submit a user-generated content or user violation report (Apple & Google UGC compliance)
  * @access  Public / Authenticated
  */
-router.post('/report', optionalAuthenticateUser, async (req: Request, res: Response) => {
+router.post('/report', authenticateUser, reportLimiter, async (req: Request, res: Response) => {
     try {
         const {
             targetType,    // 'post' | 'comment' | 'user' | 'vendor'
@@ -43,16 +46,36 @@ router.post('/report', optionalAuthenticateUser, async (req: Request, res: Respo
             return res.status(400).json({ error: `Invalid targetType. Allowed: ${validTypes.join(', ')}` });
         }
 
-        const reporterUid = req.user?.uid || req.body.reporterId || 'anonymous';
-        const reporterEmail = req.user?.email || req.body.reporterEmail || null;
-        const reportId = `rep_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+        if (!REPORT_REASONS.includes(String(reason))) {
+            return res.status(400).json({ error: 'Please choose a valid report reason' });
+        }
+        if (String(targetId).length > 200 || (targetUserId && String(targetUserId).length > 200)) {
+            return res.status(400).json({ error: 'Invalid target' });
+        }
+
+        // The reporter is always the logged-in user
+        const reporterUid = req.user!.uid;
+        const reporterEmail = req.user!.email || null;
+
+        // One report per user per item: the id is derived from (reporter, type, target)
+        const reportId = 'rep_' + crypto.createHash('sha256')
+            .update(`${reporterUid}|${targetType}|${targetId}`).digest('hex').slice(0, 32);
+        const existing = await db.collection('reports').doc(reportId).get();
+        if (existing.exists) {
+            return res.status(200).json({
+                success: true,
+                alreadyReported: true,
+                message: 'You have already reported this. Our moderation team will review it.',
+                reportId,
+            });
+        }
 
         const reportData = {
             id: reportId,
             targetType,
             targetId: String(targetId),
             targetUserId: targetUserId ? String(targetUserId) : null,
-            targetTitle: targetTitle || null,
+            targetTitle: targetTitle ? String(targetTitle).slice(0, 200) : null,
             reason: String(reason),
             details: details ? String(details).slice(0, 1000) : '',
             reporterUid,
@@ -63,12 +86,8 @@ router.post('/report', optionalAuthenticateUser, async (req: Request, res: Respo
             resolutionNotes: null,
         };
 
-        // 1. Store in Firestore reports collection
-        try {
-            await db.collection('reports').doc(reportId).set(reportData);
-        } catch (fsErr: any) {
-            console.warn('Firestore report save note:', fsErr.message);
-        }
+        // 1. Store in Firestore reports collection (if this fails the user must be told)
+        await db.collection('reports').doc(reportId).set(reportData);
 
         // 2. Also try Supabase reports table if exists (non-blocking)
         try {

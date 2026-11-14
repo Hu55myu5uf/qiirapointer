@@ -31,6 +31,7 @@ expo-env.d.ts
 */.env*
 *.pem
 *firebase*.json
+!/firebase.json
 *serviceAccount*.json
 firebase-service-account.json
 */firebase-service-account.json
@@ -49,3 +50,6 @@ yarn-error.*
 .DS_Store
 Thumbs.db
 *.tsbuildinfo
+
+# Local data backups (contain personal data)
+backups/

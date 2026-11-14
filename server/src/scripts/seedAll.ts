@@ -1,3 +1,4 @@
+import './devGuard';
 import { auth } from '../config/firebase';
 import supabase from '../config/supabase';
 

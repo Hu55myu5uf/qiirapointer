@@ -11,10 +11,10 @@ import {
     Platform,
     KeyboardAvoidingView,
 } from 'react-native';
-import { authAPI } from '../services/api';
-import { useAuthStore } from '../store/authStore';
 import { auth } from '../config/firebase';
-import { updatePassword } from 'firebase/auth';
+import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 'firebase/auth';
+
+const MIN_PASSWORD_LENGTH = 8;
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 
@@ -26,8 +26,8 @@ interface ChangePasswordModalProps {
 export default function ChangePasswordModal({ visible, onClose }: ChangePasswordModalProps) {
     const { colors } = useTheme();
     const styles = getStyles(colors);
-    const { user } = useAuthStore();
 
+    const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
@@ -36,6 +36,7 @@ export default function ChangePasswordModal({ visible, onClose }: ChangePassword
     const [successMessage, setSuccessMessage] = useState('');
 
     const handleResetState = () => {
+        setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
         setErrorMessage('');
@@ -52,13 +53,23 @@ export default function ChangePasswordModal({ visible, onClose }: ChangePassword
         setErrorMessage('');
         setSuccessMessage('');
 
+        if (!currentPassword) {
+            setErrorMessage('Please enter your current password.');
+            return;
+        }
+
         if (!newPassword || newPassword.trim() === '') {
             setErrorMessage('Please enter a new password.');
             return;
         }
 
-        if (newPassword.length < 6) {
-            setErrorMessage('Password must be at least 6 characters long.');
+        if (newPassword.length < MIN_PASSWORD_LENGTH) {
+            setErrorMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long.`);
+            return;
+        }
+
+        if (newPassword === currentPassword) {
+            setErrorMessage('Your new password must be different from your current password.');
             return;
         }
 
@@ -67,27 +78,20 @@ export default function ChangePasswordModal({ visible, onClose }: ChangePassword
             return;
         }
 
+        const firebaseUser = auth.currentUser;
+        if (!firebaseUser?.email) {
+            setErrorMessage('Please sign out and sign in again, then try changing your password.');
+            return;
+        }
+
         setLoading(true);
 
         try {
-            // 1. Try Firebase client SDK updatePassword if current user session is fresh
-            let clientSuccess = false;
-            if (auth.currentUser) {
-                try {
-                    await updatePassword(auth.currentUser, newPassword);
-                    clientSuccess = true;
-                } catch (fbErr: any) {
-                    console.log('Client SDK password update note (falling back to backend API):', fbErr.message);
-                }
-            }
-
-            // 2. Also call backend API to ensure admin-level sync
-            if (!clientSuccess) {
-                await authAPI.changePassword({
-                    newPassword,
-                    uid: user?.uid,
-                });
-            }
+            // Confirm the current password with Firebase first: a stolen or left-open session
+            // is never enough on its own to change the password.
+            const credential = EmailAuthProvider.credential(firebaseUser.email, currentPassword);
+            await reauthenticateWithCredential(firebaseUser, credential);
+            await updatePassword(firebaseUser, newPassword);
 
             setSuccessMessage('Password updated successfully!');
             setTimeout(() => {
@@ -95,12 +99,17 @@ export default function ChangePasswordModal({ visible, onClose }: ChangePassword
                 Alert.alert('Success', 'Password updated successfully!');
             }, 1200);
         } catch (error: any) {
-            console.error('Password change error:', error);
-            const msg =
-                error.response?.data?.error ||
-                error.response?.data?.message ||
-                error.message ||
-                'Failed to update password. Please try again.';
+            const code = error?.code || '';
+            let msg = 'Failed to update password. Please try again.';
+            if (code === 'auth/wrong-password' || code === 'auth/invalid-credential' || code === 'auth/invalid-login-credentials') {
+                msg = 'Your current password is incorrect.';
+            } else if (code === 'auth/too-many-requests') {
+                msg = 'Too many attempts. Please wait a few minutes and try again.';
+            } else if (code === 'auth/weak-password') {
+                msg = 'Please choose a stronger password.';
+            } else if (code === 'auth/network-request-failed') {
+                msg = 'No internet connection. Please try again.';
+            }
             setErrorMessage(msg);
         } finally {
             setLoading(false);
@@ -134,7 +143,7 @@ export default function ChangePasswordModal({ visible, onClose }: ChangePassword
                     </View>
 
                     <Text style={styles.subtitle}>
-                        Enter a new secure password (minimum 6 characters).
+                        Confirm your current password, then choose a new one (minimum {MIN_PASSWORD_LENGTH} characters).
                     </Text>
 
                     {/* Messages */}
@@ -151,6 +160,21 @@ export default function ChangePasswordModal({ visible, onClose }: ChangePassword
                     ) : null}
 
                     {/* Input Fields */}
+                    <View style={styles.formGroup}>
+                        <Text style={styles.label}>Current Password</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={currentPassword}
+                            onChangeText={setCurrentPassword}
+                            placeholder="Enter current password"
+                            placeholderTextColor={colors.textTertiary}
+                            secureTextEntry={!showPassword}
+                            autoCapitalize="none"
+                            autoComplete="current-password"
+                            textContentType="password"
+                        />
+                    </View>
+
                     <View style={styles.formGroup}>
                         <Text style={styles.label}>New Password</Text>
                         <View style={styles.inputWrapper}>

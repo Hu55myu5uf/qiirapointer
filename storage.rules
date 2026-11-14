@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// QIIRA Cloud Storage security rules
+//
+// Uploads go through the QIIRA API server (Admin SDK, not subject to these rules).
+// Direct client access is denied until Phase 2 defines public media vs. private KYC folders.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

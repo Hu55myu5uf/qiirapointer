@@ -16,7 +16,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
 import { moderationAPI } from '../services/api';
-import { auth } from '../config/firebase';
 
 export interface ReportModalProps {
     visible: boolean;
@@ -69,8 +68,6 @@ export default function ReportModal({
                 targetTitle,
                 reason: selectedReason,
                 details: details.trim(),
-                reporterId: auth.currentUser?.uid,
-                reporterEmail: auth.currentUser?.email || undefined,
             });
 
             Alert.alert(

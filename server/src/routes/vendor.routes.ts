@@ -3,6 +3,7 @@ import supabase from '../config/supabase';
 import { db, auth } from '../config/firebase';
 import { authenticateUser, requireSelfOrAdmin, MASTER_ADMIN_UID } from '../utils/authMiddleware';
 import { uploadBase64ToStorage } from '../utils/supabaseStorage';
+import { uploadLimiter, writeLimiter } from '../utils/rateLimiter';
 import * as path from 'path';
 
 const router = Router();
@@ -212,7 +213,7 @@ function mapVendor(v: any) {
         distanceMeters: v.distance_meters,
         userInfo: userObj ? {
             uid: userObj.uid,
-            email: userObj.email,
+            // email deliberately omitted (private)
             fullName: userObj.full_name || userObj.fullName || v.business_name || v.businessName,
             phoneNumber: userObj.phone_number || userObj.phoneNumber,
             role: userObj.role || (isAdmin ? 'admin' : 'vendor'),
@@ -612,7 +613,7 @@ router.get('/:id', async (req: Request, res: Response) => {
                 badgeSubscribedAt: fsVendor?.badgeSubscribedAt || vendorData?.badge_subscribed_at || null,
                 userInfo: {
                     uid: id,
-                    email: fsUser?.email || userObj?.email || fbUser?.email || '',
+                    // email deliberately omitted: vendor account emails are private
                     fullName: fsUser?.fullName || fsUser?.displayName || userObj?.full_name || fbUser?.displayName || businessName,
                     phoneNumber: fsUser?.phoneNumber || userObj?.phone_number || fbUser?.phoneNumber || '',
                     role: fsUser?.role || userObj?.role || (isVendorAdmin ? 'admin' : 'vendor'),
@@ -768,42 +769,11 @@ router.post(['/:id/verification-documents', '/:id/documents'], authenticateUser,
 });
 
 /**
- * @route   POST /api/vendors/:id/payment
- * @desc    Process verification fee payment
- * @access  Private (Vendor only)
- */
-router.post('/:id/payment', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
-    try {
-        const { id } = req.params;
-        const { paymentReference, amount } = req.body;
-
-        // TODO: Verify payment with Paystack/Stripe API
-
-        const { error } = await supabase
-            .from('vendors')
-            .update({
-                payment_status: 'paid',
-                payment_reference: paymentReference,
-                payment_amount: amount,
-                paid_at: new Date().toISOString()
-            })
-            .eq('uid', id);
-
-        if (error) throw error;
-
-        res.status(200).json({ message: 'Payment processed successfully' });
-    } catch (error: any) {
-        console.error('Payment error:', error);
-        res.status(500).json({ error: 'Failed to process payment', message: error.message });
-    }
-});
-
-/**
  * @route   POST /api/vendors/upload-image
  * @desc    Upload image (Base64) and save locally (for testing without Firebase Storage)
  * @access  Private (Vendor only)
  */
-router.post('/upload-image', authenticateUser, async (req: Request, res: Response) => {
+router.post('/upload-image', authenticateUser, uploadLimiter, async (req: Request, res: Response) => {
     try {
         const { userId, imageData, imageType } = req.body; // imageType: 'profile' or 'banner'
         const callerUid = req.user!.uid;
@@ -854,7 +824,7 @@ router.post('/upload-image', authenticateUser, async (req: Request, res: Respons
  * @desc    Upload document/PDF (Base64) to Supabase Storage
  * @access  Private (Vendor only)
  */
-router.post('/upload-document', authenticateUser, async (req: Request, res: Response) => {
+router.post('/upload-document', authenticateUser, uploadLimiter, async (req: Request, res: Response) => {
     try {
         const { userId, fileData, fileName, fileType } = req.body;
         const callerUid = req.user!.uid;
@@ -1362,7 +1332,7 @@ router.get(['/:id/documents', '/:id/menu-documents'], async (req: Request, res: 
  * @desc    Add a new menu/document PDF for a vendor
  * @access  Vendor only
  */
-router.post(['/:id/documents', '/:id/menu-documents'], async (req: Request, res: Response) => {
+router.post(['/:id/documents', '/:id/menu-documents'], authenticateUser, requireSelfOrAdmin('id'), writeLimiter, async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const { title, url, fileType, fileSize } = req.body;
@@ -1370,13 +1340,20 @@ router.post(['/:id/documents', '/:id/menu-documents'], async (req: Request, res:
         if (!title || !url) {
             return res.status(400).json({ error: 'title and url are required' });
         }
+        if (typeof title !== 'string' || title.trim().length === 0 || title.length > 120) {
+            return res.status(400).json({ error: 'Title must be 1–120 characters' });
+        }
+        // Customers tap these links directly, so only real https web links are accepted
+        if (typeof url !== 'string' || url.length > 2048 || !/^https:\/\/[^\s]+$/i.test(url)) {
+            return res.status(400).json({ error: 'Document link must be an https:// URL' });
+        }
 
         const newDoc = {
             id: `doc_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-            title,
+            title: title.trim(),
             url,
-            fileType: fileType || 'application/pdf',
-            fileSize: fileSize || 0,
+            fileType: typeof fileType === 'string' ? fileType.slice(0, 100) : 'application/pdf',
+            fileSize: Number(fileSize) || 0,
             uploadedAt: new Date().toISOString(),
         };
 

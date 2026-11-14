@@ -189,7 +189,7 @@ router.post('/:id/reviews', authenticateUser, requireSelfOrAdmin('id'), async (r
  * @desc    Get client's favorite vendors
  * @access  Private (Client only)
  */
-router.get('/:id/favorites', async (req: Request, res: Response) => {
+router.get('/:id/favorites', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
 

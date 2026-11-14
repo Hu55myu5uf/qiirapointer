@@ -262,8 +262,9 @@ export const callAPI = {
         api.post(`/calls/${callId}/reject`),
     endCall: (callId: string, durationSeconds?: number) =>
         api.post(`/calls/${callId}/end`, { durationSeconds }),
-    getHistory: (userId: string) =>
-        api.get(`/calls/history/${userId}`),
+    // Short-lived token that lets the in-call WebView exchange signals for this call only
+    getRoomToken: (callId: string) =>
+        api.get(`/calls/${callId}/room-token`),
 };
 
 export const moderationAPI = {

@@ -1,3 +1,4 @@
+if (process.env.NODE_ENV === 'production' || process.env.ALLOW_DEV_SCRIPTS !== 'yes') { console.error('Refusing to run: modifies live data. Set ALLOW_DEV_SCRIPTS=yes to run.'); process.exit(1); }
 const { auth, db } = require('../dist/config/firebase');
 const supabase = require('../dist/config/supabase').default;
 

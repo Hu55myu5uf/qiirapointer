@@ -4,8 +4,9 @@ import { authenticateUser, requireSelfOrAdmin } from '../utils/authMiddleware';
 
 const router = Router();
 
-// Protect all cart operations: only owner or admin can read/modify the cart
-router.use(authenticateUser, requireSelfOrAdmin('userId'));
+// Protect all cart operations: only owner or admin can read/modify the cart.
+// Mounted on '/:userId' so the URL param is available to the ownership check.
+router.use('/:userId', authenticateUser, requireSelfOrAdmin('userId'));
 
 export interface CartItem {
     id: string; // post ID or product ID

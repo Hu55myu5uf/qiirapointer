@@ -1,19 +1,48 @@
 import { Router, Request, Response } from 'express';
 import { auth, db } from '../config/firebase';
 import supabase from '../config/supabase';
-import { authenticateUser, requireSelfOrAdmin, MASTER_ADMIN_UID } from '../utils/authMiddleware';
-import { rateLimiter } from '../utils/rateLimiter';
+import { authenticateUser, optionalAuthenticateUser, requireSelfOrAdmin, MASTER_ADMIN_UID, SUPPORT_UID } from '../utils/authMiddleware';
+import { authLimiter } from '../utils/rateLimiter';
 
 const router = Router();
 
-// Rate limiter for authentication endpoints: 40 requests per 15 minutes per IP
-const authLimiter = rateLimiter(15 * 60 * 1000, 40, 'Too many authentication attempts. Please try again later.');
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MIN_PASSWORD_LENGTH = 8;
+
+/**
+ * Fields anyone may see about another user. Email, push token, block lists etc. stay private.
+ * Vendors' phone numbers are public on purpose (customers call businesses directly).
+ */
+function toPublicProfile(user: any) {
+    if (!user) return null;
+    const isVendor = user.role === 'vendor';
+    const phone = isVendor ? (user.phoneNumber || user.phone_number || null) : null;
+    return {
+        id: user.uid,
+        uid: user.uid,
+        fullName: user.fullName,
+        full_name: user.fullName,
+        displayName: user.fullName,
+        profileImage: user.profileImage,
+        profile_image: user.profileImage,
+        role: user.role,
+        isAdmin: Boolean(user.isAdmin),
+        isSupport: Boolean(user.isSupport),
+        isVerified: Boolean(user.isVerified),
+        is_verified: Boolean(user.isVerified),
+        businessName: user.businessName || null,
+        phoneNumber: phone,
+        phone_number: phone,
+        createdAt: user.createdAt || user.created_at || null,
+        created_at: user.createdAt || user.created_at || null,
+    };
+}
 
 // Resilient user profile retriever (checks Firestore, Supabase, and Firebase Auth)
 async function getUserProfile(uid: string) {
-    if (uid === 'qiira_official_support') {
+    if (uid === SUPPORT_UID) {
         return {
-            uid: 'qiira_official_support',
+            uid: SUPPORT_UID,
             email: 'support@qiira.com',
             fullName: 'QIIRA Customer Support',
             displayName: 'QIIRA Customer Support',
@@ -59,17 +88,15 @@ async function getUserProfile(uid: string) {
         try {
             const fbUser = await auth.getUser(uid);
             if (fbUser) {
-                const email = fbUser.email || '';
-                let role = 'client';
-                if (email.includes('bistro') || email.includes('repair') || email.includes('clinic') || email.includes('market') || email.includes('vendor')) role = 'vendor';
-
+                // Accounts with no profile document are always plain clients. (Roles are never
+                // inferred from the email address.)
                 rawData = {
                     uid,
                     email: fbUser.email,
                     fullName: fbUser.displayName || fbUser.email?.split('@')[0] || 'User',
                     profileImage: fbUser.photoURL || '',
-                    role,
-                    isVerified: role === 'admin',
+                    role: 'client',
+                    isVerified: false,
                 };
 
                 // Cache into Firestore for subsequent requests
@@ -93,7 +120,9 @@ async function getUserProfile(uid: string) {
     const isVerified = rawData.isVerified ?? rawData.is_verified ?? isAdmin;
     const isSuspended = rawData.isSuspended ?? rawData.is_suspended ?? false;
 
+    // Stored fields first; computed, authoritative fields last so stored data can't override them
     return {
+        ...rawData,
         id: uid,
         uid: uid,
         email: rawData.email,
@@ -109,8 +138,8 @@ async function getUserProfile(uid: string) {
         is_verified: Boolean(isVerified || isAdmin),
         isSuspended: Boolean(isSuspended),
         is_suspended: Boolean(isSuspended),
+        createdAt: rawData.createdAt || rawData.created_at,
         created_at: rawData.createdAt || rawData.created_at,
-        ...rawData
     };
 }
 
@@ -130,6 +159,19 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
 
         if (!['client', 'vendor'].includes(role)) {
             return res.status(400).json({ error: 'Invalid role. Must be client or vendor' });
+        }
+
+        if (typeof email !== 'string' || !EMAIL_RE.test(email.trim())) {
+            return res.status(400).json({ error: 'Please enter a valid email address' });
+        }
+        if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+            return res.status(400).json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters long` });
+        }
+        if (typeof fullName !== 'string' || fullName.trim().length < 2 || fullName.length > 100) {
+            return res.status(400).json({ error: 'Please enter your full name (2–100 characters)' });
+        }
+        if (phoneNumber !== undefined && phoneNumber !== null && (typeof phoneNumber !== 'string' || phoneNumber.length > 25)) {
+            return res.status(400).json({ error: 'Invalid phone number' });
         }
 
         // Create user in Firebase Auth (unchanged)
@@ -209,11 +251,14 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
             },
         });
     } catch (error: any) {
+        if (error?.code === 'auth/email-already-exists') {
+            return res.status(409).json({ error: 'An account with this email already exists' });
+        }
+        if (error?.code === 'auth/invalid-email' || error?.code === 'auth/invalid-password') {
+            return res.status(400).json({ error: 'Invalid email or password' });
+        }
         console.error('Registration error:', error);
-        res.status(500).json({
-            error: 'Registration failed',
-            message: error.message
-        });
+        res.status(500).json({ error: 'Registration failed' });
     }
 });
 
@@ -266,9 +311,10 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
  * @desc    OAuth (Google / Apple) sign-in and auto-registration
  * @access  Public
  */
-router.post('/oauth', async (req: Request, res: Response) => {
+router.post('/oauth', authLimiter, async (req: Request, res: Response) => {
     try {
-        const { idToken, provider, role = 'client', fullName, email, photoURL } = req.body;
+        // The email always comes from the verified token, never from the request body
+        const { idToken, provider, role = 'client', fullName, photoURL } = req.body;
 
         if (!idToken) {
             return res.status(400).json({ error: 'ID token is required' });
@@ -287,13 +333,13 @@ router.post('/oauth', async (req: Request, res: Response) => {
             tokenPicture = decodedToken.picture;
         } catch (tokenErr: any) {
             console.error('OAuth token verification error:', tokenErr.message);
-            return res.status(401).json({ error: 'Invalid or expired token', message: tokenErr.message });
+            return res.status(401).json({ error: 'Invalid or expired token' });
         }
 
         let userData = await getUserProfile(uid);
 
         if (!userData) {
-            const userEmail = email || tokenEmail || '';
+            const userEmail = tokenEmail || '';
             const userName = fullName || tokenName || userEmail.split('@')[0] || 'User';
             const userPhoto = photoURL || tokenPicture || '';
             const userRole = ['client', 'vendor'].includes(role) ? role : 'client';
@@ -359,10 +405,11 @@ router.post('/oauth', async (req: Request, res: Response) => {
 
 /**
  * @route   GET /api/auth/user/:uid
- * @desc    Get user profile
- * @access  Private (requires authentication)
+ * @desc    Get a user profile. The owner and admins get the full profile; everyone else gets
+ *          public fields only (no email, push token, block list; phone only for vendors).
+ * @access  Public (limited) / Owner or Admin (full)
  */
-router.get('/user/:uid', async (req: Request, res: Response) => {
+router.get('/user/:uid', optionalAuthenticateUser, async (req: Request, res: Response) => {
     try {
         const { uid } = req.params;
         const userData = await getUserProfile(uid);
@@ -371,13 +418,11 @@ router.get('/user/:uid', async (req: Request, res: Response) => {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        res.status(200).json({ user: userData });
+        const canSeePrivate = Boolean(req.user && (req.user.uid === uid || req.user.isAdmin));
+        res.status(200).json({ user: canSeePrivate ? userData : toPublicProfile(userData) });
     } catch (error: any) {
         console.error('Get user error:', error);
-        res.status(500).json({
-            error: 'Failed to retrieve user',
-            message: error.message
-        });
+        res.status(500).json({ error: 'Failed to retrieve user' });
     }
 });
 
@@ -489,38 +534,42 @@ router.put('/user/:uid', authenticateUser, requireSelfOrAdmin('uid'), async (req
 
 /**
  * @route   POST /api/auth/change-password
- * @desc    Change user password
- * @access  Private (requires authentication)
+ * @desc    Admin-only: reset ANOTHER user's password.
+ *          Users change their own password in the app, which first re-confirms the current
+ *          password with Firebase (reauthenticate + updatePassword). A stolen session token alone
+ *          can therefore never change a password.
+ * @access  Admin only
  */
-router.post('/change-password', authenticateUser, async (req: Request, res: Response) => {
+router.post('/change-password', authenticateUser, authLimiter, async (req: Request, res: Response) => {
     try {
-        const { newPassword, currentPassword, uid: bodyUid } = req.body;
+        const { newPassword, uid: targetUid } = req.body;
         const callerUid = req.user!.uid;
-        const isCallerAdmin = req.user!.isAdmin;
 
-        // If target uid is provided and differs from caller, caller MUST be an admin
-        const targetUid = bodyUid || callerUid;
-        if (targetUid !== callerUid && !isCallerAdmin) {
+        if (!req.user!.isAdmin) {
             return res.status(403).json({
                 error: 'Forbidden',
-                message: 'You are only allowed to change your own password.'
+                message: 'To change your password, confirm your current password in the app.'
             });
         }
-
-        if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
-            return res.status(400).json({ error: 'New password must be at least 6 characters long' });
+        if (!targetUid || typeof targetUid !== 'string' || targetUid === callerUid) {
+            return res.status(400).json({ error: 'A target user id (other than your own) is required' });
+        }
+        if (!newPassword || typeof newPassword !== 'string' || newPassword.length < MIN_PASSWORD_LENGTH) {
+            return res.status(400).json({ error: `New password must be at least ${MIN_PASSWORD_LENGTH} characters long` });
         }
 
-        // Update password using Firebase Admin
         await auth.updateUser(targetUid, { password: newPassword });
+        // Sign the user out everywhere so the old password's sessions stop working
+        await auth.revokeRefreshTokens(targetUid);
 
+        console.log(`🔑 Admin ${callerUid} reset the password of ${targetUid}`);
         res.status(200).json({ message: 'Password changed successfully' });
     } catch (error: any) {
+        if (error?.code === 'auth/user-not-found') {
+            return res.status(404).json({ error: 'User not found' });
+        }
         console.error('Change password error:', error);
-        res.status(500).json({
-            error: 'Failed to update password',
-            message: error.message
-        });
+        res.status(500).json({ error: 'Failed to update password' });
     }
 });
 

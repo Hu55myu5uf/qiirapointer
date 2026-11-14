@@ -51,8 +51,8 @@ export default function RegisterScreen({ navigation }: any) {
             return;
         }
 
-        if (password.length < 6) {
-            const msg = 'Password must be at least 6 characters long.';
+        if (password.length < 8) {
+            const msg = 'Password must be at least 8 characters long.';
             setStatusMessage({ type: 'error', text: msg });
             Alert.alert('Registration Failed', msg);
             return;
@@ -230,7 +230,7 @@ export default function RegisterScreen({ navigation }: any) {
                         <View style={styles.passwordContainer}>
                             <TextInput
                                 style={[styles.input, styles.passwordInput]}
-                                placeholder="Enter your password (min 6 characters)"
+                                placeholder="Enter your password (min 8 characters)"
                                 placeholderTextColor={colors.textTertiary}
                                 value={password}
                                 onChangeText={setPassword}

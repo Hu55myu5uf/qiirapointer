@@ -26,8 +26,6 @@ const { width, height } = Dimensions.get('window');
 export default function CallScreen({ route, navigation }: any) {
     const { colors } = useTheme();
     const { user: authUser } = useAuthStore();
-    const currentUserId = authUser?.uid || 'user_' + Date.now();
-    const currentUserName = authUser?.displayName || 'Caller';
 
     const {
         callId,
@@ -240,14 +238,28 @@ export default function CallScreen({ route, navigation }: any) {
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
 
-    const roomUrl = `${API_URL}/calls/room/${callId}?userId=${encodeURIComponent(currentUserId)}&userName=${encodeURIComponent(currentUserName)}&type=${callType}&targetId=${encodeURIComponent(otherUserId || '')}`;
+    // The call page only opens with a short-lived token issued to a participant of this call
+    const [roomToken, setRoomToken] = useState<string | null>(null);
+    useEffect(() => {
+        if (!callId) return;
+        let cancelled = false;
+        callAPI.getRoomToken(callId)
+            .then(res => { if (!cancelled) setRoomToken(res.data?.roomToken || null); })
+            .catch(() => { if (!cancelled) setRoomToken(null); });
+        return () => { cancelled = true; };
+    }, [callId]);
+
+    const apiOrigin = (API_URL.match(/^https?:\/\/[^/]+/) || [API_URL])[0];
+    const roomUrl = roomToken
+        ? `${API_URL}/calls/room/${encodeURIComponent(callId)}?type=${callType}&token=${encodeURIComponent(roomToken)}`
+        : null;
 
     return (
         <SafeAreaView style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor="#0D0E12" />
 
             {/* Live WebRTC Stream (Hidden for voice, full screen for video) */}
-            {callId ? (
+            {callId && roomUrl ? (
                 <WebView
                     ref={webViewRef}
                     source={{ uri: roomUrl }}
@@ -257,7 +269,9 @@ export default function CallScreen({ route, navigation }: any) {
                     mediaCapturePermissionGrantType="grant"
                     javaScriptEnabled={true}
                     domStorageEnabled={true}
-                    originWhitelist={['*']}
+                    // Only our own server's pages may load inside the call view
+                    originWhitelist={[apiOrigin]}
+                    setSupportMultipleWindows={false}
                     userAgent="Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Mobile Safari/537.36"
                     onMessage={(event) => {
                         try {

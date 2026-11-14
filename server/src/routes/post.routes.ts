@@ -1,10 +1,21 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../config/firebase';
 import supabase from '../config/supabase';
-import { authenticateUser } from '../utils/authMiddleware';
+import { authenticateUser, MASTER_ADMIN_UID } from '../utils/authMiddleware';
 import { uploadBase64ToStorage } from '../utils/supabaseStorage';
+import { writeLimiter } from '../utils/rateLimiter';
 
 const router = Router();
+
+const MAX_CAPTION_LENGTH = 2200;
+const MAX_COMMENT_LENGTH = 1000;
+const MAX_MEDIA_PER_POST = 10;
+
+/** Remove fields other users must not see (the full list of who liked a post). */
+function stripPrivate(p: any) {
+    const { likedBy: _likedBy, ...rest } = p || {};
+    return rest;
+}
 
 // In-memory array for newly created posts (syncs with Firestore and guarantees 100% instant retrieval)
 const MEMORY_POSTS: any[] = [];
@@ -21,7 +32,7 @@ async function getVendorMeta(vendorId: string) {
     let vendorCategory = 'General';
     let vendorImage = '';
     let isVerified = false;
-    let isAdmin = (vendorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2');
+    let isAdmin = (vendorId === MASTER_ADMIN_UID);
     let role = isAdmin ? 'admin' : 'vendor';
 
     // 1. Try Firestore vendors collection
@@ -178,7 +189,7 @@ router.get('/feed', async (req: Request, res: Response) => {
         });
 
         const finalPosts = filtered.slice(0, Number(limit) || 30).map(p => ({
-            ...p,
+            ...stripPrivate(p),
             isLiked: userId ? (p.likedBy || []).includes(userId as string) : false,
         }));
 
@@ -213,7 +224,7 @@ router.get(['/reels', '/showcase'], async (req: Request, res: Response) => {
         const showcaseList = allPosts
             .filter(p => (p.type === 'reel' || p.type === 'showcase') && (!blockedUserIds.includes(p.authorId) && !blockedUserIds.includes(p.vendorId)))
             .map(p => ({
-                ...p,
+                ...stripPrivate(p),
                 isLiked: userId ? (p.likedBy || []).includes(userId as string) : false,
             }));
 
@@ -240,7 +251,7 @@ router.get('/vendor/:vendorId', async (req: Request, res: Response) => {
         const allPosts = await getAllUnifiedPosts();
 
         const vendorPosts = allPosts.filter(p => p.vendorId === vendorId).map(p => ({
-            ...p,
+            ...stripPrivate(p),
             isLiked: userId ? (p.likedBy || []).includes(userId as string) : false,
         }));
 
@@ -269,7 +280,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         if (found) {
             res.status(200).json({
                 post: {
-                    ...found,
+                    ...stripPrivate(found),
                     isLiked: userId ? (found.likedBy || []).includes(userId as string) : false,
                 }
             });
@@ -288,7 +299,7 @@ router.get('/:id', async (req: Request, res: Response) => {
  * @desc    Create a new post, reel, or client community post
  * @access  Authenticated users (Vendors & Clients)
  */
-router.post('/', authenticateUser, async (req: Request, res: Response) => {
+router.post('/', authenticateUser, writeLimiter, async (req: Request, res: Response) => {
     try {
         const {
             vendorId,
@@ -319,12 +330,27 @@ router.post('/', authenticateUser, async (req: Request, res: Response) => {
             return res.status(403).json({ error: 'Forbidden: You can only create posts for your own account' });
         }
 
+        // Business (vendor) posts can only be published by vendors; everyone else posts to Community
+        if (authorType !== 'client' && !isCallerAdmin && req.user!.role !== 'vendor') {
+            return res.status(403).json({ error: 'Only vendor accounts can publish business posts' });
+        }
+
+        if (caption !== undefined && caption !== null && (typeof caption !== 'string' || caption.length > MAX_CAPTION_LENGTH)) {
+            return res.status(400).json({ error: `Captions can be at most ${MAX_CAPTION_LENGTH} characters` });
+        }
+
         // Build the final media array — supports both single and multi-media
         let finalMediaUrls: string[] = [];
         if (Array.isArray(mediaUrls) && mediaUrls.length > 0) {
-            finalMediaUrls = mediaUrls.filter((u: string) => u && u.trim());
-        } else if (mediaUrl) {
+            finalMediaUrls = mediaUrls.filter((u: any) => typeof u === 'string' && u.trim());
+        } else if (typeof mediaUrl === 'string' && mediaUrl) {
             finalMediaUrls = [mediaUrl];
+        }
+        if (finalMediaUrls.length > MAX_MEDIA_PER_POST) {
+            return res.status(400).json({ error: `A post can include at most ${MAX_MEDIA_PER_POST} photos or videos` });
+        }
+        if (finalMediaUrls.some(u => !/^(https?:\/\/|data:(image|video)\/)/i.test(u))) {
+            return res.status(400).json({ error: 'Invalid media' });
         }
 
         // For vendors, at least one media URL is required; for clients, either caption or media is required
@@ -366,7 +392,7 @@ router.post('/', authenticateUser, async (req: Request, res: Response) => {
             let clientName = explicitAuthorName || 'Client';
             let clientAvatar = explicitAuthorAvatar || '';
             let isVerified = false;
-            let isAdmin = (creatorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2');
+            let isAdmin = (creatorId === MASTER_ADMIN_UID);
 
             try {
                 const userDoc = await db.collection('users').doc(creatorId).get();
@@ -468,7 +494,7 @@ router.post('/', authenticateUser, async (req: Request, res: Response) => {
  * @desc    Toggle like / unlike a post
  * @access  Authenticated users
  */
-router.post('/:id/like', authenticateUser, async (req: Request, res: Response) => {
+router.post('/:id/like', authenticateUser, writeLimiter, async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const userId = req.user!.uid;
@@ -613,20 +639,34 @@ router.get('/:id/comments', async (req: Request, res: Response) => {
  * @desc    Add comment to a post
  * @access  Authenticated users
  */
-router.post('/:id/comments', authenticateUser, async (req: Request, res: Response) => {
+router.post('/:id/comments', authenticateUser, writeLimiter, async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const userId = req.user!.uid;
-        const { userName, userAvatar, text } = req.body;
+        const text = typeof req.body.text === 'string' ? req.body.text.trim() : '';
 
         if (!text) {
             res.status(400).json({ error: 'Comment text is required' });
             return;
         }
+        if (text.length > MAX_COMMENT_LENGTH) {
+            res.status(400).json({ error: `Comments can be at most ${MAX_COMMENT_LENGTH} characters` });
+            return;
+        }
 
-        // Resolve latest user avatar from users collection
-        let resolvedAvatar = userAvatar || '';
-        let resolvedName = userName || 'User';
+        // Only comment on posts that exist (otherwise orphan comment documents get created)
+        const inMemory = MEMORY_POSTS.some(p => p.id === id);
+        if (!inMemory) {
+            const postDoc = await db.collection('posts').doc(id).get();
+            if (!postDoc.exists) {
+                res.status(404).json({ error: 'Post not found' });
+                return;
+            }
+        }
+
+        // Name and photo always come from the stored profile, never from the request
+        let resolvedAvatar = '';
+        let resolvedName = 'User';
         try {
             const uDoc = await db.collection('users').doc(userId).get();
             if (uDoc.exists) {

@@ -1,85 +1,64 @@
 import { auth, db } from '../config/firebase';
-import supabase from '../config/supabase';
+import { SUPPORT_UID } from '../utils/authMiddleware';
 
+/**
+ * The shared "QIIRA Customer Support" identity.
+ *
+ * Nobody logs in as this account: it is DISABLED in Firebase Auth and has no password.
+ * Administrators read and answer its conversations from the admin dashboard; the server only
+ * lets admins send messages as Support (see chat.routes.ts).
+ */
 export const SUPPORT_ACCOUNT = {
-    uid: 'qiira_official_support',
-    email: 'support@qiira.com',
+    uid: SUPPORT_UID,
+    email: process.env.SUPPORT_EMAIL || 'support@qiira.com',
     fullName: 'QIIRA Customer Support',
     displayName: 'QIIRA Customer Support',
     role: 'support',
     isVerified: true,
-    isAdmin: true,
     isSupport: true,
     profileImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
-    bio: 'Official 24/7 Customer Care & Assistance Desk for QIIRAPOINTER.',
-    aboutUs: 'Official 24/7 Customer Care & Assistance Desk for QIIRAPOINTER.',
+    bio: 'Official Customer Care & Assistance Desk for QIIRAPOINTER.',
+    aboutUs: 'Official Customer Care & Assistance Desk for QIIRAPOINTER.',
 };
 
 export async function ensureSupportAccount(): Promise<string> {
-    console.log('🛡️ Ensuring official QIIRA Customer Support account exists...');
-    let supportUid = SUPPORT_ACCOUNT.uid;
-
-    // 1. Firebase Auth
+    // 1. Firebase Auth: make sure the record exists and is disabled (cannot sign in)
     try {
+        let existing: any = null;
         try {
-            const existing = await auth.getUser(supportUid);
-            supportUid = existing.uid;
-            console.log('✅ Found support account by UID:', supportUid);
+            existing = await auth.getUser(SUPPORT_UID);
         } catch (e: any) {
-            if (e.code === 'auth/user-not-found') {
-                try {
-                    const existingByEmail = await auth.getUserByEmail(SUPPORT_ACCOUNT.email);
-                    supportUid = existingByEmail.uid;
-                    console.log('✅ Found support account by Email:', supportUid);
-                } catch (emailErr: any) {
-                    if (emailErr.code === 'auth/user-not-found') {
-                        const newRecord = await auth.createUser({
-                            uid: SUPPORT_ACCOUNT.uid,
-                            email: SUPPORT_ACCOUNT.email,
-                            password: 'password123',
-                            displayName: SUPPORT_ACCOUNT.fullName,
-                            photoURL: SUPPORT_ACCOUNT.profileImage,
-                        });
-                        supportUid = newRecord.uid;
-                        console.log('✅ Created support account in Firebase Auth:', supportUid);
-                    } else {
-                        console.warn('Firebase Auth email lookup warning:', emailErr.message);
-                    }
-                }
-            } else {
-                console.warn('Firebase Auth UID lookup warning:', e.message);
-            }
+            if (e.code !== 'auth/user-not-found') throw e;
+        }
+
+        if (!existing) {
+            await auth.createUser({
+                uid: SUPPORT_UID,
+                displayName: SUPPORT_ACCOUNT.fullName,
+                photoURL: SUPPORT_ACCOUNT.profileImage,
+                disabled: true,
+            });
+            console.log('✅ Created disabled Support identity');
+        } else if (!existing.disabled) {
+            // Older versions created this account with a known password — lock it down
+            await auth.updateUser(SUPPORT_UID, { disabled: true });
+            await auth.revokeRefreshTokens(SUPPORT_UID);
+            console.log('🔒 Disabled sign-in for the Support identity and revoked its sessions');
         }
     } catch (err: any) {
-        console.warn('Support account auth setup note:', err.message);
+        console.warn('Support identity auth setup note:', err.message);
     }
 
-    // 2. Firestore users collection
+    // 2. Firestore profile document (role "support" — never "admin")
     try {
-        await db.collection('users').doc(supportUid).set({
+        await db.collection('users').doc(SUPPORT_UID).set({
             ...SUPPORT_ACCOUNT,
-            uid: supportUid,
+            isAdmin: false,
             updatedAt: new Date().toISOString(),
         }, { merge: true });
-        console.log('✅ Synced support account in Firestore users collection');
     } catch (fsErr: any) {
         console.warn('Firestore support sync note:', fsErr.message);
     }
 
-    // 3. Supabase users table (fallback/sync)
-    try {
-        await supabase.from('users').upsert({
-            uid: supportUid,
-            email: SUPPORT_ACCOUNT.email,
-            full_name: SUPPORT_ACCOUNT.fullName,
-            role: 'support',
-            is_verified: true,
-            profile_image: SUPPORT_ACCOUNT.profileImage,
-        });
-        console.log('✅ Synced support account in Supabase');
-    } catch (sbErr: any) {
-        // Silently skip if Supabase is offline
-    }
-
-    return supportUid;
+    return SUPPORT_UID;
 }

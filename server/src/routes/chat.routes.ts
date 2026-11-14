@@ -1,11 +1,56 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../config/firebase';
 import supabase from '../config/supabase';
-import { authenticateUser, requireSelfOrAdmin, MASTER_ADMIN_UID } from '../utils/authMiddleware';
+import { authenticateUser, MASTER_ADMIN_UID, SUPPORT_UID } from '../utils/authMiddleware';
 import { uploadBase64ToStorage } from '../utils/supabaseStorage';
+import { messageLimiter, uploadLimiter } from '../utils/rateLimiter';
 import * as path from 'path';
 
 const router = Router();
+
+const MAX_MESSAGE_LENGTH = 5000;
+
+/** Canonical conversation id for two users (stable regardless of who sends first). */
+export function conversationIdFor(a: string, b: string) {
+    return [a, b].sort().join('_');
+}
+
+/**
+ * Work out the participants of a conversation. Prefers the stored document; otherwise derives them
+ * from the canonical id using the caller's uid (uids may themselves contain "_", e.g. the Support id).
+ */
+async function getConversationParticipants(conversationId: string, callerUid: string): Promise<string[] | null> {
+    try {
+        const doc = await db.collection('conversations').doc(conversationId).get();
+        if (doc.exists) {
+            const data = doc.data() || {};
+            const list: string[] = data.participants || [data.client_id, data.vendor_id].filter(Boolean);
+            if (list.length >= 2) return list;
+        }
+    } catch (_) {}
+
+    for (const me of [callerUid, SUPPORT_UID]) {
+        let other: string | null = null;
+        if (conversationId.startsWith(`${me}_`)) other = conversationId.slice(me.length + 1);
+        else if (conversationId.endsWith(`_${me}`)) other = conversationId.slice(0, -(me.length + 1));
+        if (other && conversationIdFor(me, other) === conversationId) return [me, other];
+    }
+    return null;
+}
+
+/**
+ * Can the caller act in a conversation with these participants?
+ * Participants yes; admins only for conversations with the shared Support account.
+ */
+function canAccessConversation(user: { uid: string; isAdmin: boolean }, participants: string[]) {
+    if (participants.includes(user.uid)) return true;
+    return user.isAdmin && participants.includes(SUPPORT_UID);
+}
+
+/** The identity a caller may act as in chat: themselves, or Support if they are an admin. */
+function actingIdentities(user: { uid: string; isAdmin: boolean }) {
+    return user.isAdmin ? [user.uid, SUPPORT_UID] : [user.uid];
+}
 
 const DEFAULT_AVATARS = {
     client: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=500&auto=format&fit=crop&q=80',
@@ -27,7 +72,7 @@ async function getParticipantProfile(uid: string): Promise<{ name: string; avata
         return { name: 'User', avatar: DEFAULT_AVATARS.client, role: 'client', isVerified: false, isAdmin: false };
     }
 
-    if (uid === 'qiira_official_support') {
+    if (uid === SUPPORT_UID) {
         return {
             name: 'QIIRA Customer Support',
             avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
@@ -134,11 +179,16 @@ async function getParticipantProfile(uid: string): Promise<{ name: string; avata
  * @desc    Get all conversations for a user
  * @access  Private (requires authentication)
  */
-router.get('/conversations/:userId', authenticateUser, requireSelfOrAdmin('userId'), async (req: Request, res: Response) => {
+router.get('/conversations/:userId', authenticateUser, async (req: Request, res: Response) => {
     try {
         const { userId } = req.params;
         if (!userId) {
             return res.status(200).json({ conversations: [] });
+        }
+
+        // Your own inbox, or (admins only) the shared Support inbox
+        if (!actingIdentities(req.user!).includes(userId)) {
+            return res.status(403).json({ error: 'Forbidden', message: 'You can only view your own conversations.' });
         }
 
         const safeUserId = String(userId).replace(/[^a-zA-Z0-9_-]/g, '');
@@ -241,30 +291,18 @@ router.get('/conversations/:userId', authenticateUser, requireSelfOrAdmin('userI
  * @desc    Get all messages for a conversation
  * @access  Private (requires authentication)
  */
-router.get('/conversations/:conversationId/messages', async (req: Request, res: Response) => {
+router.get('/conversations/:conversationId/messages', authenticateUser, async (req: Request, res: Response) => {
     try {
         const { conversationId } = req.params;
 
-        // 1. Try Supabase
-        try {
-            const { data: messages, error } = await supabase
-                .from('messages')
-                .select('*')
-                .eq('conversation_id', conversationId)
-                .order('created_at', { ascending: true });
+        const participants = await getConversationParticipants(conversationId, req.user!.uid);
+        if (!participants || !canAccessConversation(req.user!, participants)) {
+            // Same response whether the chat exists or not, so ids can't be probed
+            return res.status(404).json({ error: 'Conversation not found' });
+        }
 
-            if (!error && messages && messages.length > 0) {
-                const mappedMessages = messages.map(m => ({
-                    id: m.id,
-                    senderId: m.sender_id,
-                    text: m.text,
-                    createdAt: m.created_at
-                }));
-                return res.status(200).json({ messages: mappedMessages });
-            }
-        } catch (_) {}
-
-        // 2. Fallback to Firestore
+        // Firestore is the source of truth (it stores media, replies and shared posts).
+        // The old Supabase copy only held text, which made photos and files disappear.
         const msgsSnapshot = await db.collection('conversations')
             .doc(conversationId)
             .collection('messages')
@@ -289,7 +327,7 @@ router.get('/conversations/:conversationId/messages', async (req: Request, res: 
         res.status(200).json({ messages: mappedMessages });
     } catch (error: any) {
         console.error('Get messages error:', error);
-        res.status(500).json({ error: 'Failed to retrieve messages', message: error.message });
+        res.status(500).json({ error: 'Failed to retrieve messages' });
     }
 });
 
@@ -298,7 +336,7 @@ router.get('/conversations/:conversationId/messages', async (req: Request, res: 
  * @desc    Upload an attachment (photo, video, document) for chat
  * @access  Private
  */
-router.post('/upload-attachment', authenticateUser, async (req: Request, res: Response) => {
+router.post('/upload-attachment', authenticateUser, uploadLimiter, async (req: Request, res: Response) => {
     try {
         const { userId, fileData, fileName, fileType } = req.body;
         const callerUid = req.user!.uid;
@@ -354,16 +392,12 @@ router.post('/upload-attachment', authenticateUser, async (req: Request, res: Re
  * @desc    Send a message (creates conversation if it doesn't exist)
  * @access  Private (requires authentication)
  */
-router.post('/messages', authenticateUser, async (req: Request, res: Response) => {
+router.post('/messages', authenticateUser, messageLimiter, async (req: Request, res: Response) => {
     try {
         let {
             conversationId,
-            senderId,
             receiverId,
             text,
-            receiverName,
-            receiverImage,
-            senderImage,
             mediaUrl,
             mediaType,
             fileName,
@@ -371,28 +405,58 @@ router.post('/messages', authenticateUser, async (req: Request, res: Response) =
             sharedPost
         } = req.body;
 
+        // The sender is ALWAYS the authenticated user. Admins may instead reply as Support.
+        const allowedSenders = actingIdentities(req.user!);
+        const requestedSender = req.body.senderId;
+        if (requestedSender && !allowedSenders.includes(requestedSender)) {
+            return res.status(403).json({ error: 'Forbidden', message: 'You can only send messages as yourself.' });
+        }
+        const senderId: string = requestedSender || req.user!.uid;
+
+        if (text !== undefined && typeof text !== 'string') {
+            return res.status(400).json({ error: 'Invalid message text' });
+        }
         const effectiveText = (text || '').trim();
+        if (effectiveText.length > MAX_MESSAGE_LENGTH) {
+            return res.status(400).json({ error: `Messages can be at most ${MAX_MESSAGE_LENGTH} characters` });
+        }
         if (!effectiveText && !mediaUrl && !sharedPost) {
             return res.status(400).json({ error: 'Missing message content, media, or shared post' });
         }
-
-        if (!receiverId && conversationId) {
-            const parts = conversationId.split('_');
-            receiverId = parts.find((p: string) => p !== senderId);
+        if (mediaUrl !== undefined && mediaUrl !== null && (typeof mediaUrl !== 'string' || !/^https?:\/\//i.test(mediaUrl))) {
+            return res.status(400).json({ error: 'Invalid media URL' });
+        }
+        if (fileName !== undefined && fileName !== null && (typeof fileName !== 'string' || fileName.length > 200)) {
+            return res.status(400).json({ error: 'Invalid file name' });
         }
 
-        if (!receiverId && conversationId) {
-            try {
-                const existingConvDoc = await db.collection('conversations').doc(conversationId).get();
-                if (existingConvDoc.exists) {
-                    const pList: string[] = existingConvDoc.data()?.participants || [];
-                    receiverId = pList.find((p) => p !== senderId);
-                }
-            } catch (_) {}
+        // Resolve the receiver, and make sure an explicit conversationId really belongs to the sender
+        if (conversationId) {
+            if (typeof conversationId !== 'string') {
+                return res.status(400).json({ error: 'Invalid conversationId' });
+            }
+            const participants = await getConversationParticipants(conversationId, senderId);
+            if (!participants || !participants.includes(senderId)) {
+                return res.status(403).json({ error: 'Forbidden', message: 'You are not part of this conversation.' });
+            }
+            const other = participants.find((p) => p !== senderId);
+            if (receiverId && receiverId !== other) {
+                return res.status(400).json({ error: 'receiverId does not match the conversation' });
+            }
+            receiverId = other;
         }
 
-        if (!senderId || !receiverId) {
-            return res.status(400).json({ error: 'Missing required fields: senderId or receiverId' });
+        if (!receiverId || typeof receiverId !== 'string') {
+            return res.status(400).json({ error: 'Missing required field: receiverId' });
+        }
+        if (receiverId === senderId) {
+            return res.status(400).json({ error: 'You cannot message yourself' });
+        }
+        if (receiverId !== SUPPORT_UID) {
+            const receiverDoc = await db.collection('users').doc(receiverId).get();
+            if (!receiverDoc.exists) {
+                return res.status(404).json({ error: 'Recipient not found' });
+            }
         }
 
         // Block check: Verify neither participant has blocked the other (Apple & Google UGC compliance)
@@ -416,7 +480,7 @@ router.post('/messages', authenticateUser, async (req: Request, res: Response) =
             }
         } catch (_) {}
 
-        const convId = conversationId || [senderId, receiverId].sort().join('_');
+        const convId = conversationId || conversationIdFor(senderId, receiverId);
         const now = new Date().toISOString();
 
         // Summary representation for lastMessage
@@ -433,10 +497,11 @@ router.post('/messages', authenticateUser, async (req: Request, res: Response) =
         const senderProfile = await getParticipantProfile(senderId);
         const receiverProfile = await getParticipantProfile(receiverId);
 
-        const sImage = senderImage || senderProfile.avatar;
-        const rImage = receiverImage || receiverProfile.avatar;
+        // Names and photos always come from the stored profiles, never from the request
+        const sImage = senderProfile.avatar;
+        const rImage = receiverProfile.avatar;
         const sName = senderProfile.name || 'User';
-        const rName = receiverName || receiverProfile.name || 'User';
+        const rName = receiverProfile.name || 'User';
 
         // 1. Primary write to Firestore
         try {
@@ -528,7 +593,7 @@ router.post('/messages', authenticateUser, async (req: Request, res: Response) =
         }
     } catch (error: any) {
         console.error('Send message error:', error);
-        res.status(500).json({ error: 'Failed to send message', message: error.message });
+        res.status(500).json({ error: 'Failed to send message' });
     }
 });
 

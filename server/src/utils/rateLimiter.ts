@@ -1,61 +1,58 @@
 import { Request, Response, NextFunction } from 'express';
 
-interface RateLimitStore {
-    [key: string]: {
-        count: number;
-        resetTime: number;
-    };
+interface Bucket {
+    count: number;
+    resetTime: number;
+}
+
+interface RateLimitOptions {
+    /** Key requests by the authenticated user (falls back to IP when not logged in). Default: IP only. */
+    perUser?: boolean;
 }
 
 /**
- * Creates an in-memory sliding window rate limiter
- * @param windowMs Time window in milliseconds
- * @param max Max allowed requests per window
- * @param message Custom error message
+ * In-memory fixed-window rate limiter.
+ *
+ * The client IP comes from `req.ip`, which Express derives from X-Forwarded-For ONLY for the
+ * proxies we trust (`app.set('trust proxy', ...)` in app.ts). Reading the header directly would let
+ * anyone bypass the limit by sending a fake X-Forwarded-For.
  */
-export function rateLimiter(windowMs: number = 15 * 60 * 1000, max: number = 100, message?: string) {
-    const hits: RateLimitStore = {};
+export function rateLimiter(windowMs: number = 15 * 60 * 1000, max: number = 100, message?: string, options: RateLimitOptions = {}) {
+    const hits = new Map<string, Bucket>();
 
-    // Periodically clean up expired entries every 5 minutes
-    setInterval(() => {
+    const cleanup = setInterval(() => {
         const now = Date.now();
-        for (const ip in hits) {
-            if (hits[ip].resetTime <= now) {
-                delete hits[ip];
-            }
+        for (const [key, bucket] of hits) {
+            if (bucket.resetTime <= now) hits.delete(key);
         }
     }, 5 * 60 * 1000);
+    cleanup.unref(); // never keep the process alive just for cleanup
 
     return (req: Request, res: Response, next: NextFunction): void => {
-        // Prefer x-forwarded-for header, fallback to remoteAddress
-        const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() ||
-            req.socket.remoteAddress ||
-            'unknown';
+        if (process.env.NODE_ENV === 'test' && !process.env.RATE_LIMIT_IN_TESTS) return next();
 
+        const ip = req.ip || req.socket.remoteAddress || 'unknown';
+        const key = options.perUser && req.user?.uid ? `u:${req.user.uid}` : `ip:${ip}`;
         const now = Date.now();
-        const record = hits[clientIp];
 
-        if (!record || record.resetTime <= now) {
-            hits[clientIp] = {
-                count: 1,
-                resetTime: now + windowMs,
-            };
-            res.setHeader('X-RateLimit-Limit', max);
-            res.setHeader('X-RateLimit-Remaining', max - 1);
-            return next();
+        let bucket = hits.get(key);
+        if (!bucket || bucket.resetTime <= now) {
+            bucket = { count: 0, resetTime: now + windowMs };
+            hits.set(key, bucket);
         }
+        bucket.count++;
 
-        record.count++;
-        const remaining = Math.max(0, max - record.count);
         res.setHeader('X-RateLimit-Limit', max);
-        res.setHeader('X-RateLimit-Remaining', remaining);
-        res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetTime / 1000));
+        res.setHeader('X-RateLimit-Remaining', Math.max(0, max - bucket.count));
+        res.setHeader('X-RateLimit-Reset', Math.ceil(bucket.resetTime / 1000));
 
-        if (record.count > max) {
+        if (bucket.count > max) {
+            const retryAfter = Math.ceil((bucket.resetTime - now) / 1000);
+            res.setHeader('Retry-After', retryAfter);
             res.status(429).json({
                 error: 'Too Many Requests',
                 message: message || 'You have exceeded the rate limit. Please wait and try again later.',
-                retryAfterSeconds: Math.ceil((record.resetTime - now) / 1000),
+                retryAfterSeconds: retryAfter,
             });
             return;
         }
@@ -63,3 +60,10 @@ export function rateLimiter(windowMs: number = 15 * 60 * 1000, max: number = 100
         next();
     };
 }
+
+// Shared limiters (one instance each so the counts are shared across routes)
+export const authLimiter = rateLimiter(15 * 60 * 1000, 40, 'Too many authentication attempts. Please try again later.');
+export const writeLimiter = rateLimiter(60 * 1000, 60, 'You are doing that too often. Please slow down.', { perUser: true });
+export const messageLimiter = rateLimiter(60 * 1000, 40, 'You are sending messages too quickly. Please slow down.', { perUser: true });
+export const uploadLimiter = rateLimiter(60 * 60 * 1000, 60, 'Upload limit reached. Please try again later.', { perUser: true });
+export const reportLimiter = rateLimiter(60 * 60 * 1000, 20, 'Too many reports submitted. Please try again later.', { perUser: true });

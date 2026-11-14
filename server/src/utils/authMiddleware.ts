@@ -2,8 +2,13 @@ import { Request, Response, NextFunction } from 'express';
 import { auth, db } from '../config/firebase';
 import supabase from '../config/supabase';
 
-// Hardcoded primary system admin UID for emergency / root access
-export const MASTER_ADMIN_UID = 'v8MwaOet0ISfZAWXIDAPAGcg1td2';
+// Root admin UID for emergency access. Configure MASTER_ADMIN_UID in the environment;
+// the fallback keeps existing deployments working until it is set.
+export const MASTER_ADMIN_UID = process.env.MASTER_ADMIN_UID || 'v8MwaOet0ISfZAWXIDAPAGcg1td2';
+
+// Shared "QIIRA Customer Support" identity. It has no password and cannot log in;
+// administrators read and reply to its conversations from the admin dashboard.
+export const SUPPORT_UID = 'qiira_official_support';
 
 export interface AuthUser {
     uid: string;
@@ -213,7 +218,13 @@ export function requireSelfOrAdmin(paramKey: string = 'id') {
             return;
         }
 
-        const targetId = req.params[paramKey] || req.body[paramKey];
+        // Only the URL param identifies the target. (Express 5 leaves req.body undefined on
+        // body-less requests, and a body value must never widen access anyway.)
+        const targetId = req.params?.[paramKey];
+        if (!targetId) {
+            res.status(400).json({ error: 'Bad Request', message: `Missing ${paramKey} in URL.` });
+            return;
+        }
 
         if (req.user.isAdmin || req.user.uid === MASTER_ADMIN_UID) {
             return next();

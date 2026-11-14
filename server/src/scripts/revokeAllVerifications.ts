@@ -1,8 +1,10 @@
+import './devGuard';
 import dotenv from 'dotenv';
 dotenv.config();
 
 import { db } from '../config/firebase';
 import supabase from '../config/supabase';
+import { MASTER_ADMIN_UID } from '../utils/authMiddleware';
 
 async function revokeAllNonAdminVerifications() {
     console.log('🔄 Starting revocation of all non-admin verifications...');
@@ -17,7 +19,7 @@ async function revokeAllNonAdminVerifications() {
             const data = doc.data();
             const role = data.role || 'client';
             const email = data.email || '';
-            const isAdmin = role === 'admin' || doc.id === 'v8MwaOet0ISfZAWXIDAPAGcg1td2';
+            const isAdmin = role === 'admin' || doc.id === MASTER_ADMIN_UID;
 
             if (isAdmin) {
                 adminsPreserved++;

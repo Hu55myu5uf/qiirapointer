@@ -1,3 +1,4 @@
+import './devGuard';
 import { auth } from '../config/firebase';
 
 async function reset() {

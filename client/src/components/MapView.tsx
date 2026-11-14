@@ -100,9 +100,18 @@ const MapView: React.FC<MapViewProps> = ({
     const centerLng = initialRegion?.longitude || (markers.length > 0 ? markers[0].longitude : 3.3792);
 
     const mapHtml = useMemo(() => {
-        const markersJson = JSON.stringify(markers);
+        // Vendor-controlled text (names, descriptions) is embedded as JSON with "<" escaped so it can
+        // never close the <script> tag, and is later inserted with textContent — never as HTML.
+        const safeJson = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c');
+        const markersJson = safeJson(markers.map((m: any) => ({
+            latitude: Number(m.latitude),
+            longitude: Number(m.longitude),
+            title: String(m.title || 'Vendor'),
+            description: m.description ? String(m.description) : '',
+            index: Number(m.index),
+        })));
         const userLocJson = initialRegion
-            ? JSON.stringify({ latitude: initialRegion.latitude, longitude: initialRegion.longitude })
+            ? safeJson({ latitude: Number(initialRegion.latitude), longitude: Number(initialRegion.longitude) })
             : 'null';
 
         return `<!DOCTYPE html>
@@ -143,7 +152,7 @@ const MapView: React.FC<MapViewProps> = ({
 <body>
     <div id="map"></div>
     <script>
-        var map = L.map('map', { zoomControl: true }).setView([${centerLat}, ${centerLng}], 13);
+        var map = L.map('map', { zoomControl: true }).setView([${Number(centerLat)}, ${Number(centerLng)}], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '© OpenStreetMap'
@@ -169,11 +178,24 @@ const MapView: React.FC<MapViewProps> = ({
                 popupAnchor: [0, -32]
             });
 
-            var popupContent = '<div class="popup-card">' +
-                '<div class="popup-title">' + (m.title || 'Vendor') + '</div>' +
-                (m.description ? '<div class="popup-desc">' + m.description + '</div>' : '') +
-                '<a class="popup-btn" onclick="sendMarkerClick(' + m.index + ')">View Details →</a>' +
-                '</div>';
+            // Build the popup with DOM nodes + textContent so vendor text is shown, never executed
+            var popupContent = document.createElement('div');
+            popupContent.className = 'popup-card';
+            var titleEl = document.createElement('div');
+            titleEl.className = 'popup-title';
+            titleEl.textContent = m.title || 'Vendor';
+            popupContent.appendChild(titleEl);
+            if (m.description) {
+                var descEl = document.createElement('div');
+                descEl.className = 'popup-desc';
+                descEl.textContent = m.description;
+                popupContent.appendChild(descEl);
+            }
+            var btn = document.createElement('a');
+            btn.className = 'popup-btn';
+            btn.textContent = 'View Details →';
+            (function(idx) { btn.addEventListener('click', function() { sendMarkerClick(idx); }); })(m.index);
+            popupContent.appendChild(btn);
 
             L.marker([m.latitude, m.longitude], { icon: pinIcon })
                 .addTo(map)

@@ -111,7 +111,8 @@ const MapView: React.FC<MapViewProps> = ({
 
     // Generate Leaflet Map HTML (100% free OpenStreetMap, no API keys)
     const mapHtml = useMemo(() => {
-        const markersJson = JSON.stringify(markers);
+        // Escape "<" so vendor text can never close the <script> tag
+        const markersJson = JSON.stringify(markers).replace(/</g, '\\u003c');
         const userLocJson = initialRegion
             ? JSON.stringify({ latitude: initialRegion.latitude, longitude: initialRegion.longitude })
             : 'null';
@@ -266,13 +267,21 @@ const MapView: React.FC<MapViewProps> = ({
             
             const popupContent = document.createElement('div');
             popupContent.className = 'popup-card';
-            popupContent.innerHTML = \`
-                <div class="popup-title">🏢 \${m.title}</div>
-                <div class="popup-category">\${m.description || 'Vendor'}</div>
-                <button class="popup-btn" id="btn-\${m.index}">View Store & Products</button>
-            \`;
+            // textContent only: vendor-controlled text must never be parsed as HTML
+            const titleEl = document.createElement('div');
+            titleEl.className = 'popup-title';
+            titleEl.textContent = '🏢 ' + (m.title || 'Vendor');
+            const catEl = document.createElement('div');
+            catEl.className = 'popup-category';
+            catEl.textContent = m.description || 'Vendor';
+            const btnEl = document.createElement('button');
+            btnEl.className = 'popup-btn';
+            btnEl.textContent = 'View Store & Products';
+            popupContent.appendChild(titleEl);
+            popupContent.appendChild(catEl);
+            popupContent.appendChild(btnEl);
 
-            popupContent.querySelector('#btn-' + m.index).addEventListener('click', () => {
+            btnEl.addEventListener('click', () => {
                 window.parent.postMessage(JSON.stringify({
                     type: 'QIIRA_MAP_MARKER_CLICK',
                     index: m.index
