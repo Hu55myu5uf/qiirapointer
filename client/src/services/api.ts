@@ -11,6 +11,13 @@ const PRODUCTION_API_URL = 'https://qiirapointer.onrender.com/api';
 
 // Auto-detect server IP from Expo packager connection
 const getApiUrl = () => {
+    // Explicit override (e.g. client/.env: EXPO_PUBLIC_API_URL=https://qiirapointer.onrender.com/api)
+    // lets a development build on a phone talk to the live server instead of a local one.
+    const override = process.env.EXPO_PUBLIC_API_URL;
+    if (override && /^https?:\/\//.test(override)) {
+        return override.replace(/\/+$/, '');
+    }
+
     // Production builds always use the cloud API
     if (typeof __DEV__ !== 'undefined' && !__DEV__) {
         return PRODUCTION_API_URL;
