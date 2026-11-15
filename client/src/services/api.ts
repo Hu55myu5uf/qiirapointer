@@ -151,6 +151,9 @@ export const clientAPI = {
     getFavorites: (clientId: string) => api.get(`/clients/${clientId}/favorites`),
     addFavorite: (clientId: string, vendorId: string) =>
         api.post(`/clients/${clientId}/favorites`, { vendorId }),
+    // Delete your own review of a vendor (the vendor's rating is recalculated)
+    deleteReview: (clientId: string, vendorId: string) =>
+        api.delete(`/clients/${clientId}/reviews/${vendorId}`),
     removeFavorite: (clientId: string, vendorId: string) =>
         api.delete(`/clients/${clientId}/favorites/${vendorId}`),
     // Account Conversion to Vendor
@@ -245,6 +248,9 @@ export const postAPI = {
         api.post(`/posts/${id}/like`, { userId }),
     getComments: (id: string) =>
         api.get(`/posts/${id}/comments`),
+    // Delete a comment: its author, the post's owner, or an admin
+    deleteComment: (postId: string, commentId: string) =>
+        api.delete(`/posts/${postId}/comments/${commentId}`),
     addComment: (id: string, data: { userId: string; userName: string; userAvatar?: string; text: string }) =>
         api.post(`/posts/${id}/comments`, data),
     deletePost: (id: string, params?: { userId?: string; role?: string }) =>

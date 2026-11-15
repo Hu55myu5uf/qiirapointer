@@ -16,6 +16,7 @@ import {
     FlatList,
 } from 'react-native';
 import { vendorAPI, clientAPI, postAPI, moderationAPI } from '../services/api';
+import { canDeleteComment, confirmDeleteComment } from '../utils/comments';
 import { useAuthStore } from '../store/authStore';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -931,6 +932,31 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                                 {review.comment ? (
                                                     <Text style={styles.reviewComment}>{review.comment}</Text>
                                                 ) : null}
+                                                {user?.uid && review.clientId === user.uid ? (
+                                                    <TouchableOpacity
+                                                        onPress={() => Alert.alert('Delete your review?', 'Your rating will be removed from this business.', [
+                                                            { text: 'Cancel', style: 'cancel' },
+                                                            {
+                                                                text: 'Delete',
+                                                                style: 'destructive',
+                                                                onPress: async () => {
+                                                                    try {
+                                                                        await clientAPI.deleteReview(user.uid, vendorId);
+                                                                        fetchReviews();
+                                                                        fetchVendorDetails(); // rating changes
+                                                                    } catch (e: any) {
+                                                                        Alert.alert('Could not delete', e?.response?.data?.error || 'Please try again.');
+                                                                    }
+                                                                },
+                                                            },
+                                                        ])}
+                                                        accessibilityRole="button"
+                                                        style={{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end', marginTop: SPACING.xs, padding: 6, minHeight: 32 }}
+                                                    >
+                                                        <Ionicons name="trash-outline" size={14} color={colors.textTertiary} />
+                                                        <Text style={{ fontSize: 12, color: colors.textTertiary }}>Delete my review</Text>
+                                                    </TouchableOpacity>
+                                                ) : null}
                                             </View>
                                         ))}
                                     </View>
@@ -1086,6 +1112,19 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                             </View>
                                             <Text style={styles.commentBody}>{item.text}</Text>
                                         </View>
+                                        {canDeleteComment(item, activePostForComments, user?.uid, userRole === 'admin') ? (
+                                            <TouchableOpacity
+                                                onPress={() => confirmDeleteComment(activePostForComments.id, item.id, (id) => {
+                                                    setComments((prev: any[]) => prev.filter(c => c.id !== id));
+                                                })}
+                                                accessibilityRole="button"
+                                                accessibilityLabel="Delete comment"
+                                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                                style={{ padding: 6, alignSelf: 'flex-start' }}
+                                            >
+                                                <Ionicons name="trash-outline" size={16} color={colors.textTertiary} />
+                                            </TouchableOpacity>
+                                        ) : null}
                                     </View>
                                 )}
                             />

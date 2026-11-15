@@ -55,6 +55,19 @@ interface Message {
         currency?: string;
         mediaUrl?: string;
     };
+    messageType?: string;
+    orderData?: {
+        orderId?: string;
+        productTitle?: string;
+        productImage?: string;
+        quantity?: number;
+        unitPrice?: number;
+        totalPrice?: number;
+        currency?: string;
+        notes?: string;
+        deliveryAddress?: string;
+        contactPhone?: string;
+    };
 }
 
 interface ChatScreenParams {
@@ -831,6 +844,40 @@ export default function ChatScreen({ route, navigation }: any) {
                                 </View>
                             </TouchableOpacity>
                         )}
+
+                        {/* Order Card in Chat */}
+                        {item.messageType === 'order' && item.orderData ? (
+                            <View style={styles.sharedPostCard} accessible accessibilityLabel={`Order: ${item.orderData.productTitle || 'item'}`}>
+                                {item.orderData.productImage ? (
+                                    <Image source={{ uri: item.orderData.productImage }} style={styles.sharedPostImage} />
+                                ) : (
+                                    <View style={[styles.sharedPostImage, { backgroundColor: '#B28A4520', justifyContent: 'center', alignItems: 'center' }]}>
+                                        <Ionicons name="cart" size={24} color="#B28A45" />
+                                    </View>
+                                )}
+                                <View style={styles.sharedPostDetails}>
+                                    <Text style={styles.sharedPostVendor} numberOfLines={1}>🛒 Order request</Text>
+                                    <Text style={styles.sharedPostCaption} numberOfLines={2}>
+                                        {item.orderData.quantity ? `${item.orderData.quantity} × ` : ''}{item.orderData.productTitle || 'Item'}
+                                    </Text>
+                                    {typeof item.orderData.totalPrice === 'number' ? (
+                                        <Text style={styles.sharedPostPrice}>
+                                            {item.orderData.currency && item.orderData.currency !== 'NGN' ? `${item.orderData.currency} ` : '₦'}
+                                            {item.orderData.totalPrice.toLocaleString()}
+                                        </Text>
+                                    ) : null}
+                                    {item.orderData.deliveryAddress ? (
+                                        <Text style={styles.sharedPostCaption} numberOfLines={2}>📍 {item.orderData.deliveryAddress}</Text>
+                                    ) : null}
+                                    {item.orderData.contactPhone ? (
+                                        <Text style={styles.sharedPostCaption} numberOfLines={1}>📞 {item.orderData.contactPhone}</Text>
+                                    ) : null}
+                                    {item.orderData.notes ? (
+                                        <Text style={styles.sharedPostCaption} numberOfLines={3}>📝 {item.orderData.notes}</Text>
+                                    ) : null}
+                                </View>
+                            </View>
+                        ) : null}
 
                         {/* Image Media Attachment */}
                         {item.mediaUrl && (item.mediaType === 'image' || (!item.mediaType && !item.mediaUrl.endsWith('.pdf'))) && (

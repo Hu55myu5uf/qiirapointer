@@ -26,6 +26,7 @@ import { PLACEHOLDER_AVATARS } from '../assets';
 import { POPULAR_CATEGORIES } from '../constants/categories';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import { postAPI, moderationAPI } from '../services/api';
+import { canDeleteComment, confirmDeleteComment } from '../utils/comments';
 import { sharePost, shareVendorProfile } from '../services/shareService';
 import VerificationBadge, { AvatarVerificationBadge, VerificationBadgeInline } from '../components/VerificationBadge';
 import CartButton from '../components/CartButton';
@@ -1131,6 +1132,20 @@ export default function ExploreScreen({ navigation, route }: any) {
                                             </View>
                                             <Text style={styles.commentBody}>{item.text}</Text>
                                         </View>
+                                        {canDeleteComment(item, activePost, currentUserId, userRole === 'admin') ? (
+                                            <TouchableOpacity
+                                                onPress={() => confirmDeleteComment(activePost.id, item.id, (id) => {
+                                                    setComments((prev: any[]) => prev.filter(c => c.id !== id));
+                                                    setPosts(prev => prev.map(p => p.id === activePost.id ? { ...p, commentsCount: Math.max(0, (p.commentsCount || 1) - 1) } : p));
+                                                })}
+                                                accessibilityRole="button"
+                                                accessibilityLabel="Delete comment"
+                                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                                style={{ padding: 6, alignSelf: 'flex-start' }}
+                                            >
+                                                <Ionicons name="trash-outline" size={16} color={colors.textTertiary} />
+                                            </TouchableOpacity>
+                                        ) : null}
                                     </View>
                                 )}
                             />

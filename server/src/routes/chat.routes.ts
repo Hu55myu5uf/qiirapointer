@@ -60,7 +60,7 @@ function pick(obj: any, fields: Record<string, 'string' | 'number'>, maxString =
 
 const SHARED_POST_FIELDS = { id: 'string', postId: 'string', title: 'string', caption: 'string', mediaUrl: 'string', thumbnailUrl: 'string', vendorId: 'string', vendorName: 'string', vendorImage: 'string', price: 'number', currency: 'string', type: 'string' } as const;
 const REPLY_FIELDS = { id: 'string', text: 'string', senderId: 'string', senderName: 'string', mediaType: 'string' } as const;
-const ORDER_FIELDS = { orderId: 'string', productId: 'string', productTitle: 'string', productImage: 'string', quantity: 'number', unitPrice: 'number', totalPrice: 'number', currency: 'string', notes: 'string', deliveryAddress: 'string', status: 'string' } as const;
+const ORDER_FIELDS = { orderId: 'string', productId: 'string', productTitle: 'string', productImage: 'string', quantity: 'number', unitPrice: 'number', totalPrice: 'number', currency: 'string', notes: 'string', deliveryAddress: 'string', contactPhone: 'string', status: 'string', placedAt: 'string' } as const;
 
 /**
  * @route   GET /api/chats/conversations/:userId
