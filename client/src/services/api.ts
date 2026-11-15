@@ -1,6 +1,8 @@
 import axios from 'axios';
 import Constants from 'expo-constants';
 import { auth } from '../config/firebase';
+import { useAuthStore } from '../store/authStore';
+import { showSignInPrompt } from '../store/alertStore';
 
 // ============================================================
 // PRODUCTION API URL — Connected to live Render backend
@@ -61,6 +63,12 @@ api.interceptors.response.use(
     (response) => response,
     async (error) => {
         const original = error.config;
+        // A guest (not signed in) tried an action that needs an account: offer to sign in.
+        // Background loads (GET) stay silent.
+        if (error.response?.status === 401 && !auth.currentUser && original?.method && original.method.toLowerCase() !== 'get') {
+            showSignInPrompt(() => useAuthStore.getState().requestSignIn('Login'));
+            return Promise.reject(error);
+        }
         if (error.response?.status === 401 && original && !original._retriedAuth && auth.currentUser) {
             original._retriedAuth = true;
             try {

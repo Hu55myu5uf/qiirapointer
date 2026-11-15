@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { Alert as RNAlert, Platform } from 'react-native';
+import { useAuthStore } from './authStore';
 
 export type AlertType = 'info' | 'success' | 'warning' | 'error' | 'confirm';
 
@@ -54,10 +55,37 @@ function inferAlertType(title: string, message?: string, buttons?: ThemedAlertBu
     return 'info';
 }
 
-export const useAlertStore = create<AlertStoreState>((set) => ({
+const SIGN_IN_PROMPT_ID = 'sign-in-prompt';
+
+/** Shown when a guest tries something that needs an account (like, favourite, comment, ...). */
+export function showSignInPrompt(onSignIn: () => void) {
+    useAlertStore.setState({
+        currentAlert: {
+            id: `${SIGN_IN_PROMPT_ID}_${Date.now()}`,
+            title: 'Sign in to continue',
+            message: 'Create a free QIIRA account or sign in to like, save, review, comment and chat.',
+            type: 'info',
+            buttons: [
+                { text: 'Not now', style: 'cancel' },
+                { text: 'Sign in', style: 'default', onPress: onSignIn },
+            ],
+            cancelable: true,
+        },
+    });
+}
+
+export const useAlertStore = create<AlertStoreState>((set, get) => ({
     currentAlert: null,
 
     showAlert: (title, message, buttons, options) => {
+        // While the guest "Sign in to continue" prompt is showing, the screen's own follow-up
+        // error alert for the same action is dropped (one clear message instead of two).
+        if (get().currentAlert?.id.startsWith(SIGN_IN_PROMPT_ID)) return;
+        // Screens' own "Sign in required" messages get a working "Sign in" button
+        if (/sign in required|authentication required/i.test(title || '') && !useAuthStore.getState().isAuthenticated) {
+            showSignInPrompt(() => useAuthStore.getState().requestSignIn('Login'));
+            return;
+        }
         let alertButtons: ThemedAlertButton[] = [];
 
         if (buttons && buttons.length > 0) {

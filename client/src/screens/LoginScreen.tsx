@@ -29,6 +29,7 @@ export default function LoginScreen({ navigation }: any) {
     const [loading, setLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
     const { setUser, setUserRole } = useAuthStore();
+    const enterGuestMode = useAuthStore(s => s.enterGuestMode);
 
     const handleLogin = async () => {
         setErrorMessage('');
@@ -163,6 +164,15 @@ export default function LoginScreen({ navigation }: any) {
                             <Text style={styles.linkText}>Sign Up</Text>
                         </TouchableOpacity>
                     </View>
+
+                    {/* Look around first — personal features ask to sign in when needed */}
+                    <TouchableOpacity
+                        onPress={enterGuestMode}
+                        accessibilityRole="button"
+                        style={{ alignSelf: 'center', marginTop: SPACING.lg, paddingVertical: SPACING.sm, paddingHorizontal: SPACING.md, minHeight: 44, justifyContent: 'center' }}
+                    >
+                        <Text style={[styles.linkText, { textAlign: 'center' }]}>Browse without an account →</Text>
+                    </TouchableOpacity>
                 </View>
             </ScrollView>
         </KeyboardAvoidingView>

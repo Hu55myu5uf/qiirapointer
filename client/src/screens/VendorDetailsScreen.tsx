@@ -284,7 +284,10 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
     };
 
     const handleToggleFavorite = async () => {
-        if (!user) return;
+        if (!user) {
+            Alert.alert('Sign In Required', 'Please sign in to save favourite vendors.');
+            return;
+        }
         try {
             if (!isFavorite) {
                 await clientAPI.addFavorite(user.uid, vendorId);

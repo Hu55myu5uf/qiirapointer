@@ -40,6 +40,7 @@ import ExploreScreen from './src/screens/ExploreScreen';
 import CreatePostScreen from './src/screens/CreatePostScreen';
 import CartScreen from './src/screens/CartScreen';
 import CallScreen from './src/screens/CallScreen';
+import SignInRequiredScreen from './src/screens/SignInRequiredScreen';
 import IncomingCallModal from './src/components/IncomingCallModal';
 import ThemedAlertModal from './src/components/ThemedAlertModal';
 import AdminPreviewBanner from './src/components/AdminPreviewBanner';
@@ -54,8 +55,10 @@ const Tab = createBottomTabNavigator();
 // Auth Stack (Login/Register)
 function AuthStack() {
   const { colors } = useTheme();
+  const authEntry = useAuthStore(s => s.authEntry);
   return (
     <Stack.Navigator
+      initialRouteName={authEntry}
       screenOptions={{
         headerShown: false,
         cardStyle: { backgroundColor: colors.background },
@@ -74,6 +77,7 @@ function AuthStack() {
 
 // Home Stack (Home -> Vendor Details)
 function HomeStack() {
+  const isGuest = useAuthStore(s => s.isGuest);
   const { colors } = useTheme();
   return (
     <Stack.Navigator
@@ -100,32 +104,32 @@ function HomeStack() {
       />
       <Stack.Screen
         name="WriteReview"
-        component={WriteReviewScreen}
+        component={isGuest ? SignInRequiredScreen : WriteReviewScreen}
         options={{ title: 'Write a Review' }}
       />
       <Stack.Screen
         name="Chat"
-        component={ChatScreen}
+        component={isGuest ? SignInRequiredScreen : ChatScreen}
         options={{ title: 'Chat' }}
       />
       <Stack.Screen
         name="CreatePost"
-        component={CreatePostScreen}
+        component={isGuest ? SignInRequiredScreen : CreatePostScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Cart"
-        component={CartScreen}
+        component={isGuest ? SignInRequiredScreen : CartScreen}
         options={{ title: 'Saved Cart' }}
       />
       <Stack.Screen
         name="CallScreen"
-        component={CallScreen}
+        component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Call"
-        component={CallScreen}
+        component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>
@@ -135,6 +139,7 @@ function HomeStack() {
 
 // Explore Stack (Explore Feed -> Post / Vendor Details)
 function ExploreStack() {
+  const isGuest = useAuthStore(s => s.isGuest);
   const { colors } = useTheme();
   return (
     <Stack.Navigator
@@ -151,7 +156,7 @@ function ExploreStack() {
       />
       <Stack.Screen
         name="CreatePost"
-        component={CreatePostScreen}
+        component={isGuest ? SignInRequiredScreen : CreatePostScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
@@ -161,7 +166,7 @@ function ExploreStack() {
       />
       <Stack.Screen
         name="Chat"
-        component={ChatScreen}
+        component={isGuest ? SignInRequiredScreen : ChatScreen}
         options={{ title: 'Chat' }}
       />
       <Stack.Screen
@@ -171,22 +176,22 @@ function ExploreStack() {
       />
       <Stack.Screen
         name="WriteReview"
-        component={WriteReviewScreen}
+        component={isGuest ? SignInRequiredScreen : WriteReviewScreen}
         options={{ title: 'Write a Review' }}
       />
       <Stack.Screen
         name="Cart"
-        component={CartScreen}
+        component={isGuest ? SignInRequiredScreen : CartScreen}
         options={{ title: 'Saved Cart' }}
       />
       <Stack.Screen
         name="CallScreen"
-        component={CallScreen}
+        component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Call"
-        component={CallScreen}
+        component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>
@@ -195,6 +200,7 @@ function ExploreStack() {
 
 // Client Profile Stack (for navigating to GetVerified from profile)
 function ClientProfileStack() {
+  const isGuest = useAuthStore(s => s.isGuest);
   const { colors } = useTheme();
   return (
     <Stack.Navigator
@@ -215,12 +221,12 @@ function ClientProfileStack() {
       />
       <Stack.Screen
         name="CallScreen"
-        component={CallScreen}
+        component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Call"
-        component={CallScreen}
+        component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>
@@ -229,6 +235,7 @@ function ClientProfileStack() {
 
 // Client Tabs
 function ClientTabs() {
+  const isGuest = useAuthStore(s => s.isGuest);
   const { theme, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
@@ -319,14 +326,14 @@ function ClientTabs() {
       />
       <Tab.Screen
         name="Favorites"
-        component={FavoritesScreen}
+        component={isGuest ? SignInRequiredScreen : FavoritesScreen}
         options={{
           tabBarLabel: 'Favorites',
         }}
       />
       <Tab.Screen
         name="Messages"
-        component={ClientMessagesStack}
+        component={isGuest ? SignInRequiredScreen : ClientMessagesStack}
         options={{
           tabBarLabel: 'Messages',
           tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
@@ -338,7 +345,7 @@ function ClientTabs() {
       />
       <Tab.Screen
         name="Profile"
-        component={ClientProfileStack}
+        component={isGuest ? SignInRequiredScreen : ClientProfileStack}
         options={{
           headerShown: false,
           tabBarLabel: 'Profile',
@@ -350,6 +357,7 @@ function ClientTabs() {
 
 // Client Messages Stack (for navigating from Messages tab to Chat)
 function ClientMessagesStack() {
+  const isGuest = useAuthStore(s => s.isGuest);
   const { colors } = useTheme();
   return (
     <Stack.Navigator
@@ -365,7 +373,7 @@ function ClientMessagesStack() {
       />
       <Stack.Screen
         name="Chat"
-        component={ChatScreen}
+        component={isGuest ? SignInRequiredScreen : ChatScreen}
         options={{ title: 'Chat' }}
       />
       <Stack.Screen
@@ -380,17 +388,17 @@ function ClientMessagesStack() {
       />
       <Stack.Screen
         name="Cart"
-        component={CartScreen}
+        component={isGuest ? SignInRequiredScreen : CartScreen}
         options={{ title: 'Saved Cart' }}
       />
       <Stack.Screen
         name="CallScreen"
-        component={CallScreen}
+        component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Call"
-        component={CallScreen}
+        component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>
@@ -399,6 +407,7 @@ function ClientMessagesStack() {
 
 // Vendor Messages Stack (includes Chat screen)
 function VendorMessagesStack() {
+  const isGuest = useAuthStore(s => s.isGuest);
   const { colors } = useTheme();
   return (
     <Stack.Navigator
@@ -414,7 +423,7 @@ function VendorMessagesStack() {
       />
       <Stack.Screen
         name="Chat"
-        component={ChatScreen}
+        component={isGuest ? SignInRequiredScreen : ChatScreen}
         options={{ title: 'Chat' }}
       />
       <Stack.Screen
@@ -429,17 +438,17 @@ function VendorMessagesStack() {
       />
       <Stack.Screen
         name="Cart"
-        component={CartScreen}
+        component={isGuest ? SignInRequiredScreen : CartScreen}
         options={{ title: 'Saved Cart' }}
       />
       <Stack.Screen
         name="CallScreen"
-        component={CallScreen}
+        component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Call"
-        component={CallScreen}
+        component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>
@@ -448,6 +457,7 @@ function VendorMessagesStack() {
 
 // Vendor Profile Stack (to allow navigating to CreatePost, Cart, CallScreen, etc.)
 function VendorProfileStack() {
+  const isGuest = useAuthStore(s => s.isGuest);
   const { colors } = useTheme();
   return (
     <Stack.Navigator
@@ -463,22 +473,22 @@ function VendorProfileStack() {
       />
       <Stack.Screen
         name="CreatePost"
-        component={CreatePostScreen}
+        component={isGuest ? SignInRequiredScreen : CreatePostScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Cart"
-        component={CartScreen}
+        component={isGuest ? SignInRequiredScreen : CartScreen}
         options={{ title: 'Saved Cart' }}
       />
       <Stack.Screen
         name="CallScreen"
-        component={CallScreen}
+        component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Call"
-        component={CallScreen}
+        component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
@@ -615,6 +625,7 @@ function VendorTabs() {
 
 // Admin Dashboard Stack (includes Chat and Profile view for Support Queue)
 function AdminDashboardStack() {
+  const isGuest = useAuthStore(s => s.isGuest);
   const { colors } = useTheme();
   return (
     <Stack.Navigator
@@ -630,7 +641,7 @@ function AdminDashboardStack() {
       />
       <Stack.Screen
         name="Chat"
-        component={ChatScreen}
+        component={isGuest ? SignInRequiredScreen : ChatScreen}
         options={{ title: 'Chat' }}
       />
       <Stack.Screen
@@ -743,7 +754,7 @@ function AdminTabs() {
 
 function MainApp() {
   const { colors } = useTheme();
-  const { user, setUser, setUserRole, setRealRole, realRole, setLoading, isLoading, isAuthenticated, userRole } = useAuthStore();
+  const { user, setUser, setUserRole, setRealRole, realRole, setLoading, isLoading, isAuthenticated, userRole, isGuest } = useAuthStore();
   const { checkForIncomingCall } = useCallStore();
   const [initializing, setInitializing] = useState(true);
 
@@ -942,7 +953,7 @@ function MainApp() {
         <AdminPreviewBanner />
         <NavigationContainer ref={navigationRef}>
           {!isAuthenticated ? (
-            <AuthStack />
+            isGuest ? <ClientTabs /> : <AuthStack />
           ) : userRole === 'admin' ? (
             <AdminTabs />
           ) : userRole === 'vendor' ? (
