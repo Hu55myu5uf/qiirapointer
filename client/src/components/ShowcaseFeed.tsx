@@ -8,9 +8,11 @@ import {
     TouchableOpacity,
     Image,
     Platform,
-    ViewToken,
     Animated,
 } from 'react-native';
+
+// Shape of FlatList viewability callbacks (no longer exported by react-native's types)
+type ViewToken = { item: any; key: string; index?: number | null; isViewable: boolean };
 import { useVideoPlayer, VideoView } from 'expo-video';
 
 // Looping, chrome-less video player driven by play/mute props (expo-video)
@@ -428,7 +430,7 @@ export default function ShowcaseFeed({
     }, [posts]);
 
     const onViewableItemsChanged = useRef(
-        ({ viewableItems }: { viewableItems: ViewToken[]; changed: ViewToken[] }) => {
+        ({ viewableItems }: { viewableItems: ViewToken[] }) => {
             if (viewableItems && viewableItems.length > 0 && typeof viewableItems[0].index === 'number') {
                 setActiveIndex(viewableItems[0].index);
             }

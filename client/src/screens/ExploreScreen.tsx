@@ -1028,7 +1028,7 @@ export default function ExploreScreen({ navigation, route }: any) {
                     data={filteredPosts}
                     keyExtractor={(item) => item.id}
                     renderItem={renderPostItem}
-                    ListHeaderComponent={activeTab === 'feed' ? renderHeaderComposer : null}
+                    ListHeaderComponent={activeTab === 'feed' ? renderHeaderComposer : undefined}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
                             <Ionicons name="images-outline" size={56} color={colors.textTertiary} />
@@ -1067,7 +1067,7 @@ export default function ExploreScreen({ navigation, route }: any) {
                             <TouchableOpacity onPress={handleRefresh} style={{ padding: SPACING.lg, alignItems: 'center' }}>
                                 <Text style={{ color: colors.primary, fontWeight: '600' }}>Couldn't refresh — tap to retry</Text>
                             </TouchableOpacity>
-                        ) : null
+                        ) : undefined
                     }
                     // Long lists: render in small batches and drop off-screen rows from memory
                     initialNumToRender={6}

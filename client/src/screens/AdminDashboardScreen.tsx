@@ -40,8 +40,8 @@ export default function AdminDashboardScreen({ navigation }: any) {
     const { switchViewRole } = useAuthStore();
     const styles = getStyles(colors);
 
-    const scrollViewRef = useRef<ScrollView>(null);
-    const pendingSectionRef = useRef<View>(null);
+    const scrollViewRef = useRef<any>(null);
+    const pendingSectionRef = useRef<any>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [analytics, setAnalytics] = useState<any>(null);
@@ -448,7 +448,7 @@ export default function AdminDashboardScreen({ navigation }: any) {
             } catch (e) { }
             pendingSectionRef.current?.measureLayout?.(
                 scrollViewRef.current as any,
-                (x, y) => {
+                (x: number, y: number) => {
                     scrollViewRef.current?.scrollTo({ y: y - 20, animated: true });
                 },
                 () => {

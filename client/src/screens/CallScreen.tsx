@@ -8,9 +8,9 @@ import {
     Animated,
     Dimensions,
     StatusBar,
-    SafeAreaView,
     Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { WebView } from 'react-native-webview';
 import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
@@ -267,7 +267,7 @@ export default function CallScreen({ route, navigation }: any) {
 
     return (
         <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="light-content" backgroundColor="#0D0E12" />
+            <StatusBar barStyle="light-content" />
 
             {/* Live WebRTC Stream (Hidden for voice, full screen for video) */}
             {callId && roomUrl ? (

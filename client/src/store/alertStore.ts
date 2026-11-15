@@ -138,9 +138,9 @@ export function initGlobalAlertPatch() {
     try {
         isPatched = true;
 
-        if (RNAlert && typeof RNAlert === 'object') {
+        if (RNAlert) {
             try {
-                RNAlert.alert = (
+                (RNAlert as any).alert = (
                     title: string,
                     message?: string,
                     buttons?: ThemedAlertButton[] | any[],
