@@ -8,12 +8,13 @@ import {
     TextInput,
     Alert,
     ActivityIndicator,
-    Image,
     ScrollView,
     KeyboardAvoidingView,
     Platform,
     Switch,
 } from 'react-native';
+// Cached, downscaled images (expo-image) with the same props as React Native Image
+import { Image } from './CachedImage';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../context/ThemeContext';

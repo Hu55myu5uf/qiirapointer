@@ -4,12 +4,13 @@ import {
     Text,
     StyleSheet,
     TouchableOpacity,
-    Image,
     Animated,
     Dimensions,
     StatusBar,
     Platform,
 } from 'react-native';
+// Cached, downscaled images (expo-image) with the same props as React Native Image
+import { Image } from '../components/CachedImage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { WebView } from 'react-native-webview';

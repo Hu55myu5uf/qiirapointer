@@ -4,7 +4,6 @@ import {
     Text,
     StyleSheet,
     ScrollView,
-    Image,
     TouchableOpacity,
     ActivityIndicator,
     Linking,
@@ -12,6 +11,8 @@ import {
     StatusBar,
     Alert,
 } from 'react-native';
+// Cached, downscaled images (expo-image) with the same props as React Native Image
+import { Image } from '../components/CachedImage';
 import { authAPI, vendorAPI, moderationAPI } from '../services/api';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';

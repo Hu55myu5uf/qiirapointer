@@ -12,12 +12,14 @@ import {
     Modal,
     ScrollView,
     Platform,
-    Image,
     StatusBar,
     Animated,
     Linking,
     PanResponder,
 } from 'react-native';
+// Cached, downscaled images (expo-image) with the same props as React Native Image
+import { Image } from '../components/CachedImage';
+import { FlashList } from '@shopify/flash-list';
 import MapView, { Marker, Callout } from '../components/MapView';
 import * as Location from 'expo-location';
 import { vendorAPI, clientAPI } from '../services/api';
@@ -659,7 +661,7 @@ function matchesCategory(vendorCategory: string | undefined, selected: string): 
                     <Text style={styles.emptyText}>No vendors found</Text>
                 </View>
             ) : (
-                <FlatList
+                <FlashList
                     data={vendors}
                     keyExtractor={(item) => item.id}
                     renderItem={renderVendorCard}

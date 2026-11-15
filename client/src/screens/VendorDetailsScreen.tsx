@@ -5,7 +5,6 @@ import {
     StyleSheet,
     ScrollView,
     TouchableOpacity,
-    Image,
     ActivityIndicator,
     Alert,
     Linking,
@@ -15,6 +14,8 @@ import {
     TextInput,
     FlatList,
 } from 'react-native';
+// Cached, downscaled images (expo-image) with the same props as React Native Image
+import { Image } from '../components/CachedImage';
 import { vendorAPI, clientAPI, postAPI, moderationAPI } from '../services/api';
 import { canDeleteComment, confirmDeleteComment } from '../utils/comments';
 import { useAuthStore } from '../store/authStore';

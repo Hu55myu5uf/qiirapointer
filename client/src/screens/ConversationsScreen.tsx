@@ -7,12 +7,14 @@ import {
     TouchableOpacity,
     ActivityIndicator,
     RefreshControl,
-    Image,
     Platform,
     StatusBar,
     ScrollView,
     Alert,
 } from 'react-native';
+// Cached, downscaled images (expo-image) with the same props as React Native Image
+import { Image } from '../components/CachedImage';
+import { FlashList } from '@shopify/flash-list';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { chatAPI } from '../services/api';
@@ -385,7 +387,7 @@ export default function ConversationsScreen({ navigation }: any) {
                     </Text>
                 </View>
             ) : (
-                <FlatList
+                <FlashList
                     data={displayConversations}
                     keyExtractor={(item) => item.id}
                     renderItem={renderConversation}

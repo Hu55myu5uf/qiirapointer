@@ -6,10 +6,11 @@ import {
     FlatList,
     Dimensions,
     TouchableOpacity,
-    Image,
     Platform,
     Animated,
 } from 'react-native';
+// Cached, downscaled images (expo-image) with the same props as React Native Image
+import { Image } from './CachedImage';
 
 // Shape of FlatList viewability callbacks (no longer exported by react-native's types)
 type ViewToken = { item: any; key: string; index?: number | null; isViewable: boolean };

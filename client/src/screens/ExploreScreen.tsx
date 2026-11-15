@@ -5,7 +5,6 @@ import {
     Text,
     StyleSheet,
     FlatList,
-    Image,
     TouchableOpacity,
     TextInput,
     ActivityIndicator,
@@ -18,6 +17,9 @@ import {
     StatusBar,
     KeyboardAvoidingView,
 } from 'react-native';
+// Cached, downscaled images (expo-image) with the same props as React Native Image
+import { Image } from '../components/CachedImage';
+import { FlashList } from '@shopify/flash-list';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../context/ThemeContext';
@@ -1024,7 +1026,7 @@ export default function ExploreScreen({ navigation, route }: any) {
                     refreshing={refreshing}
                 />
             ) : (
-                <FlatList
+                <FlashList
                     data={filteredPosts}
                     keyExtractor={(item) => item.id}
                     renderItem={renderPostItem}
@@ -1069,11 +1071,7 @@ export default function ExploreScreen({ navigation, route }: any) {
                             </TouchableOpacity>
                         ) : undefined
                     }
-                    // Long lists: render in small batches and drop off-screen rows from memory
-                    initialNumToRender={6}
-                    maxToRenderPerBatch={6}
-                    windowSize={9}
-                    removeClippedSubviews
+                    // FlashList recycles rows, so long feeds stay smooth on low-end phones
                 />
             )}
 

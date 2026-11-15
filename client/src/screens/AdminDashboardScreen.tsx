@@ -13,10 +13,11 @@ import {
     TextInput,
     KeyboardAvoidingView,
     Platform,
-    Image,
     StatusBar,
     Linking,
 } from 'react-native';
+// Cached, downscaled images (expo-image) with the same props as React Native Image
+import { Image } from '../components/CachedImage';
 import * as ImagePicker from 'expo-image-picker';
 import { adminAPI, chatAPI, moderationAPI } from '../services/api';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';

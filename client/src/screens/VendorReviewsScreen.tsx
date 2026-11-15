@@ -6,9 +6,10 @@ import {
     FlatList,
     ActivityIndicator,
     TouchableOpacity,
-    Image,
     RefreshControl,
 } from 'react-native';
+// Cached, downscaled images (expo-image) with the same props as React Native Image
+import { Image } from '../components/CachedImage';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { vendorAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';

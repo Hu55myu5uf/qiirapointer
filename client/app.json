@@ -2,23 +2,39 @@
   "expo": {
     "name": "QIIRA",
     "slug": "qiira",
-    "version": "1.0.4",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.qiira.pointer",
-      "buildNumber": "7"
+      "buildNumber": "8",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "QIIRA uses your camera for video calls with businesses and to take photos for your posts, profile and identity verification.",
+        "NSMicrophoneUsageDescription": "QIIRA uses your microphone for voice and video calls with businesses and when recording videos for your posts."
+      }
     },
     "android": {
       "package": "com.qiira.pointer",
-      "versionCode": 7,
+      "versionCode": 8,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "softwareKeyboardLayoutMode": "pan"
+      "softwareKeyboardLayoutMode": "pan",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "blockedPermissions": [
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -42,20 +58,30 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow QIIRA to access your photos to upload media."
+          "photosPermission": "QIIRA needs access to your photos so you can add pictures to your posts, profile, chats and identity verification.",
+          "cameraPermission": "QIIRA uses your camera so you can take photos for your posts, profile, chats and identity verification.",
+          "microphonePermission": "QIIRA uses your microphone to record sound when you film a video for a post."
         }
       ],
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow QIIRA to use your location to discover nearby businesses."
+          "locationWhenInUsePermission": "QIIRA uses your location while you use the app to show businesses near you and, for vendors, to place your shop on the map.",
+          "isAndroidBackgroundLocationEnabled": false,
+          "isIosBackgroundLocationEnabled": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "QIIRA uses your microphone for voice and video calls with businesses."
         }
       ],
       "expo-video",
-      "expo-audio",
       "expo-asset",
       "expo-font",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-image"
     ]
   }
 }

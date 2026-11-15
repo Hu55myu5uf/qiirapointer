@@ -8,10 +8,11 @@ import {
     ActivityIndicator,
     Alert,
     RefreshControl,
-    Image,
     Platform,
     StatusBar,
 } from 'react-native';
+// Cached, downscaled images (expo-image) with the same props as React Native Image
+import { Image } from '../components/CachedImage';
 import { clientAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';

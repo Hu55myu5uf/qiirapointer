@@ -5,10 +5,11 @@ import {
     StyleSheet,
     Modal,
     TouchableOpacity,
-    Image,
     Animated,
     Dimensions,
 } from 'react-native';
+// Cached, downscaled images (expo-image) with the same props as React Native Image
+import { Image } from './CachedImage';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useCallStore } from '../store/callStore';
 import { useTheme } from '../context/ThemeContext';
