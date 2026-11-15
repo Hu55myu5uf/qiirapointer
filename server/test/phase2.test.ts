@@ -286,3 +286,19 @@ describe('calls stored in Firestore', () => {
         expect((await api().get('/api/calls/incoming/bob').set('Authorization', bearer('bob'))).body.incomingCall).toBeNull();
     });
 });
+
+describe('set shop location', () => {
+    it('puts the store on the map and in distance search', async () => {
+        await approvedVendor('ven');
+        expect((await api().get('/api/vendors/ven')).body.vendor.location).toBeNull();
+        const res = await api().put('/api/vendors/ven/location').set('Authorization', bearer('ven'))
+            .send({ useLiveLocation: false, businessLatitude: 12.0022, businessLongitude: 8.592 });
+        expect(res.status).toBe(200);
+        expect((await api().get('/api/vendors/ven')).body.vendor.location).toEqual({ latitude: 12.0022, longitude: 8.592 });
+        const near = await api().get('/api/vendors').query({ latitude: 12.0, longitude: 8.59, radius: 2000 });
+        expect(near.body.vendors.map((v: any) => v.id)).toEqual(['ven']);
+        // garbage coordinates are rejected
+        expect((await api().put('/api/vendors/ven/location').set('Authorization', bearer('ven'))
+            .send({ useLiveLocation: false, businessLatitude: 999, businessLongitude: 8 })).status).toBe(400);
+    });
+});

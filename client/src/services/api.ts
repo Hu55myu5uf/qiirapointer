@@ -114,7 +114,14 @@ export const vendorAPI = {
     removeDocument: (id: string, docId: string) =>
         api.delete(`/vendors/${id}/documents/${docId}`),
     // Location toggle
-    updateLocation: (id: string, data: { useLiveLocation: boolean; liveLatitude?: number; liveLongitude?: number }) =>
+    updateLocation: (id: string, data: {
+        useLiveLocation: boolean;
+        liveLatitude?: number;
+        liveLongitude?: number;
+        // the shop's fixed map pin
+        businessLatitude?: number;
+        businessLongitude?: number;
+    }) =>
         api.put(`/vendors/${id}/location`, data),
     // KYC Verification Submission
     submitVerification: (id: string, data: { documentType: string; documentUrl: string; documentName?: string; documentFileType?: string; notes?: string }) =>

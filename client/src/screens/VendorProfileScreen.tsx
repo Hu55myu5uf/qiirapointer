@@ -155,6 +155,8 @@ export default function VendorProfileScreen({ navigation }: any) {
     // Live location toggle state
     const [useLiveLocation, setUseLiveLocation] = useState(false);
     const [locationToggling, setLocationToggling] = useState(false);
+    const [hasShopLocation, setHasShopLocation] = useState(true); // avoid flashing the prompt while loading
+    const [settingShopLocation, setSettingShopLocation] = useState(false);
 
     // Fetch menu documents
     const fetchMenuDocuments = useCallback(async () => {
@@ -275,6 +277,36 @@ export default function VendorProfileScreen({ navigation }: any) {
         }
     };
 
+    // Save where the vendor is standing right now as the shop's fixed map pin
+    const handleSetShopLocation = async () => {
+        if (!user) return;
+        setSettingShopLocation(true);
+        try {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert(
+                    'Location needed',
+                    'To put your shop on the map, allow QIIRA to use your location while you are at your shop. You can change this later in your phone settings.'
+                );
+                return;
+            }
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+            await vendorAPI.updateLocation(user.uid, {
+                useLiveLocation,
+                ...(useLiveLocation ? { liveLatitude: loc.coords.latitude, liveLongitude: loc.coords.longitude } : {}),
+                businessLatitude: loc.coords.latitude,
+                businessLongitude: loc.coords.longitude,
+            });
+            setHasShopLocation(true);
+            Alert.alert('Shop location saved', 'Customers can now find your shop on the map.');
+        } catch (error: any) {
+            console.error('Set shop location error:', error);
+            Alert.alert('Could not get your location', error?.response?.data?.error || 'Please make sure location services are on and try again.');
+        } finally {
+            setSettingShopLocation(false);
+        }
+    };
+
     const handleToggleLocation = async () => {
         if (!user) return;
         setLocationToggling(true);
@@ -334,16 +366,11 @@ export default function VendorProfileScreen({ navigation }: any) {
                 setServices(vendor.services || '');
                 setBusinessImage(vendor.businessImage || '');
                 setBannerImage(vendor.bannerImage || '');
-                setVerificationStatus(vendor.verificationStatus || vendor.verification_status || 'pending');
-                const verifiedFlag = Boolean(
-                    vendor.isVerified ||
-                    vendor.is_verified ||
-                    vendor.userInfo?.isVerified ||
-                    vendor.verificationStatus === 'approved' ||
-                    vendor.verification_status === 'approved' ||
-                    (userRole === 'admin')
-                );
-                setIsVerified(verifiedFlag);
+                setVerificationStatus(vendor.verificationStatus || 'pending');
+                // The badge means "identity verified" — an approved store alone doesn't earn it
+                setIsVerified(Boolean(vendor.isVerified || userRole === 'admin'));
+                setUseLiveLocation(Boolean(vendor.useLiveLocation));
+                setHasShopLocation(Boolean(vendor.location));
                 setBusinessHours(vendor.businessHours || DEFAULT_BUSINESS_HOURS);
             }
         } catch (error) {
@@ -728,7 +755,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                 ...(user as any),
                 displayName: businessName,
                 photoURL: imageUrl,
-            } as any);
+            });
 
             // Update local state to prevent re-upload
             if (imageUrl !== businessImage) setBusinessImage(imageUrl);
@@ -905,6 +932,58 @@ export default function VendorProfileScreen({ navigation }: any) {
                             </View>
                             <Text style={{ fontSize: 20, color: '#B28A45', fontWeight: 'bold' }}>›</Text>
                         </TouchableOpacity>
+
+                        {/* Shop location: without it the store can't appear on the map */}
+                        <View style={{
+                            backgroundColor: hasShopLocation ? colors.surfaceLight : 'rgba(178, 138, 69, 0.12)',
+                            marginHorizontal: SPACING.md,
+                            marginTop: SPACING.sm,
+                            padding: SPACING.md,
+                            borderRadius: BORDER_RADIUS.md,
+                            borderWidth: 1,
+                            borderColor: hasShopLocation ? colors.border : '#B28A45',
+                        }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Ionicons name={hasShopLocation ? 'location' : 'alert-circle-outline'} size={18} color={hasShopLocation ? colors.primary : '#B28A45'} />
+                                <Text style={{ flex: 1, fontSize: FONT_SIZES.sm, fontWeight: '700', color: colors.textPrimary }}>
+                                    {hasShopLocation ? 'Your shop is on the map' : "Customers can't find you on the map yet"}
+                                </Text>
+                            </View>
+                            <Text style={{ fontSize: 12, color: colors.textSecondary, marginTop: 4 }}>
+                                {hasShopLocation
+                                    ? 'Moved? Stand at your shop and update the pin.'
+                                    : 'Stand at your shop and tap the button below to place your pin.'}
+                            </Text>
+                            <TouchableOpacity
+                                onPress={handleSetShopLocation}
+                                disabled={settingShopLocation}
+                                accessibilityRole="button"
+                                accessibilityLabel={hasShopLocation ? 'Update shop location' : 'Set my shop location here'}
+                                style={{
+                                    marginTop: SPACING.sm,
+                                    alignSelf: 'flex-start',
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    paddingVertical: 8,
+                                    paddingHorizontal: 14,
+                                    minHeight: 40,
+                                    borderRadius: BORDER_RADIUS.md,
+                                    backgroundColor: hasShopLocation ? colors.surface : '#B28A45',
+                                    borderWidth: hasShopLocation ? 1 : 0,
+                                    borderColor: colors.border,
+                                }}
+                            >
+                                {settingShopLocation ? (
+                                    <ActivityIndicator size="small" color={hasShopLocation ? colors.primary : '#FFFFFF'} />
+                                ) : (
+                                    <Ionicons name="navigate-outline" size={16} color={hasShopLocation ? colors.primary : '#FFFFFF'} />
+                                )}
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: hasShopLocation ? colors.primary : '#FFFFFF' }}>
+                                    {hasShopLocation ? 'Update shop location' : 'Set my shop location here'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
 
                         {/* Location Toggle */}
                         <View style={{
