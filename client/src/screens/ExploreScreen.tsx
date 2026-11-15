@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import {
     View,
@@ -185,41 +185,61 @@ export default function ExploreScreen({ navigation, route }: any) {
 
     const currentUserId = auth.currentUser?.uid;
 
+    // Paged feed: the first page loads on open; more pages load as you scroll ("infinite scroll")
+    const [nextCursor, setNextCursor] = useState<string | null>(null);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [feedError, setFeedError] = useState(false);
+    const postsRef = useRef<any[]>([]);
+    postsRef.current = posts;
+
+    const feedParams = useCallback((before?: string) => ({
+        type: activeTab === 'reels' ? 'reel' : 'all',
+        category: selectedCategory !== 'All' ? selectedCategory : undefined,
+        limit: 20,
+        ...(before ? { before } : {}),
+    }), [activeTab, selectedCategory]);
+
     const fetchPosts = useCallback(async () => {
         try {
-            setLoading(true);
-            const params: any = {
-                type: activeTab === 'reels' ? 'reel' : 'all',
-                category: selectedCategory !== 'All' ? selectedCategory : undefined,
-                userId: currentUserId,
-            };
-
-            const response = await postAPI.getFeed(params);
-            const fetchedPosts = response.data.posts || [];
-            const sortedPosts = [...fetchedPosts].sort((a: any, b: any) => {
-                const aAdv = a.isAdvert || a.promoted ? 1 : 0;
-                const bAdv = b.isAdvert || b.promoted ? 1 : 0;
-                if (aAdv !== bAdv) return bAdv - aAdv;
-                return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-            });
-            setPosts(sortedPosts);
+            // Only show the full-screen spinner when there is nothing on screen yet
+            if (postsRef.current.length === 0) setLoading(true);
+            const response = await postAPI.getFeed(feedParams() as any);
+            setPosts(response.data.posts || []);
+            setNextCursor(response.data.nextCursor || null);
+            setFeedError(false);
         } catch (error) {
             console.error('Fetch feed error:', error);
+            setFeedError(true);
         } finally {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [activeTab, selectedCategory, currentUserId]);
+    }, [feedParams]);
 
+    const loadMorePosts = useCallback(async () => {
+        if (!nextCursor || loadingMore || loading) return;
+        setLoadingMore(true);
+        try {
+            const response = await postAPI.getFeed(feedParams(nextCursor) as any);
+            const more = response.data.posts || [];
+            setPosts(prev => {
+                const seen = new Set(prev.map(p => p.id));
+                return [...prev, ...more.filter((p: any) => !seen.has(p.id))];
+            });
+            setNextCursor(response.data.nextCursor || null);
+        } catch (error) {
+            console.error('Load more posts error:', error);
+        } finally {
+            setLoadingMore(false);
+        }
+    }, [nextCursor, loadingMore, loading, feedParams]);
+
+    // Reload when the screen gains focus or the tab/category changes (once — no double fetch)
     useFocusEffect(
         useCallback(() => {
             fetchPosts();
         }, [fetchPosts])
     );
-
-    useEffect(() => {
-        fetchPosts();
-    }, [fetchPosts]);
 
     const handleRefresh = () => {
         setRefreshing(true);
@@ -1036,6 +1056,23 @@ export default function ExploreScreen({ navigation, route }: any) {
                     refreshControl={
                         <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
                     }
+                    // Infinite scroll: fetch the next page when ~2 screens from the end
+                    onEndReached={loadMorePosts}
+                    onEndReachedThreshold={2}
+                    ListFooterComponent={
+                        loadingMore ? (
+                            <ActivityIndicator style={{ marginVertical: SPACING.lg }} color={colors.primary} />
+                        ) : feedError && posts.length > 0 ? (
+                            <TouchableOpacity onPress={handleRefresh} style={{ padding: SPACING.lg, alignItems: 'center' }}>
+                                <Text style={{ color: colors.primary, fontWeight: '600' }}>Couldn't refresh — tap to retry</Text>
+                            </TouchableOpacity>
+                        ) : null
+                    }
+                    // Long lists: render in small batches and drop off-screen rows from memory
+                    initialNumToRender={6}
+                    maxToRenderPerBatch={6}
+                    windowSize={9}
+                    removeClippedSubviews
                 />
             )}
 

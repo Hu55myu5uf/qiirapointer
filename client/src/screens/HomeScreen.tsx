@@ -423,19 +423,27 @@ function matchesCategory(vendorCategory: string | undefined, selected: string): 
         })();
     }, []);
 
+    // Search waits until typing pauses (one request instead of one per keystroke)
+    const [debouncedSearch, setDebouncedSearch] = useState(searchQuery);
+    useEffect(() => {
+        const t = setTimeout(() => setDebouncedSearch(searchQuery), 400);
+        return () => clearTimeout(t);
+    }, [searchQuery]);
+
     useEffect(() => {
         fetchVendors();
-    }, [selectedCategory, searchQuery, minRating, sortBy]);
+    }, [selectedCategory, debouncedSearch, minRating, sortBy]);
 
     const fetchVendors = async () => {
         try {
             setLoading(true);
-            const params: any = {};
+            // Filtering and sorting happen on the device, so request the full list (server max 100)
+            const params: any = { limit: 100 };
             if (selectedCategory && selectedCategory !== 'All') {
                 params.category = selectedCategory;
             }
-            if (searchQuery) {
-                params.search = searchQuery;
+            if (debouncedSearch) {
+                params.search = debouncedSearch;
             }
 
             const response = await vendorAPI.getAll(params);
