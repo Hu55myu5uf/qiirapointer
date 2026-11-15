@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import * as FirebaseAuth from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
+import { initializeFirestore, getFirestore, Firestore } from 'firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
@@ -43,5 +44,15 @@ try {
 // Initialize Storage
 const storage = getStorage(app);
 
-export { auth, storage };
+// Firestore is used READ-ONLY by the app, for real-time chat and calls (security rules only allow
+// participants to read their own conversations). All writes go through the QIIRA API server.
+// Long-polling auto-detection keeps listeners working on mobile networks and in React Native.
+let firestore: Firestore;
+try {
+    firestore = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+} catch {
+    firestore = getFirestore(app);
+}
+
+export { auth, storage, firestore };
 export default app;

@@ -19,7 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
-import supabase from '../config/supabase';
+import { subscribeToMessages } from '../services/realtime';
 import { chatAPI, vendorAPI, authAPI, moderationAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
@@ -559,61 +559,40 @@ export default function ChatScreen({ route, navigation }: any) {
 
         setConversationId(convId);
         markAsRead(convId);
-        refreshUnreadCount(user.uid);
         fetchMessages(convId, true);
 
-        // Polling fallback
-        const pollInterval = setInterval(() => {
-            fetchMessages(convId, false);
-            markAsRead(convId);
-        }, 3000);
-
-        // Realtime subscription
-        const channel = supabase
-            .channel(`messages-${convId}`)
-            .on(
-                'postgres_changes',
-                {
-                    event: 'INSERT',
-                    schema: 'public',
-                    table: 'messages',
-                    filter: `conversation_id=eq.${convId}`,
-                },
-                (payload) => {
-                    const newMsg: Message = {
-                        id: payload.new.id,
-                        senderId: payload.new.sender_id,
-                        text: payload.new.text,
-                        createdAt: payload.new.created_at,
-                        mediaUrl: payload.new.media_url,
-                        mediaType: payload.new.media_type,
-                        fileName: payload.new.file_name,
-                        replyTo: payload.new.reply_to,
-                        sharedPost: payload.new.shared_post,
-                    };
-                    setMessages((prev) => {
-                        const hasTemp = prev.some((m) => m.id.startsWith('temp-') && m.text === newMsg.text && m.senderId === newMsg.senderId);
-                        if (hasTemp) {
-                            return prev.map((m) =>
-                                m.id.startsWith('temp-') && m.text === newMsg.text && m.senderId === newMsg.senderId ? newMsg : m
-                            );
-                        }
-                        if (prev.some((m) => m.id === newMsg.id)) return prev;
-                        return [...prev, newMsg];
-                    });
-                    markAsRead(convId);
+        // Real-time: new messages appear instantly (no polling). If the live connection can't be
+        // used, fall back to checking every 5 seconds while this chat is open.
+        let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+        const unsubscribe = subscribeToMessages(
+            convId,
+            (liveMsgs) => {
+                setMessages((prev) => {
+                    // Keep "sending…" messages that the server hasn't confirmed yet
+                    const pendingOptimistic = prev.filter(
+                        (p) => p.id.startsWith('temp-') && !liveMsgs.some((s) => s.text === p.text && s.senderId === p.senderId)
+                    );
+                    return [...(liveMsgs as Message[]), ...pendingOptimistic];
+                });
+                setLoading(false);
+                markAsRead(convId);
+            },
+            (error) => {
+                console.warn('Live chat unavailable, falling back to refresh:', error.message);
+                if (!fallbackTimer) {
+                    fallbackTimer = setInterval(() => {
+                        fetchMessages(convId, false);
+                        markAsRead(convId);
+                    }, 5000);
                 }
-            )
-            .subscribe();
+            },
+        );
 
         return () => {
-            clearInterval(pollInterval);
-            supabase.removeChannel(channel);
-            if (user) {
-                refreshUnreadCount(user.uid);
-            }
+            unsubscribe();
+            if (fallbackTimer) clearInterval(fallbackTimer);
         };
-    }, [user, existingConvId, otherUserId, fetchMessages, markAsRead, refreshUnreadCount]);
+    }, [user, existingConvId, otherUserId, fetchMessages, markAsRead]);
 
     const handleDirectCameraSnap = async () => {
         try {

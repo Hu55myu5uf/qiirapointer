@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
+import { getFirestore } from 'firebase/firestore';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -21,5 +22,8 @@ const auth = getAuth(app);
 // Initialize Storage
 const storage = getStorage(app);
 
-export { auth, storage };
+// Read-only real-time listeners (chat, calls); all writes go through the API server
+const firestore = getFirestore(app);
+
+export { auth, storage, firestore };
 export default app;

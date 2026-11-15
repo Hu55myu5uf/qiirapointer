@@ -2,17 +2,51 @@ rules_version = '2';
 
 // QIIRA Firestore security rules
 //
-// All reads and writes go through the QIIRA API server, which uses the Firebase Admin SDK
-// (the Admin SDK is not subject to these rules). The mobile app never accesses Firestore
-// directly, so direct client access is denied everywhere.
+// All WRITES go through the QIIRA API server, which uses the Firebase Admin SDK (not subject to
+// these rules). The app may only READ, in real time, the few things listed below. Everything else
+// is denied to clients.
 //
-// Previously, signed-in users could write their own `users` document — including `role: "admin"`,
-// which the server trusts — and could read every conversation and message. Locking this down
-// closes both holes.
-//
-// Phase 3 (real-time chat) will add narrow, read-only rules for conversation participants.
+// The `role` field in users/{uid} can only be written by the server, so it is safe to trust here.
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Participants can read their conversations; admins can read the shared Support inbox
+    function canReadConversation(participants) {
+      return signedIn() && (
+        request.auth.uid in participants ||
+        ('qiira_official_support' in participants && isAdmin())
+      );
+    }
+
+    match /conversations/{conversationId} {
+      allow read: if canReadConversation(resource.data.participants);
+      allow write: if false;
+
+      match /messages/{messageId} {
+        allow read: if canReadConversation(
+          get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants
+        );
+        allow write: if false;
+      }
+    }
+
+    // In-app calls: only the caller and the person being called can see a call
+    match /calls/{callId} {
+      allow read: if signedIn() &&
+        (request.auth.uid == resource.data.callerId || request.auth.uid == resource.data.receiverId);
+      allow write: if false;
+    }
+
+    // Everything else: no direct client access
     match /{document=**} {
       allow read, write: if false;
     }

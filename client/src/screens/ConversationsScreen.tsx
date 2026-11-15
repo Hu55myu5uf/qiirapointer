@@ -15,7 +15,6 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
-import supabase from '../config/supabase';
 import { chatAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
@@ -44,10 +43,30 @@ export default function ConversationsScreen({ navigation }: any) {
     const styles = getStyles(colors);
 
     const { user } = useAuthStore();
-    const { readTimestamps, markAsRead, refreshUnreadCount, loadReadTimestamps } = useChatStore();
-    const [conversations, setConversations] = useState<Conversation[]>([]);
-    const [loading, setLoading] = useState(true);
+    const { readTimestamps, markAsRead, loadReadTimestamps } = useChatStore();
+    // Live list (instant updates) from the app-wide subscription
+    const liveConversations = useChatStore(s => s.conversations);
+    const liveLoaded = useChatStore(s => s.conversationsLoaded);
+    // Server copy adds live names, photos and verified badges for each participant
+    const [serverConversations, setServerConversations] = useState<Record<string, Conversation>>({});
+    const [serverLoaded, setServerLoaded] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+
+    const conversations: Conversation[] = useMemo(() => {
+        const base: Conversation[] = liveConversations.length ? liveConversations : Object.values(serverConversations);
+        return base.map(c => {
+            const s = serverConversations[c.id];
+            if (!s) return c;
+            return {
+                ...c,
+                participantNames: { ...c.participantNames, ...s.participantNames },
+                participantImages: { ...(c.participantImages || {}), ...(s.participantImages || {}) },
+                participantVerified: s.participantVerified,
+                participantIsAdmin: s.participantIsAdmin,
+            };
+        });
+    }, [liveConversations, serverConversations]);
+    const loading = !liveLoaded && !serverLoaded;
     const [activeCategory, setActiveCategory] = useState<ChatCategory>('all');
     const [archivedIds, setArchivedIds] = useState<string[]>([]);
 
@@ -74,57 +93,37 @@ export default function ConversationsScreen({ navigation }: any) {
         loadReadTimestamps();
     }, [loadReadTimestamps]);
 
-    const fetchConversations = useCallback(async (showLoading = false) => {
+    const fetchServerDetails = useCallback(async () => {
         if (!user) return;
-        if (showLoading) setLoading(true);
         try {
             const response = await chatAPI.getConversations(user.uid);
-            const convs = response.data.conversations || [];
-            setConversations(convs);
-            refreshUnreadCount(user.uid);
+            const byId: Record<string, Conversation> = {};
+            for (const c of response.data.conversations || []) byId[c.id] = c;
+            setServerConversations(byId);
         } catch (error) {
-            console.error('Error fetching conversations:', error);
+            console.error('Error fetching conversation details:', error);
         } finally {
-            if (showLoading) setLoading(false);
+            setServerLoaded(true);
             setRefreshing(false);
         }
-    }, [user, refreshUnreadCount]);
+    }, [user]);
 
-    // Refetch conversations every time the Messages tab is focused
+    // Names / photos / badges: refresh when the tab is opened (the list itself is live)
     useFocusEffect(
         useCallback(() => {
-            fetchConversations(conversations.length === 0);
-
-            const interval = setInterval(() => {
-                fetchConversations(false);
-            }, 5000);
-
-            // Subscribe to changes on conversations for the active user
-            const channel = supabase
-                .channel('conversations-channel')
-                .on(
-                    'postgres_changes',
-                    {
-                        event: '*',
-                        schema: 'public',
-                        table: 'conversations',
-                    },
-                    () => {
-                        fetchConversations(false);
-                    }
-                )
-                .subscribe();
-
-            return () => {
-                clearInterval(interval);
-                supabase.removeChannel(channel);
-            };
-        }, [fetchConversations, conversations.length])
+            fetchServerDetails();
+        }, [fetchServerDetails])
     );
+
+    // A conversation we have no details for yet (e.g. someone new messaged us): fetch once
+    const unknownCount = liveConversations.filter(c => !serverConversations[c.id]).length;
+    useEffect(() => {
+        if (unknownCount > 0 && serverLoaded) fetchServerDetails();
+    }, [unknownCount]);
 
     const onRefresh = () => {
         setRefreshing(true);
-        fetchConversations(false);
+        fetchServerDetails();
     };
 
     const [avatarErrors, setAvatarErrors] = useState<Record<string, boolean>>({});

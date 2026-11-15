@@ -231,23 +231,14 @@ function ClientTabs() {
   const { theme, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const { unreadCount, refreshUnreadCount, loadReadTimestamps } = useChatStore();
+  const unreadCount = useChatStore(s => s.unreadCount);
 
   const bottomInset = insets.bottom > 0 ? insets.bottom : (Platform.OS === 'ios' ? 12 : 8);
   const barHeight = Platform.OS === 'ios'
     ? (insets.bottom > 0 ? 60 + insets.bottom : 68)
     : 66 + (insets.bottom > 0 ? insets.bottom : 0);
 
-  useEffect(() => {
-    loadReadTimestamps();
-    if (user) {
-      refreshUnreadCount(user.uid);
-      const interval = setInterval(() => {
-        refreshUnreadCount(user.uid);
-      }, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [user]);
+  // Unread badge comes from the app-wide live chat subscription (see MainApp)
 
   return (
     <Tab.Navigator
@@ -508,23 +499,14 @@ function VendorTabs() {
   const { theme, colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const { unreadCount, refreshUnreadCount, loadReadTimestamps } = useChatStore();
+  const unreadCount = useChatStore(s => s.unreadCount);
 
   const bottomInset = insets.bottom > 0 ? insets.bottom : (Platform.OS === 'ios' ? 12 : 8);
   const barHeight = Platform.OS === 'ios'
     ? (insets.bottom > 0 ? 60 + insets.bottom : 68)
     : 66 + (insets.bottom > 0 ? insets.bottom : 0);
 
-  useEffect(() => {
-    loadReadTimestamps();
-    if (user) {
-      refreshUnreadCount(user.uid);
-      const interval = setInterval(() => {
-        refreshUnreadCount(user.uid);
-      }, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [user]);
+  // Unread badge comes from the app-wide live chat subscription (see MainApp)
 
   return (
     <Tab.Navigator
@@ -774,6 +756,14 @@ function MainApp() {
       return () => clearInterval(interval);
     }
   }, [user]);
+
+  // One real-time chat subscription for the whole app (inbox, unread badge, chat screens)
+  const startChats = useChatStore(s => s.start);
+  const stopChats = useChatStore(s => s.stop);
+  useEffect(() => {
+    if (user?.uid) startChats(user.uid);
+    else stopChats();
+  }, [user?.uid]);
 
   // Initialize themed alert patch safely inside component lifecycle
   useEffect(() => {
