@@ -243,3 +243,18 @@ describe('comments moderation', () => {
         expect((await api().get(`/api/posts/${post.id}/comments`)).body.comments).toEqual([]);
     });
 });
+
+describe('posts whose media was lost', () => {
+    it('are hidden from feeds; text-only community posts still show', async () => {
+        await approvedVendor('ven'); await seedUser('alice');
+        const now = Date.now();
+        await fakeDb.collection('posts').doc('dead').set({ id: 'dead', vendorId: 'ven', authorId: 'ven', type: 'reel', mediaUrls: ['https://qiirapointer.onrender.com/uploads/x.mp4'], createdAt: new Date(now - 3000).toISOString() });
+        await fakeDb.collection('posts').doc('ok').set({ id: 'ok', vendorId: 'ven', authorId: 'ven', type: 'post', mediaUrls: ['https://x.test/a.jpg'], createdAt: new Date(now - 2000).toISOString() });
+        await fakeDb.collection('posts').doc('talk').set({ id: 'talk', vendorId: 'alice', authorId: 'alice', authorType: 'client', type: 'community', caption: 'hi', mediaUrls: [], createdAt: new Date(now - 1000).toISOString() });
+
+        const feed = await api().get('/api/posts/feed');
+        expect(feed.body.posts.map((p: any) => p.id)).toEqual(['talk', 'ok']);
+        expect((await api().get('/api/posts/showcase')).body.showcase).toEqual([]);
+        expect((await api().get('/api/posts/vendor/ven')).body.posts.map((p: any) => p.id)).toEqual(['ok']);
+    });
+});

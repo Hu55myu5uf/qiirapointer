@@ -152,10 +152,13 @@ async function migrateVendors(sbVendors: Map<string, any>) {
     for (const doc of snap.docs) {
         const v = doc.data();
         const sb = sbVendors.get(doc.id) || {};
+        const owner = (await db.collection('users').doc(doc.id).get()).data() || {};
         const update: Record<string, any> = {};
         const set = (k: string, val: any) => { if (val !== undefined && JSON.stringify(v[k]) !== JSON.stringify(val)) update[k] = val; };
 
-        set('businessName', (v.businessName || v.business_name || sb.business_name || 'Vendor').toString().slice(0, 100));
+        // Never store a placeholder name: fall back to the owner's own name
+        const storedName = v.businessName && v.businessName !== 'Vendor' ? v.businessName : '';
+        set('businessName', (storedName || v.business_name || sb.business_name || owner.businessName || owner.fullName || owner.full_name || 'Vendor').toString().slice(0, 100));
         set('category', v.category || sb.category || '');
         set('description', v.description || v.aboutUs || v.about_us || v.bio || sb.description || '');
         set('address', v.address || sb.address || '');

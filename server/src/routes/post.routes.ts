@@ -53,6 +53,16 @@ function presentPost(p: any, viewerId: string | undefined, people: Map<string, a
     };
 }
 
+/**
+ * Business posts and reels are only shown if at least one photo/video still works
+ * (some older uploads were lost from the old server disk). Community posts may be text-only.
+ */
+function isDisplayable(p: any): boolean {
+    if (p.type === 'community' || p.authorType === 'client') return true;
+    const media = (Array.isArray(p.mediaUrls) && p.mediaUrls.length ? p.mediaUrls : [p.mediaUrl]);
+    return media.some((u: any) => Boolean(usableImage(u)));
+}
+
 async function blockedFor(viewerId?: string): Promise<string[]> {
     if (!viewerId) return [];
     return (await getDisplayProfile(viewerId)).blockedUserIds;
@@ -106,7 +116,7 @@ router.get('/feed', optionalAuthenticateUser, async (req: Request, res: Response
         const { page, nextCursor } = await loadPostsPage({
             limit,
             before: typeof req.query.before === 'string' ? req.query.before : undefined,
-            filter: p =>
+            filter: p => isDisplayable(p) &&
                 !blocked.includes(p.authorId) && !blocked.includes(p.vendorId) &&
                 (type === 'all' || p.type === type) &&
                 (!category || category === 'All' || matchesCategory(p, category)),
@@ -131,7 +141,7 @@ router.get(['/reels', '/showcase'], optionalAuthenticateUser, async (req: Reques
         const { page, nextCursor } = await loadPostsPage({
             limit: Math.min(Math.max(Number(req.query.limit) || DEFAULT_PAGE, 1), MAX_PAGE),
             before: typeof req.query.before === 'string' ? req.query.before : undefined,
-            filter: p => (p.type === 'reel' || p.type === 'showcase') && !blocked.includes(p.authorId) && !blocked.includes(p.vendorId),
+            filter: p => isDisplayable(p) && (p.type === 'reel' || p.type === 'showcase') && !blocked.includes(p.authorId) && !blocked.includes(p.vendorId),
         });
         const people = await getDisplayProfiles(page.map(p => p.authorId || p.vendorId));
         const showcase = page.map(p => presentPost(p, viewerId, people));
@@ -154,7 +164,8 @@ router.get('/vendor/:vendorId', optionalAuthenticateUser, async (req: Request, r
             .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
         const before = typeof req.query.before === 'string' ? req.query.before : '';
         const limit = Math.min(Math.max(Number(req.query.limit) || MAX_PAGE, 1), MAX_PAGE);
-        const remaining = before ? all.filter(p => String(p.createdAt) < before) : all;
+        const visible = all.filter(isDisplayable);
+        const remaining = before ? visible.filter(p => String(p.createdAt) < before) : visible;
         const page = remaining.slice(0, limit);
 
         const people = await getDisplayProfiles([req.params.vendorId]);
