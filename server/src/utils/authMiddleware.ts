@@ -136,6 +136,9 @@ export async function optionalAuthenticateUser(req: Request, res: Response, next
                     const user = await getVerifiedUser(decodedToken.uid, decodedToken.email);
                     if (user && !user.isSuspended) {
                         req.user = user;
+                    } else if (user?.isSuspended) {
+                        // Treated as anonymous, but routes can still tell the user they're suspended
+                        (req as any).suspendedUid = user.uid;
                     }
                 } catch (_) {
                     // Ignore invalid token for optional auth

@@ -1,21 +1,19 @@
 import 'react-native-gesture-handler';
 import { registerRootComponent } from 'expo';
 
-// Early diagnostic boot ping to confirm JS runtime execution
+// Wake the API server as early as possible: on the free hosting plan it sleeps when idle and
+// takes a while to start, so this overlaps that wait with the app's own start-up.
 try {
-  fetch('https://qiirapointer.onrender.com/health?src=android_boot_v103').catch(() => {});
+  fetch('https://qiirapointer.onrender.com/health').catch(() => {});
 } catch (_) {}
 
-// Global safety guard for unhandled errors
+// Log unhandled errors, then always pass them on to React Native's default handler so real
+// crashes are reported (and not silently swallowed, which left the app frozen).
 if (typeof (globalThis as any).ErrorUtils !== 'undefined') {
   const originalHandler = (globalThis as any).ErrorUtils.getGlobalHandler();
   (globalThis as any).ErrorUtils.setGlobalHandler((error: any, isFatal?: boolean) => {
-    console.error('Captured by global error handler:', error, 'isFatal:', isFatal);
-    if (!isFatal && originalHandler) {
-      try {
-        originalHandler(error, isFatal);
-      } catch (_) {}
-    }
+    console.error('Unhandled error:', error, 'isFatal:', isFatal);
+    originalHandler?.(error, isFatal);
   });
 }
 

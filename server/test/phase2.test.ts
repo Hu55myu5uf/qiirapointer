@@ -258,3 +258,14 @@ describe('posts whose media was lost', () => {
         expect((await api().get('/api/posts/vendor/ven')).body.posts.map((p: any) => p.id)).toEqual(['ok']);
     });
 });
+
+describe('app start-up profile load', () => {
+    it('tells a suspended user they are suspended (instead of returning a public profile)', async () => {
+        await seedUser('bad', 'client', { isSuspended: true });
+        const res = await api().get('/api/auth/user/bad').set('Authorization', bearer('bad'));
+        expect(res.status).toBe(403);
+        expect(res.body.error).toBe('Account Suspended');
+        // others still just see the public profile
+        expect((await api().get('/api/auth/user/bad')).status).toBe(200);
+    });
+});

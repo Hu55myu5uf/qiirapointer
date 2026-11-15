@@ -369,6 +369,15 @@ router.post('/oauth', authLimiter, async (req: Request, res: Response) => {
 router.get('/user/:uid', optionalAuthenticateUser, async (req: Request, res: Response) => {
     try {
         const { uid } = req.params;
+
+        // A suspended user loading their own profile (app start-up) must be told so explicitly
+        if ((req as any).suspendedUid === uid) {
+            return res.status(403).json({
+                error: 'Account Suspended',
+                message: 'Your account has been suspended by an administrator. Please contact support.',
+            });
+        }
+
         const userData = await getUserProfile(uid);
 
         if (!userData) {

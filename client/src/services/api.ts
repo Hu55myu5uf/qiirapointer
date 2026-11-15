@@ -56,13 +56,20 @@ api.interceptors.request.use(
     }
 );
 
-// Response interceptor for error handling
+// On 401, refresh the Firebase token once and retry (tokens expire hourly; a refresh usually fixes it)
 api.interceptors.response.use(
     (response) => response,
-    (error) => {
-        if (error.response?.status === 401) {
-            // Handle unauthorized - logout user
-            console.log('Unauthorized - logging out');
+    async (error) => {
+        const original = error.config;
+        if (error.response?.status === 401 && original && !original._retriedAuth && auth.currentUser) {
+            original._retriedAuth = true;
+            try {
+                const token = await auth.currentUser.getIdToken(true);
+                original.headers = { ...(original.headers || {}), Authorization: `Bearer ${token}` };
+                return api(original);
+            } catch {
+                // fall through to the original error
+            }
         }
         return Promise.reject(error);
     }

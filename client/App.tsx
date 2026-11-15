@@ -13,7 +13,8 @@ import { auth } from './src/config/firebase';
 import { useAuthStore } from './src/store/authStore';
 import { useChatStore } from './src/store/chatStore';
 import { authAPI } from './src/services/api';
-import { registerForPushNotifications, savePushToken, addNotificationListeners } from './src/services/notifications';
+import { registerForPushNotifications, savePushToken } from './src/services/notifications';
+import { getCachedProfile, fetchProfileWithRetry, clearCachedProfile } from './src/services/session';
 import * as SplashScreen from 'expo-splash-screen';
 
 // Screens
@@ -783,71 +784,87 @@ function MainApp() {
     }
   }, []);
 
+  // 'connecting' while waiting for the server, 'offline' when it couldn't be reached
+  const [connection, setConnection] = useState<'ok' | 'connecting' | 'offline'>('ok');
+  const [retryKey, setRetryKey] = useState(0);
+
+  const applyProfile = (firebaseUser: any, dbUser: any) => {
+    setRealRole(dbUser?.role === 'admin' || dbUser?.role === 'vendor' ? dbUser.role : 'client');
+    const resolvedPhoto = dbUser?.profileImage || dbUser?.businessImage || firebaseUser.photoURL || '';
+    const resolvedName = dbUser?.fullName || dbUser?.businessName || firebaseUser.displayName || '';
+    setUser({
+      ...firebaseUser,
+      uid: firebaseUser.uid,
+      displayName: resolvedName || firebaseUser.displayName,
+      photoURL: resolvedPhoto || firebaseUser.photoURL,
+    } as any);
+  };
+
+  const signOutLocally = async (uid?: string) => {
+    if (uid) await clearCachedProfile(uid);
+    await auth.signOut().catch(() => {});
+    setUser(null);
+    setUserRole(null);
+    setRealRole(null);
+  };
+
   // Listen for Firebase auth state changes
   useEffect(() => {
-    const safetyTimeout = setTimeout(() => {
-      setInitializing(false);
-    }, 3500);
+    let cancelled = false;
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      clearTimeout(safetyTimeout);
-      try {
-        if (firebaseUser) {
-          const response = await authAPI.getUser(firebaseUser.uid);
-          const dbUser = response.data?.user;
-
-          if (dbUser?.isSuspended) {
-            Alert.alert(
-              'Account Suspended',
-              'Your account has been suspended by an administrator. Please contact QIIRA support for assistance.'
-            );
-            await auth.signOut();
-            setUser(null);
-            setUserRole(null);
-            setRealRole(null);
-            return;
-          }
-
-          const role = dbUser?.role || 'client';
-          setRealRole(role);
-          const resolvedPhoto = dbUser?.profileImage || dbUser?.profile_image || dbUser?.businessImage || firebaseUser.photoURL || '';
-          const resolvedName = dbUser?.fullName || dbUser?.full_name || dbUser?.businessName || firebaseUser.displayName || '';
-          const enrichedUser = {
-            ...firebaseUser,
-            displayName: resolvedName || firebaseUser.displayName,
-            photoURL: resolvedPhoto || firebaseUser.photoURL,
-          };
-          setUser(enrichedUser as any);
-
-          // Register for push notifications and save token
-          const pushToken = await registerForPushNotifications();
-          if (pushToken) {
-            await savePushToken(firebaseUser.uid, pushToken);
-          }
-        } else {
-          setUser(null);
-          setUserRole(null);
-          setRealRole(null);
-        }
-      } catch (error: any) {
-        console.error('Error fetching user role:', error);
-        // If user exists in Firebase but not in DB (404) or is suspended (403), log them out
-        if (error.response && (error.response.status === 404 || error.response.status === 403)) {
-          console.log('User not found or suspended, logging out...');
-          await auth.signOut();
-        }
-        // On any error (network, 404, etc), clear auth state and show login
+      if (!firebaseUser) {
         setUser(null);
         setUserRole(null);
         setRealRole(null);
-      } finally {
+        setConnection('ok');
+        setLoading(false);
+        setInitializing(false);
+        return;
+      }
+
+      // 1. Instant start from the profile cached on this device (if any)
+      const cached = await getCachedProfile(firebaseUser.uid);
+      if (cached && !cancelled) {
+        applyProfile(firebaseUser, cached);
         setLoading(false);
         setInitializing(false);
       }
+
+      // 2. Fresh profile from the server, retrying patiently through slow networks / wake-up
+      setConnection('connecting');
+      const result = await fetchProfileWithRetry(firebaseUser.uid);
+      if (cancelled) return;
+
+      if (result.status === 'ok') {
+        applyProfile(firebaseUser, result.user);
+        setConnection('ok');
+        registerForPushNotifications()
+          .then(token => { if (token) return savePushToken(firebaseUser.uid, token); })
+          .catch(() => {});
+      } else if (result.status === 'suspended') {
+        Alert.alert(
+          'Account Suspended',
+          result.message || 'Your account has been suspended by an administrator. Please contact QIIRA support for assistance.'
+        );
+        await signOutLocally(firebaseUser.uid);
+        setConnection('ok');
+      } else if (result.status === 'not-found') {
+        await signOutLocally(firebaseUser.uid);
+        setConnection('ok');
+      } else {
+        // Couldn't reach the server: keep the user signed in and offer a retry
+        setConnection('offline');
+      }
+      setLoading(false);
+      setInitializing(false);
     });
 
-    return unsubscribe;
-  }, []);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [retryKey]);
 
   // Hide native splash screen once initial load finishes
   useEffect(() => {
@@ -858,8 +875,38 @@ function MainApp() {
 
   if (initializing) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background, padding: 24 }}>
         <ActivityIndicator size="large" color={colors.primary} />
+        {connection === 'connecting' ? (
+          <Text style={{ marginTop: 16, color: colors.textSecondary, textAlign: 'center' }}>
+            Connecting to QIIRA… this can take up to a minute.
+          </Text>
+        ) : null}
+      </View>
+    );
+  }
+
+  // Signed in, never loaded a profile on this device, and the server can't be reached
+  if (connection === 'offline' && !isAuthenticated && auth.currentUser) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background, padding: 24 }}>
+        <Ionicons name="cloud-offline-outline" size={56} color={colors.textSecondary} />
+        <Text style={{ marginTop: 16, fontSize: 18, fontWeight: '700', color: colors.textPrimary, textAlign: 'center' }}>
+          Can't reach QIIRA
+        </Text>
+        <Text style={{ marginTop: 8, color: colors.textSecondary, textAlign: 'center' }}>
+          Check your internet connection and try again.
+        </Text>
+        <TouchableOpacity
+          onPress={() => { setConnection('connecting'); setInitializing(true); setRetryKey(k => k + 1); }}
+          accessibilityRole="button"
+          style={{ marginTop: 24, backgroundColor: colors.primary, paddingVertical: 12, paddingHorizontal: 32, borderRadius: 10 }}
+        >
+          <Text style={{ color: colors.textInverse, fontWeight: '700' }}>Retry</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => signOutLocally(auth.currentUser?.uid)} style={{ marginTop: 16, padding: 8 }}>
+          <Text style={{ color: colors.textSecondary }}>Sign out</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -867,6 +914,17 @@ function MainApp() {
   return (
     <SafeAreaProvider>
       <View style={{ flex: 1, backgroundColor: colors.background }}>
+        {connection === 'offline' ? (
+          <TouchableOpacity
+            onPress={() => setRetryKey(k => k + 1)}
+            accessibilityRole="button"
+            style={{ backgroundColor: '#B45309', paddingVertical: 6, paddingHorizontal: 12 }}
+          >
+            <Text style={{ color: '#FFFFFF', textAlign: 'center', fontSize: 13 }}>
+              You're offline — showing saved data. Tap to retry.
+            </Text>
+          </TouchableOpacity>
+        ) : null}
         <AdminPreviewBanner />
         <NavigationContainer ref={navigationRef}>
           {!isAuthenticated ? (
