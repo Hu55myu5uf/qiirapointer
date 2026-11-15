@@ -4,6 +4,7 @@ import { authenticateUser, SUPPORT_UID } from '../utils/authMiddleware';
 import { decodeUpload, saveUpload, UploadError } from '../utils/fileStorage';
 import { getDisplayProfile, getDisplayProfiles } from '../utils/profiles';
 import { messageLimiter, uploadLimiter } from '../utils/rateLimiter';
+import { notifyNewMessage } from '../utils/pushNotifications';
 
 const router = Router();
 
@@ -305,6 +306,9 @@ router.post('/messages', authenticateUser, messageLimiter, async (req: Request, 
         }, { merge: true });
         batch.set(msgRef, message);
         await batch.commit();
+
+        // Push notification to the receiver (background; never delays or fails the send)
+        notifyNewMessage(receiverId, sender.name, preview.slice(0, 120), convId, senderId).catch(() => {});
 
         res.status(201).json({
             message: 'Message sent successfully',

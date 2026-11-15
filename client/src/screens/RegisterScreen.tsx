@@ -12,7 +12,6 @@ import {
     ActivityIndicator,
 } from 'react-native';
 import { authAPI } from '../services/api';
-import { scheduleLocalNotification } from '../services/notifications';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -72,14 +71,6 @@ export default function RegisterScreen({ navigation }: any) {
             const successText = 'Account registered successfully! Redirecting you to login...';
             setStatusMessage({ type: 'success', text: successText });
 
-            // Trigger local/device notification
-            try {
-                await scheduleLocalNotification(
-                    'Registration Successful 🎉',
-                    `Welcome to QIIRA, ${fullName.trim()}! Your account is ready.`
-                );
-            } catch (_) {}
-
             // Themed in-app notification popup
             let navigated = false;
             const goToLogin = () => {
@@ -102,10 +93,6 @@ export default function RegisterScreen({ navigation }: any) {
                 error.response?.data?.message || error.response?.data?.error || error.message || 'Registration failed. Please check your credentials and try again.';
             
             setStatusMessage({ type: 'error', text: errorMessage });
-
-            try {
-                await scheduleLocalNotification('Registration Failed ⚠️', errorMessage);
-            } catch (_) {}
 
             Alert.alert('Registration Failed', errorMessage);
         } finally {

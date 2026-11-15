@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { MAP_TILES } from '../constants/mapTiles';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform } from 'react-native';
 
 export const Marker: React.FC<any> = ({ children, title, description, coordinate }) => {
@@ -229,10 +230,10 @@ const MapView: React.FC<MapViewProps> = ({
             attributionControl: false
         });
 
-        // 100% Free OpenStreetMap standard tiles (Zero API key needed)
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap contributors'
+        // Tile source: MapTiler in released builds (see constants/mapTiles.ts)
+        L.tileLayer(${JSON.stringify(MAP_TILES.url)}, {
+            maxZoom: ${MAP_TILES.maxZoom},
+            attribution: ${JSON.stringify(MAP_TILES.attribution)}
         }).addTo(map);
 
         // Custom Gold Pin Icon

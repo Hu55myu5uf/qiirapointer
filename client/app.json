@@ -81,7 +81,14 @@
       "expo-asset",
       "expo-font",
       "expo-status-bar",
-      "expo-image"
+      "expo-image",
+      "@sentry/react-native",
+      [
+        "expo-notifications",
+        {
+          "color": "#B28A45"
+        }
+      ]
     ]
   }
 }

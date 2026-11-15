@@ -13,10 +13,11 @@ import { auth } from './src/config/firebase';
 import { useAuthStore } from './src/store/authStore';
 import { useChatStore } from './src/store/chatStore';
 import { authAPI } from './src/services/api';
-import { registerForPushNotifications, savePushToken } from './src/services/notifications';
+import { registerForPushNotifications, savePushToken, addNotificationListeners } from './src/services/notifications';
 import { getCachedProfile, fetchProfileWithRetry, clearCachedProfile } from './src/services/session';
 import { subscribeToIncomingCalls } from './src/services/realtime';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Sentry from '@sentry/react-native';
 
 // Screens
 import LoginScreen from './src/screens/LoginScreen';
@@ -792,6 +793,23 @@ function MainApp() {
     };
   }, [user?.uid]);
 
+  // Tapping a notification: open the conversation. (A call notification just opens the app —
+  // the live incoming-call listener then shows the ringing call.)
+  useEffect(() => {
+    if (!user?.uid) return;
+    return addNotificationListeners((target) => {
+      if (target.type !== 'message' || !target.conversationId) return;
+      const open = () => {
+        if (!navigationRef.isReady()) return setTimeout(open, 300);
+        navigationRef.navigate('Messages', {
+          screen: 'Chat',
+          params: { conversationId: target.conversationId, otherUserId: target.senderId },
+        });
+      };
+      open();
+    });
+  }, [user?.uid]);
+
   // One real-time chat subscription for the whole app (inbox, unread badge, chat screens)
   const startChats = useChatStore(s => s.start);
   const stopChats = useChatStore(s => s.stop);
@@ -986,6 +1004,8 @@ class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, E
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error('RootErrorBoundary caught an error:', error, errorInfo);
+    // Report to Sentry (does nothing when crash reporting isn't configured)
+    try { Sentry.captureException(error, { extra: { componentStack: errorInfo?.componentStack } }); } catch (_) {}
   }
 
   handleRestart = () => {

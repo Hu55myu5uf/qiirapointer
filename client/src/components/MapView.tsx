@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { MAP_TILES } from '../constants/mapTiles';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
 
@@ -153,9 +154,9 @@ const MapView: React.FC<MapViewProps> = ({
     <div id="map"></div>
     <script>
         var map = L.map('map', { zoomControl: true }).setView([${Number(centerLat)}, ${Number(centerLng)}], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap'
+        L.tileLayer(${JSON.stringify(MAP_TILES.url)}, {
+            maxZoom: ${MAP_TILES.maxZoom},
+            attribution: ${JSON.stringify(MAP_TILES.attribution)}
         }).addTo(map);
 
         var markers = ${markersJson};

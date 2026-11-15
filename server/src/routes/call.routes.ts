@@ -4,6 +4,7 @@ import { db } from '../config/firebase';
 import { authenticateUser } from '../utils/authMiddleware';
 import { getDisplayProfile } from '../utils/profiles';
 import { writeLimiter } from '../utils/rateLimiter';
+import { notifyIncomingCall } from '../utils/pushNotifications';
 
 const router = Router();
 
@@ -210,6 +211,9 @@ router.post('/initiate', authenticateUser, writeLimiter, async (req: Request, re
             createdAt: new Date().toISOString(),
         };
         await calls().doc(callId).set(session);
+
+        // Ring the receiver even when the app is closed (background, best effort)
+        notifyIncomingCall(receiverId, session.callerName, session.callType, callId).catch(() => {});
 
         res.status(201).json({ message: 'Call initiated successfully', call: session });
     } catch (error: any) {
