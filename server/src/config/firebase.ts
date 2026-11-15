@@ -18,7 +18,7 @@ try {
         const serviceAccount = require(serviceAccountPath);
         app = initializeApp({
             credential: cert(serviceAccount),
-            storageBucket: `${serviceAccount.project_id}.appspot.com`
+            storageBucket: process.env.FIREBASE_STORAGE_BUCKET || `${serviceAccount.project_id}.firebasestorage.app`
         });
     }
     // Option 2: Use environment variables (for production)
@@ -32,7 +32,7 @@ try {
 
         app = initializeApp({
             credential: cert(serviceAccount),
-            storageBucket: `${process.env.FIREBASE_PROJECT_ID}.appspot.com`
+            storageBucket: process.env.FIREBASE_STORAGE_BUCKET || `${process.env.FIREBASE_PROJECT_ID}.firebasestorage.app`
         });
     }
     // No credentials found
@@ -59,7 +59,7 @@ try {
     process.exit(1);
 }
 
-import { getFirestore } from 'firebase-admin/firestore';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 
 // Export Firebase services
 export const auth = getAuth(app);
@@ -67,3 +67,6 @@ export const storage = getStorage(app);
 export const db = getFirestore(app);
 
 export default app;
+
+// Atomic update helpers (increment, arrayUnion, ...). Re-exported so tests can substitute them.
+export { FieldValue };

@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
 import { auth, db } from '../config/firebase';
-import supabase from '../config/supabase';
 
 // Root admin UID for emergency access. Configure MASTER_ADMIN_UID in the environment;
 // the fallback keeps existing deployments working until it is set.
@@ -28,71 +27,39 @@ declare global {
     }
 }
 
+// Short cache of role/suspension per user: every authenticated request needs it, and it rarely
+// changes. Suspensions and role changes made through this server clear the entry immediately.
+const USER_CACHE_TTL_MS = 10_000;
+const userCache = new Map<string, { at: number; value: AuthUser }>();
+
+export function invalidateAuthUser(uid?: string) {
+    if (uid) userCache.delete(uid); else userCache.clear();
+}
+
 /**
- * Fetch authoritative user role and status from Firestore / Supabase / Firebase Auth
+ * Authoritative role and status for a uid, from the Firestore `users` profile.
+ * Accounts without a profile are plain clients (roles are never inferred from anything else).
  */
-export async function getVerifiedUser(uid: string): Promise<AuthUser | null> {
+export async function getVerifiedUser(uid: string, tokenEmail?: string): Promise<AuthUser | null> {
     if (!uid) return null;
+    const hit = userCache.get(uid);
+    if (hit && Date.now() - hit.at < USER_CACHE_TTL_MS) return hit.value;
 
-    let role = 'client';
-    let isVerified = false;
-    let isSuspended = false;
-    let email = '';
+    const doc = await db.collection('users').doc(uid).get();
+    const data: any = doc.exists ? doc.data() : {};
+    const isAdmin = data.role === 'admin' || uid === MASTER_ADMIN_UID;
+    const role = isAdmin ? 'admin' : (data.role === 'vendor' ? 'vendor' : 'client');
 
-    // 1. Check Firestore
-    try {
-        const userDoc = await db.collection('users').doc(uid).get();
-        if (userDoc.exists) {
-            const data = userDoc.data()!;
-            role = data.role || 'client';
-            isVerified = Boolean(data.isVerified || data.is_verified);
-            isSuspended = Boolean(data.isSuspended || data.is_suspended);
-            email = data.email || '';
-        }
-    } catch (_) {}
-
-    // 2. Check Supabase fallback
-    if (!email) {
-        try {
-            const { data: sbUser } = await supabase
-                .from('users')
-                .select('*')
-                .eq('uid', uid)
-                .single();
-            if (sbUser) {
-                role = sbUser.role || role;
-                isVerified = isVerified || Boolean(sbUser.is_verified);
-                isSuspended = isSuspended || Boolean(sbUser.is_suspended);
-                email = sbUser.email || '';
-            }
-        } catch (_) {}
-    }
-
-    // 3. Fallback to Firebase Auth user record
-    if (!email) {
-        try {
-            const fbUser = await auth.getUser(uid);
-            if (fbUser) {
-                email = fbUser.email || '';
-            }
-        } catch (_) {}
-    }
-
-    // STRICT Admin check: Only DB role === 'admin' OR the master admin UID
-    const isAdmin = Boolean(role === 'admin' || uid === MASTER_ADMIN_UID);
-    if (isAdmin) {
-        role = 'admin';
-        isVerified = true;
-    }
-
-    return {
+    const value: AuthUser = {
         uid,
-        email,
+        email: data.email || tokenEmail || '',
         role,
         isAdmin,
-        isVerified,
-        isSuspended,
+        isVerified: Boolean(isAdmin || data.isVerified),
+        isSuspended: Boolean(data.isSuspended),
     };
+    userCache.set(uid, { at: Date.now(), value });
+    return value;
 }
 
 /**
@@ -130,7 +97,7 @@ export async function authenticateUser(req: Request, res: Response, next: NextFu
             return;
         }
 
-        const user = await getVerifiedUser(decodedToken.uid);
+        const user = await getVerifiedUser(decodedToken.uid, decodedToken.email);
         if (!user) {
             res.status(401).json({
                 error: 'Unauthorized',
@@ -166,7 +133,7 @@ export async function optionalAuthenticateUser(req: Request, res: Response, next
             if (idToken) {
                 try {
                     const decodedToken = await auth.verifyIdToken(idToken);
-                    const user = await getVerifiedUser(decodedToken.uid);
+                    const user = await getVerifiedUser(decodedToken.uid, decodedToken.email);
                     if (user && !user.isSuspended) {
                         req.user = user;
                     }

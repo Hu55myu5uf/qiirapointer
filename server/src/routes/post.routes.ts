@@ -1,791 +1,485 @@
 import { Router, Request, Response } from 'express';
-import { db } from '../config/firebase';
-import supabase from '../config/supabase';
-import { authenticateUser, MASTER_ADMIN_UID } from '../utils/authMiddleware';
-import { uploadBase64ToStorage } from '../utils/supabaseStorage';
+import crypto from 'crypto';
+import { db, FieldValue } from '../config/firebase';
+import { authenticateUser, optionalAuthenticateUser } from '../utils/authMiddleware';
+import { decodeUpload, saveUpload, storagePathOf, UploadError } from '../utils/fileStorage';
+import { getDisplayProfile, getDisplayProfiles, usableImage } from '../utils/profiles';
 import { writeLimiter } from '../utils/rateLimiter';
+import { storage } from '../config/firebase';
 
 const router = Router();
 
 const MAX_CAPTION_LENGTH = 2200;
 const MAX_COMMENT_LENGTH = 1000;
 const MAX_MEDIA_PER_POST = 10;
+const MAX_TAGS = 20;
+const DEFAULT_PAGE = 30;
+const MAX_PAGE = 50;
 
-/** Remove fields other users must not see (the full list of who liked a post). */
-function stripPrivate(p: any) {
-    const { likedBy: _likedBy, ...rest } = p || {};
-    return rest;
+const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+
+function matchesCategory(post: any, wanted: string) {
+    const w = wanted.toLowerCase();
+    const root = w.split('&')[0].trim().split(' ')[0].trim();
+    return [post.category, post.vendorCategory].some(c => {
+        const v = String(c || '').toLowerCase();
+        return v && (v.includes(w) || w.includes(v) || (root.length > 3 && v.includes(root)));
+    });
 }
 
-// In-memory array for newly created posts (syncs with Firestore and guarantees 100% instant retrieval)
-const MEMORY_POSTS: any[] = [];
-
-// Sample seed posts (empty - only real user-created posts are shown)
-const SAMPLE_POSTS: any[] = [];
-
-// In-memory comments store
-const IN_MEMORY_COMMENTS: Record<string, any[]> = {};
-
-// Helper: fetch vendor information to enrich post
-async function getVendorMeta(vendorId: string) {
-    let vendorName = 'Vendor';
-    let vendorCategory = 'General';
-    let vendorImage = '';
-    let isVerified = false;
-    let isAdmin = (vendorId === MASTER_ADMIN_UID);
-    let role = isAdmin ? 'admin' : 'vendor';
-
-    // 1. Try Firestore vendors collection
-    try {
-        const doc = await db.collection('vendors').doc(vendorId).get();
-        if (doc.exists) {
-            const data = doc.data()!;
-            vendorName = data.businessName || data.fullName || vendorName;
-            vendorCategory = data.category || vendorCategory;
-            vendorImage = data.profileImage || data.businessImage || data.photoURL || data.avatar || data.logo || vendorImage;
-            if (data.isVerified === true || data.is_verified === true) {
-                isVerified = true;
-            }
-            if (data.role === 'admin') {
-                isAdmin = true;
-                role = 'admin';
-            }
-        }
-    } catch (_) {}
-
-    // 2. Try Firestore users collection
-    try {
-        const userDoc = await db.collection('users').doc(vendorId).get();
-        if (userDoc.exists) {
-            const data = userDoc.data()!;
-            vendorName = data.businessName || data.fullName || data.displayName || vendorName;
-            vendorCategory = data.category || vendorCategory;
-            vendorImage = data.profileImage || data.businessImage || data.photoURL || data.avatar || vendorImage;
-            if (data.isVerified === true || data.is_verified === true || data.role === 'admin') {
-                isVerified = true;
-            }
-            if (data.role === 'admin') {
-                isAdmin = true;
-                role = 'admin';
-            }
-        }
-    } catch (_) {}
-
-    if (isAdmin) {
-        isVerified = true;
-    }
-
+/**
+ * Shape a stored post for the app: live author name/photo/badge, the viewer's like state, and no
+ * private fields (who liked it). Dead image links from the old server disk are dropped.
+ */
+function presentPost(p: any, viewerId: string | undefined, people: Map<string, any>) {
+    const { likedBy, ...rest } = p;
+    const author = people.get(p.authorId || p.vendorId);
+    const media: string[] = (Array.isArray(p.mediaUrls) && p.mediaUrls.length ? p.mediaUrls : [p.mediaUrl])
+        .map((u: any) => usableImage(u)).filter(Boolean);
     return {
-        vendorName,
-        vendorCategory,
-        vendorImage,
-        isVerified,
-        isAdmin,
-        role,
+        ...rest,
+        vendorName: author?.name || p.vendorName || 'QIIRA user',
+        vendorImage: author?.avatar ?? '',
+        isVerified: Boolean(author?.isVerified),
+        isAdmin: Boolean(author?.isAdmin),
+        role: author?.role || p.role,
+        mediaUrl: media[0] || null,
+        mediaUrls: media,
+        mediaCount: media.length,
+        thumbnailUrl: usableImage(p.thumbnailUrl) || media[0] || null,
+        likesCount: Math.max(0, Number(p.likesCount) || 0),
+        commentsCount: Math.max(0, Number(p.commentsCount) || 0),
+        isLiked: Boolean(viewerId && Array.isArray(likedBy) && likedBy.includes(viewerId)),
     };
 }
 
-function withTimeout(promise: any, ms = 1200): Promise<any> {
-    return Promise.race([
-        Promise.resolve(promise),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))
-    ]);
+async function blockedFor(viewerId?: string): Promise<string[]> {
+    if (!viewerId) return [];
+    return (await getDisplayProfile(viewerId)).blockedUserIds;
 }
 
-// Helper: get all unified posts from Firestore + Memory + Seed
-async function getAllUnifiedPosts(): Promise<any[]> {
-    const postMap = new Map<string, any>();
-
-    // 1. Add Seed posts
-    for (const p of SAMPLE_POSTS) {
-        postMap.set(p.id, { ...p });
-    }
-
-    // 2. Add In-Memory created posts
-    for (const p of MEMORY_POSTS) {
-        postMap.set(p.id, { ...p });
-    }
-
-    // 3. Add Firestore posts (graceful with 1.2s timeout)
-    try {
-        const snapshot = await withTimeout(db.collection('posts').get(), 1200);
-        if (snapshot) {
-            snapshot.forEach((doc: any) => {
-                const data = doc.data();
-                postMap.set(doc.id, {
-                    id: doc.id,
-                    ...data,
-                });
-            });
+/**
+ * Load a page of posts, newest first, applying in-memory filters (type, category, blocks).
+ * `before` is the createdAt cursor returned as `nextCursor` by the previous page.
+ */
+// Only orderBy(createdAt) + a range on createdAt is used, which Firestore indexes automatically
+// (adding equality filters here would require deploying composite indexes).
+async function loadPostsPage(opts: {
+    limit: number;
+    before?: string;
+    filter?: (p: any) => boolean;
+}) {
+    const { limit, before, filter } = opts;
+    const results: any[] = [];
+    let cursor = before;
+    // Over-fetch in rounds so filters don't leave pages short; bounded to keep reads predictable
+    for (let round = 0; round < 3 && results.length < limit; round++) {
+        let q: FirebaseFirestore.Query = db.collection('posts').orderBy('createdAt', 'desc');
+        if (cursor) q = q.where('createdAt', '<', cursor);
+        const snap = await q.limit(limit * 2).get();
+        if (snap.empty) { cursor = undefined; break; }
+        for (const d of snap.docs) {
+            const p = { id: d.id, ...(d.data() as any) };
+            if (!filter || filter(p)) results.push(p);
         }
-    } catch (e: any) {
-        console.warn('Firestore load posts note:', e.message);
+        cursor = snap.docs[snap.docs.length - 1].data().createdAt;
+        if (snap.size < limit * 2) { cursor = undefined; break; }
     }
-
-    // Convert map to array
-    const allPosts = Array.from(postMap.values());
-
-    // Enrich vendor info for live vendor posts with their latest profile picture & verification status
-    const uniqueVendorIds = Array.from(new Set(allPosts.map(p => p.vendorId).filter(id => id && !id.startsWith('seed-'))));
-    if (uniqueVendorIds.length > 0) {
-        const metas = await Promise.all(uniqueVendorIds.map(id => getVendorMeta(id)));
-        const vendorCache = new Map<string, any>();
-        uniqueVendorIds.forEach((id, idx) => vendorCache.set(id, metas[idx]));
-
-        for (const p of allPosts) {
-            if (p.authorType === 'client') continue; // Preserve client author metadata
-            if (p.vendorId && vendorCache.has(p.vendorId)) {
-                const meta = vendorCache.get(p.vendorId);
-                if (meta) {
-                    if (meta.vendorImage) p.vendorImage = meta.vendorImage;
-                    if (meta.vendorName && meta.vendorName !== 'Vendor') p.vendorName = meta.vendorName;
-                    if (meta.vendorCategory && meta.vendorCategory !== 'General') p.vendorCategory = meta.vendorCategory;
-                    p.isVerified = Boolean(meta.isVerified);
-                    p.isAdmin = Boolean(meta.isAdmin);
-                    p.role = meta.role || (meta.isAdmin ? 'admin' : 'vendor');
-                }
-            }
-        }
-    }
-
-    allPosts.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-    return allPosts;
+    const page = results.slice(0, limit);
+    const nextCursor = results.length > limit ? page[page.length - 1].createdAt : cursor || null;
+    return { page, nextCursor };
 }
 
 /**
  * @route   GET /api/posts/feed
- * @desc    Get explore feed with optional filtering by type ('post' | 'reel' | 'all') and category
- * @access  Public
+ * @query   type ('post' | 'reel' | 'community' | 'all'), category, limit (≤50), before (cursor)
+ * @access  Public (personalised when logged in)
  */
-router.get('/feed', async (req: Request, res: Response) => {
+router.get('/feed', optionalAuthenticateUser, async (req: Request, res: Response) => {
     try {
-        const { type, category, limit = '30', userId } = req.query;
-        const allPosts = await getAllUnifiedPosts();
+        const viewerId = req.user?.uid;
+        const limit = Math.min(Math.max(Number(req.query.limit) || DEFAULT_PAGE, 1), MAX_PAGE);
+        const type = typeof req.query.type === 'string' ? req.query.type : 'all';
+        const category = typeof req.query.category === 'string' ? req.query.category : '';
+        const blocked = await blockedFor(viewerId);
 
-        // Fetch blocked users if userId is provided
-        let blockedUserIds: string[] = [];
-        if (userId) {
-            try {
-                const uSnap = await db.collection('users').doc(userId as string).get();
-                blockedUserIds = uSnap.data()?.blockedUserIds || [];
-            } catch (_) {}
-        }
-
-        let filtered = allPosts.filter(p => {
-            if (blockedUserIds.length > 0 && (blockedUserIds.includes(p.authorId) || blockedUserIds.includes(p.vendorId))) {
-                return false;
-            }
-            if (type && type !== 'all' && p.type !== type) return false;
-            if (category && category !== 'All') {
-                const catStr = String(category).toLowerCase();
-                const rootWord = catStr.split('&')[0].trim().split(' ')[0].trim();
-                const pCat = String(p.category || '').toLowerCase();
-                const vCat = String(p.vendorCategory || '').toLowerCase();
-                const matches = pCat.includes(catStr) || catStr.includes(pCat) || (rootWord.length > 3 && pCat.includes(rootWord)) ||
-                                vCat.includes(catStr) || catStr.includes(vCat) || (rootWord.length > 3 && vCat.includes(rootWord));
-                if (!matches) return false;
-            }
-            return true;
+        const { page, nextCursor } = await loadPostsPage({
+            limit,
+            before: typeof req.query.before === 'string' ? req.query.before : undefined,
+            filter: p =>
+                !blocked.includes(p.authorId) && !blocked.includes(p.vendorId) &&
+                (type === 'all' || p.type === type) &&
+                (!category || category === 'All' || matchesCategory(p, category)),
         });
 
-        const finalPosts = filtered.slice(0, Number(limit) || 30).map(p => ({
-            ...stripPrivate(p),
-            isLiked: userId ? (p.likedBy || []).includes(userId as string) : false,
-        }));
-
-        res.status(200).json({
-            posts: finalPosts,
-            count: finalPosts.length,
-        });
+        const people = await getDisplayProfiles(page.map(p => p.authorId || p.vendorId));
+        const posts = page.map(p => presentPost(p, viewerId, people));
+        res.status(200).json({ posts, count: posts.length, nextCursor });
     } catch (error: any) {
         console.error('Get feed error:', error);
-        res.status(500).json({ error: 'Failed to fetch explore feed', message: error.message });
+        res.status(500).json({ error: 'Failed to fetch explore feed' });
     }
 });
 
 /**
- * @route   GET /api/posts/showcase (or /api/posts/reels)
- * @desc    Get showcase (video) only feed
- * @access  Public
+ * @route   GET /api/posts/showcase (alias /reels) — video posts only
  */
-router.get(['/reels', '/showcase'], async (req: Request, res: Response) => {
+router.get(['/reels', '/showcase'], optionalAuthenticateUser, async (req: Request, res: Response) => {
     try {
-        const { userId } = req.query;
-        const allPosts = await getAllUnifiedPosts();
-
-        let blockedUserIds: string[] = [];
-        if (userId) {
-            try {
-                const uSnap = await db.collection('users').doc(userId as string).get();
-                blockedUserIds = uSnap.data()?.blockedUserIds || [];
-            } catch (_) {}
-        }
-
-        const showcaseList = allPosts
-            .filter(p => (p.type === 'reel' || p.type === 'showcase') && (!blockedUserIds.includes(p.authorId) && !blockedUserIds.includes(p.vendorId)))
-            .map(p => ({
-                ...stripPrivate(p),
-                isLiked: userId ? (p.likedBy || []).includes(userId as string) : false,
-            }));
-
-        res.status(200).json({
-            showcase: showcaseList,
-            reels: showcaseList,
-            count: showcaseList.length,
+        const viewerId = req.user?.uid;
+        const blocked = await blockedFor(viewerId);
+        const { page, nextCursor } = await loadPostsPage({
+            limit: Math.min(Math.max(Number(req.query.limit) || DEFAULT_PAGE, 1), MAX_PAGE),
+            before: typeof req.query.before === 'string' ? req.query.before : undefined,
+            filter: p => (p.type === 'reel' || p.type === 'showcase') && !blocked.includes(p.authorId) && !blocked.includes(p.vendorId),
         });
+        const people = await getDisplayProfiles(page.map(p => p.authorId || p.vendorId));
+        const showcase = page.map(p => presentPost(p, viewerId, people));
+        res.status(200).json({ showcase, reels: showcase, count: showcase.length, nextCursor });
     } catch (error: any) {
         console.error('Get showcase error:', error);
-        res.status(500).json({ error: 'Failed to fetch showcase', message: error.message });
+        res.status(500).json({ error: 'Failed to fetch showcase' });
     }
 });
 
 /**
  * @route   GET /api/posts/vendor/:vendorId
- * @desc    Get all posts and reels uploaded by a specific vendor
- * @access  Public
  */
-router.get('/vendor/:vendorId', async (req: Request, res: Response) => {
+router.get('/vendor/:vendorId', optionalAuthenticateUser, async (req: Request, res: Response) => {
     try {
-        const { vendorId } = req.params;
-        const { userId } = req.query;
-        const allPosts = await getAllUnifiedPosts();
+        const viewerId = req.user?.uid;
+        // One vendor's posts: equality query only (no composite index needed), sorted here
+        const snap = await db.collection('posts').where('vendorId', '==', req.params.vendorId).limit(500).get();
+        const all = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))
+            .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+        const before = typeof req.query.before === 'string' ? req.query.before : '';
+        const limit = Math.min(Math.max(Number(req.query.limit) || MAX_PAGE, 1), MAX_PAGE);
+        const remaining = before ? all.filter(p => String(p.createdAt) < before) : all;
+        const page = remaining.slice(0, limit);
 
-        const vendorPosts = allPosts.filter(p => p.vendorId === vendorId).map(p => ({
-            ...stripPrivate(p),
-            isLiked: userId ? (p.likedBy || []).includes(userId as string) : false,
-        }));
-
+        const people = await getDisplayProfiles([req.params.vendorId]);
+        const posts = page.map(p => presentPost(p, viewerId, people));
         res.status(200).json({
-            posts: vendorPosts,
-            count: vendorPosts.length,
+            posts,
+            count: posts.length,
+            nextCursor: remaining.length > limit ? page[page.length - 1].createdAt : null,
         });
     } catch (error: any) {
         console.error('Get vendor posts error:', error);
-        res.status(500).json({ error: 'Failed to fetch vendor posts', message: error.message });
+        res.status(500).json({ error: 'Failed to fetch vendor posts' });
     }
 });
 
 /**
  * @route   GET /api/posts/:id
- * @desc    Get single post details
- * @access  Public
  */
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', optionalAuthenticateUser, async (req: Request, res: Response) => {
     try {
-        const { id } = req.params;
-        const { userId } = req.query;
-        const allPosts = await getAllUnifiedPosts();
-
-        const found = allPosts.find(p => p.id === id);
-        if (found) {
-            res.status(200).json({
-                post: {
-                    ...stripPrivate(found),
-                    isLiked: userId ? (found.likedBy || []).includes(userId as string) : false,
-                }
-            });
-            return;
-        }
-
-        res.status(404).json({ error: 'Post not found' });
+        const doc = await db.collection('posts').doc(req.params.id).get();
+        if (!doc.exists) return res.status(404).json({ error: 'Post not found' });
+        const p = { id: doc.id, ...(doc.data() as any) };
+        const people = await getDisplayProfiles([p.authorId || p.vendorId]);
+        res.status(200).json({ post: presentPost(p, req.user?.uid, people) });
     } catch (error: any) {
         console.error('Get post error:', error);
-        res.status(500).json({ error: 'Failed to fetch post', message: error.message });
+        res.status(500).json({ error: 'Failed to fetch post' });
     }
 });
+
+/** Accept already-uploaded https media, or upload base64 data URIs (validated by file content). */
+async function resolveMedia(items: string[], creatorId: string): Promise<string[]> {
+    const out: string[] = [];
+    for (const [idx, u] of items.entries()) {
+        if (u.startsWith('data:')) {
+            const file = decodeUpload(u, ['image', 'video']);
+            const saved = await saveUpload({ folder: ['posts', creatorId], namePrefix: `media_${idx}`, file, visibility: 'public' });
+            out.push(saved.url);
+        } else if (/^https:\/\/[^\s]+$/i.test(u) && u.length <= 2048) {
+            out.push(u);
+        } else {
+            throw new UploadError('Invalid media');
+        }
+    }
+    return out;
+}
 
 /**
  * @route   POST /api/posts
- * @desc    Create a new post, reel, or client community post
- * @access  Authenticated users (Vendors & Clients)
+ * @desc    Vendors publish business posts / reels; everyone can post to Community (authorType "client")
  */
 router.post('/', authenticateUser, writeLimiter, async (req: Request, res: Response) => {
     try {
-        const {
-            vendorId,
-            userId,
-            authorId,
-            authorType = 'vendor', // 'vendor' | 'client'
-            authorName: explicitAuthorName,
-            authorAvatar: explicitAuthorAvatar,
-            clientPostType = 'update', // 'update' | 'question' | 'shoutout'
-            taggedVendorId,
-            taggedVendorName,
-            type = 'post', // 'post' | 'reel' | 'community'
-            caption,
-            mediaUrl,
-            mediaUrls,   // array of media URLs for multi-media posts
-            thumbnailUrl,
-            price,
-            currency = 'NGN',
-            category = 'General',
-            tags = [],
-        } = req.body;
-
+        const b = req.body || {};
         const callerUid = req.user!.uid;
-        const isCallerAdmin = req.user!.isAdmin;
-        const creatorId = vendorId || userId || authorId || callerUid;
-
-        if (creatorId !== callerUid && !isCallerAdmin) {
+        const isAdmin = req.user!.isAdmin;
+        const creatorId = b.vendorId || b.userId || b.authorId || callerUid;
+        if (creatorId !== callerUid && !isAdmin) {
             return res.status(403).json({ error: 'Forbidden: You can only create posts for your own account' });
         }
 
-        // Business (vendor) posts can only be published by vendors; everyone else posts to Community
-        if (authorType !== 'client' && !isCallerAdmin && req.user!.role !== 'vendor') {
+        const isCommunity = b.authorType === 'client';
+        if (!isCommunity && !isAdmin && req.user!.role !== 'vendor') {
             return res.status(403).json({ error: 'Only vendor accounts can publish business posts' });
         }
-
-        if (caption !== undefined && caption !== null && (typeof caption !== 'string' || caption.length > MAX_CAPTION_LENGTH)) {
+        if (b.caption !== undefined && b.caption !== null && (typeof b.caption !== 'string' || b.caption.length > MAX_CAPTION_LENGTH)) {
             return res.status(400).json({ error: `Captions can be at most ${MAX_CAPTION_LENGTH} characters` });
         }
 
-        // Build the final media array — supports both single and multi-media
-        let finalMediaUrls: string[] = [];
-        if (Array.isArray(mediaUrls) && mediaUrls.length > 0) {
-            finalMediaUrls = mediaUrls.filter((u: any) => typeof u === 'string' && u.trim());
-        } else if (typeof mediaUrl === 'string' && mediaUrl) {
-            finalMediaUrls = [mediaUrl];
-        }
-        if (finalMediaUrls.length > MAX_MEDIA_PER_POST) {
+        let media: string[] = Array.isArray(b.mediaUrls) && b.mediaUrls.length
+            ? b.mediaUrls.filter((u: any) => typeof u === 'string' && u.trim())
+            : (typeof b.mediaUrl === 'string' && b.mediaUrl ? [b.mediaUrl] : []);
+        if (media.length > MAX_MEDIA_PER_POST) {
             return res.status(400).json({ error: `A post can include at most ${MAX_MEDIA_PER_POST} photos or videos` });
         }
-        if (finalMediaUrls.some(u => !/^(https?:\/\/|data:(image|video)\/)/i.test(u))) {
-            return res.status(400).json({ error: 'Invalid media' });
+        const caption = str(b.caption, MAX_CAPTION_LENGTH);
+        if (!isCommunity && media.length === 0) {
+            return res.status(400).json({ error: 'Please add at least one photo or video' });
         }
-
-        // For vendors, at least one media URL is required; for clients, either caption or media is required
-        if (authorType !== 'client' && finalMediaUrls.length === 0) {
-            return res.status(400).json({ error: 'vendorId and at least one media URL are required' });
-        }
-
-        if (authorType === 'client' && !caption && finalMediaUrls.length === 0) {
+        if (isCommunity && !caption && media.length === 0) {
             return res.status(400).json({ error: 'Please provide either a message or a photo/video for your post' });
         }
 
-        // Convert any Base64 data URIs to permanent Supabase Storage URLs
-        const reqHost = req.get('host') || 'localhost:5000';
-        const reqProtocol = req.protocol || 'http';
-        finalMediaUrls = await Promise.all(finalMediaUrls.map(async (u, idx) => {
-            if (u && typeof u === 'string' && u.startsWith('data:')) {
-                try {
-                    const upRes = await uploadBase64ToStorage({
-                        folder: `posts/${creatorId}`,
-                        filenamePrefix: `media_${idx}`,
-                        base64Data: u,
-                        reqHost,
-                        protocol: reqProtocol,
-                    });
-                    return upRes.url;
-                } catch (e) {
-                    console.warn('Post media upload note:', e);
-                    return u;
-                }
-            }
-            return u;
-        }));
+        media = await resolveMedia(media, creatorId);
+        const thumb = typeof b.thumbnailUrl === 'string' && /^https:\/\//i.test(b.thumbnailUrl) ? b.thumbnailUrl : media[0] || null;
 
-        const postId = `post_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-        let newPost: any;
+        const author = await getDisplayProfile(creatorId);
+        const now = new Date().toISOString();
+        const tags = (Array.isArray(b.tags) ? b.tags : (typeof b.tags === 'string' ? b.tags.split(',') : []))
+            .map((t: any) => str(String(t), 40)).filter(Boolean).slice(0, MAX_TAGS);
+        const price = b.price !== undefined && b.price !== null && b.price !== '' && Number.isFinite(Number(b.price)) && Number(b.price) >= 0
+            ? Number(b.price) : null;
 
-        if (authorType === 'client') {
-            // Fetch client details from users collection if not passed explicitly
-            let clientName = explicitAuthorName || 'Client';
-            let clientAvatar = explicitAuthorAvatar || '';
-            let isVerified = false;
-            let isAdmin = (creatorId === MASTER_ADMIN_UID);
-
-            try {
-                const userDoc = await db.collection('users').doc(creatorId).get();
-                if (userDoc.exists) {
-                    const uData = userDoc.data()!;
-                    clientName = uData.displayName || uData.fullName || clientName;
-                    clientAvatar = uData.photoURL || uData.profileImage || uData.avatar || clientAvatar;
-                    if (uData.isVerified || uData.is_verified) isVerified = true;
-                    if (uData.role === 'admin') isAdmin = true;
-                }
-            } catch (_) {}
-
-            newPost = {
-                id: postId,
-                vendorId: creatorId,
-                authorId: creatorId,
-                authorType: 'client',
-                clientPostType: clientPostType || 'update',
-                taggedVendorId: taggedVendorId || null,
-                taggedVendorName: taggedVendorName || null,
-                vendorName: clientName,
-                vendorCategory: 'Community',
-                vendorImage: clientAvatar,
-                vendorTier: isVerified ? 'verified' : 'none',
-                isVerified: Boolean(isVerified || isAdmin),
-                isAdmin: Boolean(isAdmin),
-                role: isAdmin ? 'admin' : 'client',
-                type: 'community',
-                caption: caption || '',
-                mediaUrl: finalMediaUrls[0] || null,
-                mediaUrls: finalMediaUrls,
-                thumbnailUrl: thumbnailUrl || finalMediaUrls[0] || null,
-                mediaCount: finalMediaUrls.length,
-                price: null,
-                currency,
-                category: 'Community',
-                tags: Array.isArray(tags) ? tags : (typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : []),
-                likesCount: 0,
-                commentsCount: 0,
-                likedBy: [],
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            };
-        } else {
-            const vendorMeta = await getVendorMeta(creatorId);
-
-            newPost = {
-                id: postId,
-                vendorId: creatorId,
-                authorId: creatorId,
-                authorType: 'vendor',
-                vendorName: vendorMeta.vendorName,
-                vendorCategory: vendorMeta.vendorCategory,
-                vendorImage: vendorMeta.vendorImage,
-                vendorTier: vendorMeta.isVerified ? 'verified' : 'none',
-                isVerified: vendorMeta.isVerified,
-                isAdmin: Boolean(vendorMeta.isAdmin),
-                role: vendorMeta.role || (vendorMeta.isAdmin ? 'admin' : 'vendor'),
-                type: type === 'reel' ? 'reel' : 'post',
-                caption: caption || '',
-                mediaUrl: finalMediaUrls[0],                    // Primary media (backward compat)
-                mediaUrls: finalMediaUrls,                      // Full list of all media
-                thumbnailUrl: thumbnailUrl || finalMediaUrls[0],
-                mediaCount: finalMediaUrls.length,
-                price: (price !== undefined && price !== null && price !== '' && !isNaN(Number(price))) ? Number(price) : null,
-                currency,
-                category,
-                tags: Array.isArray(tags) ? tags : (typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : []),
-                likesCount: 0,
-                commentsCount: 0,
-                likedBy: [],
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            };
+        const postId = `post_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+        let vendorCategory = 'Community';
+        if (!isCommunity) {
+            const vDoc = await db.collection('vendors').doc(creatorId).get();
+            vendorCategory = vDoc.data()?.category || 'General';
         }
 
-        // 1. Store in memory for instant availability
-        MEMORY_POSTS.unshift(newPost);
-
-        // 2. Also persist to Firestore
-        try {
-            await db.collection('posts').doc(postId).set(newPost);
-        } catch (dbErr: any) {
-            console.warn('Firestore post save note:', dbErr.message);
+        const newPost: Record<string, any> = {
+            id: postId,
+            vendorId: creatorId,
+            authorId: creatorId,
+            authorType: isCommunity ? 'client' : 'vendor',
+            type: isCommunity ? 'community' : (b.type === 'reel' ? 'reel' : 'post'),
+            vendorName: author.name,
+            vendorCategory,
+            caption,
+            mediaUrl: media[0] || null,
+            mediaUrls: media,
+            thumbnailUrl: thumb,
+            mediaCount: media.length,
+            price: isCommunity ? null : price,
+            currency: str(b.currency, 5) || 'NGN',
+            category: isCommunity ? 'Community' : (str(b.category, 80) || vendorCategory),
+            tags,
+            likesCount: 0,
+            commentsCount: 0,
+            likedBy: [],
+            createdAt: now,
+            updatedAt: now,
+        };
+        if (isCommunity) {
+            newPost.clientPostType = ['update', 'question', 'shoutout'].includes(b.clientPostType) ? b.clientPostType : 'update';
+            newPost.taggedVendorId = str(b.taggedVendorId, 128) || null;
+            newPost.taggedVendorName = str(b.taggedVendorName, 100) || null;
         }
 
-        res.status(201).json({
-            message: 'Post created successfully',
-            post: newPost,
-        });
+        await db.collection('posts').doc(postId).set(newPost);
+        const people = new Map([[creatorId, author]]);
+        res.status(201).json({ message: 'Post created successfully', post: presentPost(newPost, callerUid, people) });
     } catch (error: any) {
+        if (error instanceof UploadError) return res.status(error.status).json({ error: error.message });
         console.error('Create post error:', error);
-        res.status(500).json({ error: 'Failed to create post', message: error.message });
+        res.status(500).json({ error: 'Failed to create post' });
     }
 });
 
 /**
- * @route   POST /api/posts/:id/like
- * @desc    Toggle like / unlike a post
- * @access  Authenticated users
+ * @route   POST /api/posts/:id/like — toggle (atomic)
  */
 router.post('/:id/like', authenticateUser, writeLimiter, async (req: Request, res: Response) => {
     try {
-        const { id } = req.params;
-        const userId = req.user!.uid;
-
-        // Check in memory / seed first
-        let targetPost = MEMORY_POSTS.find(p => p.id === id) || SAMPLE_POSTS.find(p => p.id === id);
-
-        if (!targetPost) {
-            try {
-                const doc = await db.collection('posts').doc(id).get();
-                if (doc.exists) {
-                    targetPost = { id: doc.id, ...doc.data() };
-                    MEMORY_POSTS.push(targetPost);
-                }
-            } catch (_) {}
-        }
-
-        if (!targetPost) {
-            res.status(404).json({ error: 'Post not found' });
-            return;
-        }
-
-        targetPost.likedBy = targetPost.likedBy || [];
-        const index = targetPost.likedBy.indexOf(userId);
-        let liked = false;
-
-        if (index > -1) {
-            targetPost.likedBy.splice(index, 1);
-            targetPost.likesCount = Math.max(0, (targetPost.likesCount || 1) - 1);
-        } else {
-            targetPost.likedBy.push(userId);
-            targetPost.likesCount = (targetPost.likesCount || 0) + 1;
-            liked = true;
-        }
-
-        try {
-            await db.collection('posts').doc(id).set({
-                likedBy: targetPost.likedBy,
-                likesCount: targetPost.likesCount,
-                updatedAt: new Date().toISOString(),
-            }, { merge: true });
-        } catch (_) {}
-
-        res.status(200).json({
-            liked,
-            likesCount: targetPost.likesCount,
+        const uid = req.user!.uid;
+        const ref = db.collection('posts').doc(req.params.id);
+        const result = await db.runTransaction(async tx => {
+            const snap = await tx.get(ref);
+            if (!snap.exists) return null;
+            const likedBy: string[] = snap.data()!.likedBy || [];
+            const wasLiked = likedBy.includes(uid);
+            const likesCount = Math.max(0, (Number(snap.data()!.likesCount) || 0) + (wasLiked ? -1 : 1));
+            tx.update(ref, {
+                likedBy: wasLiked ? FieldValue.arrayRemove(uid) : FieldValue.arrayUnion(uid),
+                likesCount,
+            });
+            return { liked: !wasLiked, likesCount };
         });
+        if (!result) return res.status(404).json({ error: 'Post not found' });
+        res.status(200).json(result);
     } catch (error: any) {
         console.error('Like post error:', error);
-        res.status(500).json({ error: 'Failed to toggle like', message: error.message });
+        res.status(500).json({ error: 'Failed to toggle like' });
     }
 });
 
 /**
  * @route   GET /api/posts/:id/comments
- * @desc    Get comments thread for a post
- * @access  Public
  */
-router.get('/:id/comments', async (req: Request, res: Response) => {
+router.get('/:id/comments', optionalAuthenticateUser, async (req: Request, res: Response) => {
     try {
-        const { id } = req.params;
-        const commentsList: any[] = [];
-
-        // 1. Check In-Memory comments
-        if (IN_MEMORY_COMMENTS[id]) {
-            commentsList.push(...IN_MEMORY_COMMENTS[id]);
-        }
-
-        // 2. Check Firestore post subcollection
-        try {
-            let snapshot: any = await db.collection('posts').doc(id).collection('comments').orderBy('createdAt', 'asc').get().catch(() => null);
-            if (!snapshot) {
-                snapshot = await db.collection('posts').doc(id).collection('comments').get().catch(() => null);
-            }
-            if (snapshot?.forEach) {
-                snapshot.forEach((doc: any) => {
-                    if (!commentsList.some(c => c.id === doc.id)) {
-                        commentsList.push({ id: doc.id, ...doc.data() });
-                    }
-                });
-            }
-        } catch (_) {}
-
-        // 3. Check Firestore root comments collection
-        try {
-            const rootSnap: any = await db.collection('comments').where('postId', '==', id).get().catch(() => null);
-            if (rootSnap?.forEach) {
-                rootSnap.forEach((doc: any) => {
-                    if (!commentsList.some(c => c.id === doc.id)) {
-                        commentsList.push({ id: doc.id, ...doc.data() });
-                    }
-                });
-            }
-        } catch (_) {}
-
-        // 4. Enrich comments with live verification status and latest profile photos
-        const userIds = Array.from(new Set(commentsList.map(c => c.userId).filter(Boolean)));
-        const userVerifyMap = new Map<string, { isVerified: boolean; isAdmin: boolean; avatar?: string; name?: string }>();
-
-        if (userIds.length > 0) {
-            try {
-                const userDocs = await Promise.all(userIds.map(uid => db.collection('users').doc(uid).get().catch(() => null)));
-                userDocs.forEach(doc => {
-                    if (doc && doc.exists) {
-                        const d = doc.data()!;
-                        userVerifyMap.set(doc.id, {
-                            isVerified: Boolean(d.isVerified || d.is_verified || d.role === 'admin'),
-                            isAdmin: d.role === 'admin',
-                            avatar: d.profileImage || d.profile_image || d.photoURL || d.avatar || '',
-                            name: d.fullName || d.full_name || d.displayName || '',
-                        });
-                    }
-                });
-            } catch (_) {}
-        }
-
-        const enrichedComments = commentsList.map(c => {
-            const vInfo = userVerifyMap.get(c.userId);
+        const blocked = await blockedFor(req.user?.uid);
+        // Comments live in the top-level "comments" collection (automatic single-field indexes)
+        const snap = await db.collection('comments').where('postId', '==', req.params.id).get();
+        const raw = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))
+            .filter(c => !blocked.includes(c.userId))
+            .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
+            .slice(-500);
+        const people = await getDisplayProfiles(raw.map(c => c.userId));
+        const comments = raw.map(c => {
+            const p = people.get(c.userId);
             return {
-                ...c,
-                userAvatar: vInfo?.avatar || c.userAvatar || '',
-                userName: vInfo?.name || c.userName || 'User',
-                isVerified: vInfo?.isVerified ?? Boolean(c.isVerified),
-                isAdmin: vInfo?.isAdmin ?? false,
+                id: c.id,
+                postId: req.params.id,
+                userId: c.userId,
+                userName: p?.name || 'QIIRA user',
+                userAvatar: p?.avatar || '',
+                text: c.text || '',
+                createdAt: c.createdAt,
+                isVerified: Boolean(p?.isVerified),
+                isAdmin: Boolean(p?.isAdmin),
             };
         });
-
-        enrichedComments.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
-
-        res.status(200).json({
-            comments: enrichedComments,
-            count: enrichedComments.length,
-        });
+        res.status(200).json({ comments, count: comments.length });
     } catch (error: any) {
         console.error('Get comments error:', error);
-        res.status(500).json({ error: 'Failed to fetch comments', message: error.message });
+        res.status(500).json({ error: 'Failed to fetch comments' });
     }
 });
 
 /**
  * @route   POST /api/posts/:id/comments
- * @desc    Add comment to a post
- * @access  Authenticated users
  */
 router.post('/:id/comments', authenticateUser, writeLimiter, async (req: Request, res: Response) => {
     try {
-        const { id } = req.params;
-        const userId = req.user!.uid;
-        const text = typeof req.body.text === 'string' ? req.body.text.trim() : '';
-
-        if (!text) {
-            res.status(400).json({ error: 'Comment text is required' });
-            return;
-        }
+        const uid = req.user!.uid;
+        const text = str(req.body.text, MAX_COMMENT_LENGTH + 1);
+        if (!text) return res.status(400).json({ error: 'Comment text is required' });
         if (text.length > MAX_COMMENT_LENGTH) {
-            res.status(400).json({ error: `Comments can be at most ${MAX_COMMENT_LENGTH} characters` });
-            return;
+            return res.status(400).json({ error: `Comments can be at most ${MAX_COMMENT_LENGTH} characters` });
         }
 
-        // Only comment on posts that exist (otherwise orphan comment documents get created)
-        const inMemory = MEMORY_POSTS.some(p => p.id === id);
-        if (!inMemory) {
-            const postDoc = await db.collection('posts').doc(id).get();
-            if (!postDoc.exists) {
-                res.status(404).json({ error: 'Post not found' });
-                return;
-            }
+        const postRef = db.collection('posts').doc(req.params.id);
+        const post = await postRef.get();
+        if (!post.exists) return res.status(404).json({ error: 'Post not found' });
+
+        // You can't comment on posts by someone who blocked you
+        const author = await getDisplayProfile(post.data()!.authorId || post.data()!.vendorId);
+        if (author.blockedUserIds.includes(uid)) {
+            return res.status(403).json({ error: 'You cannot comment on this post' });
         }
 
-        // Name and photo always come from the stored profile, never from the request
-        let resolvedAvatar = '';
-        let resolvedName = 'User';
-        try {
-            const uDoc = await db.collection('users').doc(userId).get();
-            if (uDoc.exists) {
-                const uData = uDoc.data()!;
-                resolvedAvatar = uData.profileImage || uData.profile_image || uData.photoURL || uData.avatar || resolvedAvatar;
-                resolvedName = uData.fullName || uData.full_name || uData.displayName || resolvedName;
-            }
-        } catch (_) {}
+        const me = await getDisplayProfile(uid);
+        const commentId = `comment_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+        const comment = { id: commentId, postId: post.id, userId: uid, text, createdAt: new Date().toISOString() };
 
-        const commentId = `comment_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-        const newComment = {
-            id: commentId,
-            postId: id,
-            userId,
-            userName: resolvedName,
-            userAvatar: resolvedAvatar,
-            text,
-            createdAt: new Date().toISOString(),
-        };
-
-        if (!IN_MEMORY_COMMENTS[id]) {
-            IN_MEMORY_COMMENTS[id] = [];
-        }
-        IN_MEMORY_COMMENTS[id].push(newComment);
-
-        // Update post comments count in memory
-        const targetPost = MEMORY_POSTS.find(p => p.id === id) || SAMPLE_POSTS.find(p => p.id === id);
-        if (targetPost) {
-            targetPost.commentsCount = (targetPost.commentsCount || 0) + 1;
-        }
-
-        // Persist to Firestore (subcollection and root collection for max durability)
-        try {
-            await db.collection('posts').doc(id).collection('comments').doc(commentId).set(newComment);
-            await db.collection('comments').doc(commentId).set(newComment);
-            await db.collection('posts').doc(id).set({
-                commentsCount: (targetPost?.commentsCount || 1),
-            }, { merge: true });
-        } catch (_) {}
+        const batch = db.batch();
+        batch.set(db.collection('comments').doc(commentId), comment);
+        batch.update(postRef, { commentsCount: FieldValue.increment(1) });
+        await batch.commit();
 
         res.status(201).json({
             message: 'Comment added successfully',
-            comment: newComment,
+            comment: { ...comment, userName: me.name, userAvatar: me.avatar, isVerified: me.isVerified, isAdmin: me.isAdmin },
         });
     } catch (error: any) {
         console.error('Add comment error:', error);
-        res.status(500).json({ error: 'Failed to add comment', message: error.message });
+        res.status(500).json({ error: 'Failed to add comment' });
     }
 });
 
 /**
- * @route   DELETE /api/posts/:id
- * @desc    Delete a post (Vendor can delete own posts, Admin can delete any post)
- * @access  Vendor owner or Admin only
+ * @route   DELETE /api/posts/:id/comments/:commentId
+ * @desc    Delete a comment: its author, the post's owner, or an admin
+ */
+router.delete('/:id/comments/:commentId', authenticateUser, async (req: Request, res: Response) => {
+    try {
+        const postRef = db.collection('posts').doc(req.params.id);
+        const [post, comment] = await Promise.all([postRef.get(), db.collection('comments').doc(req.params.commentId).get()]);
+        if (!post.exists || !comment.exists || comment.data()!.postId !== post.id) {
+            return res.status(404).json({ error: 'Comment not found' });
+        }
+
+        const uid = req.user!.uid;
+        const isPostOwner = post.data()!.authorId === uid || post.data()!.vendorId === uid;
+        if (comment.data()!.userId !== uid && !isPostOwner && !req.user!.isAdmin) {
+            return res.status(403).json({ error: 'You can only delete your own comments' });
+        }
+        await deleteComment(req.params.commentId);
+        res.status(200).json({ message: 'Comment deleted', commentId: req.params.commentId });
+    } catch (error: any) {
+        console.error('Delete comment error:', error);
+        res.status(500).json({ error: 'Failed to delete comment' });
+    }
+});
+
+/**
+ * @route   DELETE /api/posts/:id — owner or admin
  */
 router.delete('/:id', authenticateUser, async (req: Request, res: Response) => {
     try {
-        const { id } = req.params;
-        const callerUid = req.user!.uid;
-        const isAdmin = req.user!.isAdmin;
-
-        // 1. Locate the post in Memory, Seed, or Firestore
-        let targetPost = MEMORY_POSTS.find(p => p.id === id) || SAMPLE_POSTS.find(p => p.id === id);
-
-        if (!targetPost) {
-            try {
-                const doc = await db.collection('posts').doc(id).get();
-                if (doc.exists) {
-                    targetPost = { id: doc.id, ...doc.data() };
-                }
-            } catch (_) {}
+        const doc = await db.collection('posts').doc(req.params.id).get();
+        if (!doc.exists) return res.status(404).json({ error: 'Post not found' });
+        const p = doc.data()!;
+        const isOwner = p.vendorId === req.user!.uid || p.authorId === req.user!.uid;
+        if (!isOwner && !req.user!.isAdmin) {
+            return res.status(403).json({ error: 'Forbidden: You only have permission to delete your own posts unless you are an administrator.' });
         }
-
-        if (!targetPost) {
-            res.status(404).json({ error: 'Post not found' });
-            return;
-        }
-
-        // 2. Check permissions: Admin can delete any post; Post creator can only delete their own post
-        const isOwner = targetPost.vendorId === callerUid || targetPost.userId === callerUid || targetPost.creatorId === callerUid;
-
-        if (!isAdmin && !isOwner) {
-            res.status(403).json({
-                error: 'Forbidden: You only have permission to delete your own posts unless you are an administrator.',
-            });
-            return;
-        }
-
-        // 3. Remove from MEMORY_POSTS
-        const memIdx = MEMORY_POSTS.findIndex(p => p.id === id);
-        if (memIdx > -1) {
-            MEMORY_POSTS.splice(memIdx, 1);
-        }
-
-        // 4. Remove from SAMPLE_POSTS
-        const seedIdx = SAMPLE_POSTS.findIndex(p => p.id === id);
-        if (seedIdx > -1) {
-            SAMPLE_POSTS.splice(seedIdx, 1);
-        }
-
-        // 5. Remove comments
-        delete IN_MEMORY_COMMENTS[id];
-
-        // 6. Delete from Firestore
-        try {
-            await db.collection('posts').doc(id).delete();
-        } catch (dbErr: any) {
-            console.warn('Firestore post delete note:', dbErr.message);
-        }
-
-        res.status(200).json({
-            message: 'Post deleted successfully',
-            postId: id,
-            deletedBy: isAdmin ? 'admin' : 'vendor',
-        });
+        await deletePostAndComments(req.params.id);
+        res.status(200).json({ message: 'Post deleted successfully', postId: req.params.id, deletedBy: isOwner ? 'owner' : 'admin' });
     } catch (error: any) {
         console.error('Delete post error:', error);
-        res.status(500).json({ error: 'Failed to delete post', message: error.message });
+        res.status(500).json({ error: 'Failed to delete post' });
     }
 });
+
+// ─── Shared deletion helpers (also used by moderation) ──────────────────────
+
+/** Delete a post, all its comments (incl. any legacy sub-collection copies) and its uploaded media. */
+export async function deletePostAndComments(postId: string): Promise<void> {
+    const postRef = db.collection('posts').doc(postId);
+    const post = await postRef.get();
+    const [comments, legacy] = await Promise.all([
+        db.collection('comments').where('postId', '==', postId).get(),
+        postRef.collection('comments').get(),
+    ]);
+    const refs = [...comments.docs.map(d => d.ref), ...legacy.docs.map(d => d.ref), postRef];
+    for (let i = 0; i < refs.length; i += 400) {
+        const batch = db.batch();
+        refs.slice(i, i + 400).forEach(r => batch.delete(r));
+        await batch.commit();
+    }
+    // Remove the post's own uploaded files (external links are left alone)
+    const media: string[] = post.exists ? [...(post.data()!.mediaUrls || []), post.data()!.mediaUrl, post.data()!.thumbnailUrl] : [];
+    const paths = [...new Set(media.map(storagePathOf).filter((p): p is string => Boolean(p)))];
+    await Promise.all(paths.map(p => storage.bucket().file(p).delete().catch(() => {})));
+}
+
+/** Delete one comment and correct its post's comment counter. */
+export async function deleteComment(commentId: string): Promise<boolean> {
+    const ref = db.collection('comments').doc(commentId);
+    const snap = await ref.get();
+    if (!snap.exists) return false;
+
+    const postId = snap.data()!.postId;
+    const batch = db.batch();
+    batch.delete(ref);
+    if (postId) {
+        const postRef = db.collection('posts').doc(postId);
+        batch.delete(postRef.collection('comments').doc(commentId)); // legacy copy, if any
+        if ((await postRef.get()).exists) batch.update(postRef, { commentsCount: FieldValue.increment(-1) });
+    }
+    await batch.commit();
+    return true;
+}
 
 export default router;

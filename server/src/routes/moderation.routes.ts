@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
-import { db } from '../config/firebase';
-import supabase from '../config/supabase';
+import { auth, db, FieldValue } from '../config/firebase';
 import crypto from 'crypto';
-import { authenticateUser, requireAdmin } from '../utils/authMiddleware';
+import { authenticateUser, requireAdmin, MASTER_ADMIN_UID, SUPPORT_UID } from '../utils/authMiddleware';
+import { clearProfileCache } from '../utils/profiles';
+import { invalidateVendorList } from '../utils/vendors';
 import { reportLimiter } from '../utils/rateLimiter';
 
 const router = Router();
@@ -86,23 +87,8 @@ router.post('/report', authenticateUser, reportLimiter, async (req: Request, res
             resolutionNotes: null,
         };
 
-        // 1. Store in Firestore reports collection (if this fails the user must be told)
+        // Store the report (if this fails the user must be told)
         await db.collection('reports').doc(reportId).set(reportData);
-
-        // 2. Also try Supabase reports table if exists (non-blocking)
-        try {
-            await supabase.from('reports').insert([{
-                id: reportId,
-                target_type: targetType,
-                target_id: String(targetId),
-                target_user_id: targetUserId ? String(targetUserId) : null,
-                reason: String(reason),
-                details: details ? String(details).slice(0, 1000) : '',
-                reporter_uid: reporterUid,
-                status: 'pending',
-                created_at: new Date().toISOString()
-            }]);
-        } catch (_) {}
 
         console.log(`🚩 Report submitted [${reportId}]: ${targetType} ${targetId} by ${reporterUid} (Reason: ${reason})`);
 
@@ -135,27 +121,23 @@ router.post('/block', authenticateUser, async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'You cannot block yourself' });
         }
 
-        const now = new Date().toISOString();
-
-        // 1. Save in Firestore under caller's blocked_users subcollection
-        try {
-            await db.collection('users').doc(callerUid).collection('blocked_users').doc(blockedUserId).set({
-                blockedUserId,
-                blockedUserName: blockedUserName || 'User',
-                blockedAt: now,
-            });
-
-            // Also maintain blockedUserIds array on user doc for easy atomic array checks
-            const userRef = db.collection('users').doc(callerUid);
-            const userSnap = await userRef.get();
-            const existingBlocked: string[] = userSnap.data()?.blockedUserIds || [];
-            if (!existingBlocked.includes(blockedUserId)) {
-                existingBlocked.push(blockedUserId);
-                await userRef.set({ blockedUserIds: existingBlocked }, { merge: true });
-            }
-        } catch (fsErr: any) {
-            console.warn('Firestore block save note:', fsErr.message);
+        if (blockedUserId.length > 128 || blockedUserId === SUPPORT_UID) {
+            return res.status(400).json({ error: 'This account cannot be blocked' });
         }
+
+        const now = new Date().toISOString();
+        const userRef = db.collection('users').doc(callerUid);
+
+        // Atomic: the list entry and the quick-lookup array are written together
+        const batch = db.batch();
+        batch.set(userRef.collection('blocked_users').doc(blockedUserId), {
+            blockedUserId,
+            blockedUserName: typeof blockedUserName === 'string' ? blockedUserName.slice(0, 100) : 'User',
+            blockedAt: now,
+        });
+        batch.set(userRef, { blockedUserIds: FieldValue.arrayUnion(blockedUserId) }, { merge: true });
+        await batch.commit();
+        clearProfileCache(callerUid);
 
         console.log(`🚫 User ${callerUid} blocked ${blockedUserId}`);
 
@@ -184,17 +166,12 @@ router.post('/unblock', authenticateUser, async (req: Request, res: Response) =>
             return res.status(400).json({ error: 'blockedUserId is required' });
         }
 
-        try {
-            await db.collection('users').doc(callerUid).collection('blocked_users').doc(blockedUserId).delete();
-
-            const userRef = db.collection('users').doc(callerUid);
-            const userSnap = await userRef.get();
-            const existingBlocked: string[] = userSnap.data()?.blockedUserIds || [];
-            const updated = existingBlocked.filter(id => id !== blockedUserId);
-            await userRef.set({ blockedUserIds: updated }, { merge: true });
-        } catch (fsErr: any) {
-            console.warn('Firestore unblock note:', fsErr.message);
-        }
+        const userRef = db.collection('users').doc(callerUid);
+        const batch = db.batch();
+        batch.delete(userRef.collection('blocked_users').doc(blockedUserId));
+        batch.set(userRef, { blockedUserIds: FieldValue.arrayRemove(blockedUserId) }, { merge: true });
+        await batch.commit();
+        clearProfileCache(callerUid);
 
         console.log(`🔓 User ${callerUid} unblocked ${blockedUserId}`);
 
@@ -259,6 +236,9 @@ router.put('/reports/:id/resolve', authenticateUser, requireAdmin, async (req: R
     try {
         const { id } = req.params;
         const { action, notes } = req.body; // 'dismiss' | 'remove_content' | 'suspend_user'
+        if (!['dismiss', 'remove_content', 'suspend_user'].includes(action)) {
+            return res.status(400).json({ error: 'Invalid action' });
+        }
 
         const reportRef = db.collection('reports').doc(id);
         const reportDoc = await reportRef.get();
@@ -269,23 +249,35 @@ router.put('/reports/:id/resolve', authenticateUser, requireAdmin, async (req: R
         const reportData = reportDoc.data()!;
         const now = new Date().toISOString();
 
-        if (action === 'remove_content' && reportData.targetType === 'post' && reportData.targetId) {
-            try {
-                await db.collection('posts').doc(reportData.targetId).delete();
+        if (action === 'remove_content' && reportData.targetId) {
+            const { deletePostAndComments, deleteComment } = await import('./post.routes');
+            if (reportData.targetType === 'post') {
+                await deletePostAndComments(reportData.targetId);
                 console.log(`🗑️ Admin removed reported post: ${reportData.targetId}`);
-            } catch (_) {}
+            } else if (reportData.targetType === 'comment') {
+                await deleteComment(reportData.targetId);
+                console.log(`🗑️ Admin removed reported comment: ${reportData.targetId}`);
+            } else {
+                return res.status(400).json({ error: 'Use "suspend_user" for reported users and vendors' });
+            }
         }
 
-        if (action === 'suspend_user' && reportData.targetUserId) {
-            try {
-                await db.collection('users').doc(reportData.targetUserId).set({
-                    isSuspended: true,
-                    suspendedAt: now,
-                    suspensionReason: `Report violation: ${reportData.reason}`
-                }, { merge: true });
-                await supabase.from('users').update({ is_suspended: true, suspended_at: now }).eq('uid', reportData.targetUserId);
-                console.log(`⛔ Admin suspended reported user: ${reportData.targetUserId}`);
-            } catch (_) {}
+        if (action === 'suspend_user') {
+            const target = reportData.targetUserId || (['user', 'vendor'].includes(reportData.targetType) ? reportData.targetId : null);
+            if (!target) return res.status(400).json({ error: 'This report has no user to suspend' });
+            if (target === req.user!.uid || target === MASTER_ADMIN_UID || target === SUPPORT_UID) {
+                return res.status(403).json({ error: 'This account cannot be suspended' });
+            }
+            await db.collection('users').doc(target).set({
+                isSuspended: true,
+                suspendedAt: now,
+                suspendedBy: req.user!.uid,
+                suspensionReason: `Report violation: ${reportData.reason}`,
+            }, { merge: true });
+            try { await auth.revokeRefreshTokens(target); } catch (_) {}
+            clearProfileCache(target);
+            invalidateVendorList();
+            console.log(`⛔ Admin suspended reported user: ${target}`);
         }
 
         await reportRef.set({

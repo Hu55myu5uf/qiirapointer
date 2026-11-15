@@ -296,7 +296,8 @@ describe('vendors, posts and reports', () => {
             .send({ caption: 'New stock', mediaUrl: 'https://x.test/a.jpg' });
         expect(post.status).toBe(201);
         await api().post(`/api/posts/${post.body.post.id}/like`).set('Authorization', bearer('alice'));
-        const feed = await api().get('/api/posts/feed').query({ userId: 'alice' });
+        // the viewer comes from the login token (a ?userId= parameter is ignored)
+        const feed = await api().get('/api/posts/feed').set('Authorization', bearer('alice'));
         const p = feed.body.posts.find((x: any) => x.id === post.body.post.id);
         expect(p.likedBy).toBeUndefined();
         expect(p.isLiked).toBe(true);

@@ -208,7 +208,8 @@ export default function VendorProfileScreen({ navigation }: any) {
                     selectedPdfFile.uri,
                     selectedPdfFile.name || 'document.pdf',
                     user.uid,
-                    selectedPdfFile.mimeType || 'application/pdf'
+                    selectedPdfFile.mimeType || 'application/pdf',
+                    'menu' // menus are public so customers can open them
                 );
 
                 // 2. Add document record to vendor profile

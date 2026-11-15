@@ -18,4 +18,8 @@ beforeEach(async () => {
     const m = await import('./fakes/instances');
     m.fakeDb.reset();
     m.fakeAuth.reset();
+    m.storedFiles.clear();
+    // In-process caches must not leak between tests
+    (await import('../src/utils/profiles')).clearProfileCache();
+    (await import('../src/utils/vendors')).invalidateVendorList();
 });

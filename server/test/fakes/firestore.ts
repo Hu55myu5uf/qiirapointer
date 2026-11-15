@@ -75,6 +75,7 @@ export class FakeFirestore {
     reset() { this.store.clear(); }
 
     collection(name: string) { return new CollectionRef(this, name); }
+    collectionGroup(name: string) { return new Query(this, '', [], [], undefined, undefined, name); }
     doc(path: string) {
         const parts = path.split('/');
         return new DocRef(this, parts.slice(0, -1).join('/'), parts[parts.length - 1]);
@@ -188,20 +189,21 @@ class Query {
         protected orders: { field: string; dir: 'asc' | 'desc' }[] = [],
         protected limitN?: number,
         protected afterValues?: any[],
+        protected group?: string,
     ) {}
 
     where(field: string, op: string, value: any) {
-        return new Query(this.fs, this.path, [...this.filters, { field, op, value }], this.orders, this.limitN, this.afterValues);
+        return new Query(this.fs, this.path, [...this.filters, { field, op, value }], this.orders, this.limitN, this.afterValues, this.group);
     }
     orderBy(field: string, dir: 'asc' | 'desc' = 'asc') {
-        return new Query(this.fs, this.path, this.filters, [...this.orders, { field, dir }], this.limitN, this.afterValues);
+        return new Query(this.fs, this.path, this.filters, [...this.orders, { field, dir }], this.limitN, this.afterValues, this.group);
     }
-    limit(n: number) { return new Query(this.fs, this.path, this.filters, this.orders, n, this.afterValues); }
+    limit(n: number) { return new Query(this.fs, this.path, this.filters, this.orders, n, this.afterValues, this.group); }
     startAfter(...values: any[]) {
         const vals = values.length === 1 && values[0] instanceof DocSnapshot
             ? this.orders.map(o => values[0].get(o.field))
             : values;
-        return new Query(this.fs, this.path, this.filters, this.orders, this.limitN, vals);
+        return new Query(this.fs, this.path, this.filters, this.orders, this.limitN, vals, this.group);
     }
     count() {
         return { get: async () => { const s = await this.get(); return { data: () => ({ count: s.size }) }; } };
@@ -230,6 +232,13 @@ class Query {
         const prefix = `${this.path}/`;
         let docs: DocSnapshot[] = [];
         for (const [key, data] of this.fs.store.entries()) {
+            if (this.group) {
+                // collectionGroup: any document whose parent collection has this id
+                const parts = key.split('/');
+                if (parts[parts.length - 2] !== this.group || !this.matches(data)) continue;
+                docs.push(new DocSnapshot(new DocRef(this.fs, parts.slice(0, -1).join('/'), parts[parts.length - 1]), data));
+                continue;
+            }
             if (!key.startsWith(prefix)) continue;
             const rest = key.slice(prefix.length);
             if (rest.includes('/')) continue; // sub-collection doc
@@ -263,6 +272,11 @@ class Query {
 export class CollectionRef extends Query {
     constructor(fs: FakeFirestore, path: string) { super(fs, path); }
     get id() { return this.path.split('/').pop()!; }
+    /** The document that owns this sub-collection (null for top-level collections). */
+    get parent(): DocRef | null {
+        const parts = this.path.split('/');
+        return parts.length >= 3 ? new DocRef(this.fs, parts.slice(0, -2).join('/'), parts[parts.length - 2]) : null;
+    }
     doc(id?: string) { return new DocRef(this.fs, this.path, id || `auto_${++autoId}`); }
     async add(data: Data) { const ref = this.doc(); await ref.set(data); return ref; }
 }

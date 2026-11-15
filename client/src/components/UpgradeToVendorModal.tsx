@@ -100,7 +100,7 @@ export default function UpgradeToVendorModal({
             if (document) {
                 if (document.type === 'pdf') {
                     try {
-                        const res = await uploadDocumentViaBackend(document.uri, document.name);
+                        const res = await uploadDocumentViaBackend(document.uri, document.name, undefined, 'application/pdf', 'upgrade');
                         docUrl = res?.fileUrl || document.uri;
                     } catch (_) {
                         docUrl = document.uri;

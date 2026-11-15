@@ -98,13 +98,14 @@ export const uploadDocumentViaBackend = async (
     uri: string,
     fileName: string,
     userId?: string,
-    mimeType: string = 'application/pdf'
+    mimeType: string = 'application/pdf',
+    // 'menu' = public (customers can open it); 'kyc' / 'upgrade' = private identity documents
+    purpose: 'menu' | 'kyc' | 'upgrade' = 'kyc'
 ): Promise<{ fileUrl: string; fileName: string; fileSize: number }> => {
     let base64 = '';
 
     if (uri.startsWith('data:')) {
         // Already a base64 data URI
-        console.log('[Upload Doc] Received data URI.');
         const response = await fetch(`${API_URL}/vendors/upload-document`, {
             method: 'POST',
             headers: await getAuthHeaders(),
@@ -112,6 +113,7 @@ export const uploadDocumentViaBackend = async (
                 fileData: uri,
                 fileName,
                 fileType: mimeType,
+                purpose,
                 userId: resolveUserId(userId)
             })
         });
@@ -150,6 +152,7 @@ export const uploadDocumentViaBackend = async (
         fileData: dataURI,
         fileName,
         fileType: mimeType,
+        purpose,
         userId: resolveUserId(userId)
     };
 

@@ -1,305 +1,244 @@
 import { Router, Request, Response } from 'express';
-import supabase from '../config/supabase';
 import { db } from '../config/firebase';
 import { notifyNewReview } from '../utils/pushNotifications';
 import { authenticateUser, requireSelfOrAdmin } from '../utils/authMiddleware';
+import { isOwnPrivateRef } from '../utils/fileStorage';
+import { getDisplayProfile } from '../utils/profiles';
+import { toVendorResponse, invalidateVendorList } from '../utils/vendors';
+import { writeLimiter } from '../utils/rateLimiter';
 
 const router = Router();
 
-// Helper mapper to convert database snake_case to client camelCase
-function mapVendor(v: any) {
-    if (!v) return null;
+const MAX_REVIEW_LENGTH = 1000;
+const MAX_FAVORITES = 500;
 
-    // Parse location if it exists
-    let location: { latitude: number; longitude: number } | null = null;
-    if (v.location) {
-        if (typeof v.location === 'object') {
-            if (Array.isArray(v.location.coordinates)) {
-                location = {
-                    latitude: Number(v.location.coordinates[1]),
-                    longitude: Number(v.location.coordinates[0])
-                };
-            } else if (v.location.latitude !== undefined && v.location.longitude !== undefined) {
-                location = {
-                    latitude: Number(v.location.latitude),
-                    longitude: Number(v.location.longitude)
-                };
-            } else if (v.location._latitude !== undefined && v.location._longitude !== undefined) {
-                location = {
-                    latitude: Number(v.location._latitude),
-                    longitude: Number(v.location._longitude)
-                };
-            }
-        } else if (typeof v.location === 'string') {
-            try {
-                const geo = JSON.parse(v.location);
-                if (Array.isArray(geo.coordinates)) {
-                    location = {
-                        latitude: Number(geo.coordinates[1]),
-                        longitude: Number(geo.coordinates[0])
-                    };
-                } else if (geo.latitude !== undefined && geo.longitude !== undefined) {
-                    location = {
-                        latitude: Number(geo.latitude),
-                        longitude: Number(geo.longitude)
-                    };
-                }
-            } catch (e) {
-                console.error('Failed to parse location string:', e);
-            }
-        }
-    } else if (v.latitude !== undefined && v.longitude !== undefined && v.latitude !== null && v.longitude !== null) {
-        location = {
-            latitude: Number(v.latitude),
-            longitude: Number(v.longitude)
-        };
-    }
+/** One review per (vendor, client) pair — the document id enforces it. */
+export const reviewIdFor = (vendorId: string, clientId: string) => `${vendorId}_${clientId}`;
 
-    if (!location) {
-        const hash = (v.uid || v.id || v.business_name || 'vendor')
-            .split('')
-            .reduce((acc: number, c: string) => acc + c.charCodeAt(0), 0);
-        const latOffset = ((hash % 100) - 50) * 0.002;
-        const lngOffset = (((hash * 7) % 100) - 50) * 0.002;
-        location = {
-            latitude: 6.5244 + latOffset,
-            longitude: 3.3792 + lngOffset
-        };
-    }
+const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
-    const isVerified = Boolean(v.is_verified === true || v.isVerified === true || v.users?.is_verified === true || v.users?.isVerified === true || v.users?.role === 'admin' || v.role === 'admin');
-
-    return {
-        id: v.uid,
-        uid: v.uid,
-        businessName: v.business_name || v.businessName || 'Vendor',
-        category: v.category || 'Retail',
-        description: v.description || '',
-        address: v.address || '',
-        services: v.services || [],
-        location,
-        businessImage: v.business_image || v.businessImage,
-        bannerImage: v.banner_image || v.bannerImage,
-        businessHours: v.business_hours || v.businessHours,
-        verificationStatus: v.verification_status || v.verificationStatus || 'approved',
-        isVerified,
-        is_verified: isVerified,
-        isActive: v.is_active ?? true,
-        documents: v.documents || [],
-        paymentStatus: v.payment_status,
-        paymentReference: v.payment_reference,
-        paymentAmount: v.payment_amount,
-        paidAt: v.paid_at,
-        averageRating: Number(v.average_rating || v.averageRating || 0),
-        totalReviews: Number(v.total_reviews || v.totalReviews || 0),
-        rejectionReason: v.rejection_reason,
-        verifiedAt: v.verified_at,
-        createdAt: v.created_at || v.createdAt,
-        updatedAt: v.updated_at || v.updatedAt
-    };
+/**
+ * Recalculate a vendor's rating inside a transaction from the stored running totals.
+ * `delta` adjusts the sum and count (e.g. a new review: +rating, +1).
+ */
+function applyRatingDelta(current: any, sumDelta: number, countDelta: number) {
+    const ratingSum = Math.max(0, (Number(current.ratingSum) || 0) + sumDelta);
+    const totalReviews = Math.max(0, (Number(current.totalReviews) || 0) + countDelta);
+    const averageRating = totalReviews > 0 ? Math.round((ratingSum / totalReviews) * 100) / 100 : 0;
+    return { ratingSum, totalReviews, averageRating };
 }
 
 /**
  * @route   POST /api/clients/:id/reviews
- * @desc    Submit a review for a vendor
- * @access  Private (Client only)
+ * @desc    Write (or update) your review of a vendor. One review per vendor; you can't review yourself.
+ * @access  Owner
  */
-router.post('/:id/reviews', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
+router.post('/:id/reviews', authenticateUser, requireSelfOrAdmin('id'), writeLimiter, async (req: Request, res: Response) => {
     try {
-        const { id } = req.params; // Client ID
-        const { vendorId, rating, comment } = req.body;
+        const clientId = req.params.id;
+        const { vendorId } = req.body;
+        const rating = Number(req.body.rating);
+        const comment = str(req.body.comment, MAX_REVIEW_LENGTH + 1);
 
-        if (!vendorId || !rating) {
-            return res.status(400).json({ error: 'Vendor ID and rating are required' });
+        if (!vendorId || typeof vendorId !== 'string') {
+            return res.status(400).json({ error: 'Vendor ID is required' });
+        }
+        if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+            return res.status(400).json({ error: 'Rating must be a whole number from 1 to 5' });
+        }
+        if (comment.length > MAX_REVIEW_LENGTH) {
+            return res.status(400).json({ error: `Reviews can be at most ${MAX_REVIEW_LENGTH} characters` });
+        }
+        if (vendorId === clientId) {
+            return res.status(400).json({ error: 'You cannot review your own business' });
         }
 
-        if (rating < 1 || rating > 5) {
-            return res.status(400).json({ error: 'Rating must be between 1 and 5' });
-        }
+        const vendorRef = db.collection('vendors').doc(vendorId);
+        const reviewRef = db.collection('reviews').doc(reviewIdFor(vendorId, clientId));
+        const now = new Date().toISOString();
 
-        // Create review in Supabase
-        const { data: newReview, error: reviewError } = await supabase
-            .from('reviews')
-            .insert({
-                client_id: id,
-                vendor_id: vendorId,
+        const outcome = await db.runTransaction(async tx => {
+            const [vendorSnap, reviewSnap] = await Promise.all([tx.get(vendorRef), tx.get(reviewRef)]);
+            if (!vendorSnap.exists || vendorSnap.data()!.verificationStatus !== 'approved') return 'no-vendor' as const;
+
+            const previous = reviewSnap.exists ? Number(reviewSnap.data()!.rating) || 0 : null;
+            const totals = previous === null
+                ? applyRatingDelta(vendorSnap.data(), rating, 1)
+                : applyRatingDelta(vendorSnap.data(), rating - previous, 0);
+
+            tx.set(reviewRef, {
+                vendorId,
+                clientId,
                 rating,
-                comment: comment || '',
-            })
-            .select()
-            .single();
+                comment,
+                createdAt: reviewSnap.exists ? reviewSnap.data()!.createdAt : now,
+                updatedAt: now,
+            });
+            tx.set(vendorRef, totals, { merge: true });
+            return previous === null ? 'created' as const : 'updated' as const;
+        });
 
-        if (reviewError) throw reviewError;
+        if (outcome === 'no-vendor') return res.status(404).json({ error: 'Vendor not found' });
+        invalidateVendorList();
 
-        // Fetch all reviews for vendor to calculate average rating
-        const { data: reviews, error: reviewsError } = await supabase
-            .from('reviews')
-            .select('rating')
-            .eq('vendor_id', vendorId);
-
-        if (reviewsError) throw reviewsError;
-
-        const totalReviews = reviews.length;
-        const avgRating = totalReviews > 0
-            ? reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
-            : 0;
-
-        // Update vendor's average rating and total reviews
-        const { error: vendorUpdateError } = await supabase
-            .from('vendors')
-            .update({
-                average_rating: avgRating,
-                total_reviews: totalReviews,
-            })
-            .eq('uid', vendorId);
-
-        if (vendorUpdateError) throw vendorUpdateError;
-
-        // Send push notification to vendor
-        try {
-            // Get vendor user, vendor details, and reviewer profile
-            const { data: vendorUser } = await supabase.from('users').select('*').eq('uid', vendorId).single();
-            const { data: vendorDoc } = await supabase.from('vendors').select('*').eq('uid', vendorId).single();
-            const { data: reviewerDoc } = await supabase.from('users').select('*').eq('uid', id).single();
-
-            const pushToken = vendorUser?.push_token;
-            const businessName = vendorDoc?.business_name || 'Your business';
-            const reviewerName = reviewerDoc?.full_name || 'A customer';
-
-            if (pushToken) {
-                await notifyNewReview(pushToken, reviewerName, rating, businessName);
-                console.log('Review notification sent to vendor:', vendorId);
+        // Notify the vendor about new reviews (best effort)
+        if (outcome === 'created') {
+            try {
+                const [vendorUser, vendorDoc, reviewer] = await Promise.all([
+                    db.collection('users').doc(vendorId).get(),
+                    vendorRef.get(),
+                    getDisplayProfile(clientId),
+                ]);
+                const pushToken = vendorUser.data()?.pushToken;
+                if (pushToken) {
+                    await notifyNewReview(pushToken, reviewer.name, rating, vendorDoc.data()?.businessName || 'your business');
+                }
+            } catch (e: any) {
+                console.warn('Review notification note:', e.message);
             }
-        } catch (notifError) {
-            console.error('Error sending review notification (non-blocking):', notifError);
         }
 
-        res.status(201).json({
-            message: 'Review submitted successfully',
-            reviewId: newReview.id
+        res.status(outcome === 'created' ? 201 : 200).json({
+            message: outcome === 'created' ? 'Review submitted successfully' : 'Your review has been updated',
+            reviewId: reviewRef.id,
+            updated: outcome === 'updated',
         });
     } catch (error: any) {
         console.error('Submit review error:', error);
-        res.status(500).json({ error: 'Failed to submit review', message: error.message });
+        res.status(500).json({ error: 'Failed to submit review' });
     }
 });
 
 /**
- * @route   GET /api/clients/:id/favorites
- * @desc    Get client's favorite vendors
- * @access  Private (Client only)
+ * @route   DELETE /api/clients/:id/reviews/:vendorId
+ * @desc    Delete your own review of a vendor
  */
+router.delete('/:id/reviews/:vendorId', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
+    try {
+        const { id: clientId, vendorId } = req.params;
+        const deleted = await deleteReview(vendorId, clientId);
+        if (!deleted) return res.status(404).json({ error: 'Review not found' });
+        res.status(200).json({ message: 'Review deleted' });
+    } catch (error: any) {
+        console.error('Delete review error:', error);
+        res.status(500).json({ error: 'Failed to delete review' });
+    }
+});
+
+/** Delete a review and take it out of the vendor's rating. Used by users, admins and account deletion. */
+export async function deleteReview(vendorId: string, clientId: string): Promise<boolean> {
+    const vendorRef = db.collection('vendors').doc(vendorId);
+    const reviewRef = db.collection('reviews').doc(reviewIdFor(vendorId, clientId));
+    const deleted = await db.runTransaction(async tx => {
+        const [reviewSnap, vendorSnap] = await Promise.all([tx.get(reviewRef), tx.get(vendorRef)]);
+        if (!reviewSnap.exists) return false;
+        tx.delete(reviewRef);
+        if (vendorSnap.exists) {
+            tx.set(vendorRef, applyRatingDelta(vendorSnap.data(), -(Number(reviewSnap.data()!.rating) || 0), -1), { merge: true });
+        }
+        return true;
+    });
+    if (deleted) invalidateVendorList();
+    return deleted;
+}
+
+// ─── Favourites: favorites/{clientId}_{vendorId}  { clientId, vendorId, createdAt } ─────
+// A top-level collection so both "my favourites" and "who favourited this store" use
+// Firestore's automatic single-field indexes.
+export const favoriteIdFor = (clientId: string, vendorId: string) => `${clientId}_${vendorId}`;
+
 router.get('/:id/favorites', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
     try {
-        const { id } = req.params;
+        const favSnap = await db.collection('favorites').where('clientId', '==', req.params.id).limit(MAX_FAVORITES).get();
+        const ids = [...new Set(favSnap.docs.map(d => d.data().vendorId as string).filter(Boolean))];
+        const [vendorDocs, userDocs] = await Promise.all([
+            Promise.all(ids.map(id => db.collection('vendors').doc(id).get())),
+            Promise.all(ids.map(id => db.collection('users').doc(id).get())),
+        ]);
 
-        // Fetch favorites
-        const { data: favorites, error } = await supabase
-            .from('favorites')
-            .select('vendor_id')
-            .eq('client_id', id);
+        const favorites = ids
+            .map((id, i) => ({ id, v: vendorDocs[i].exists ? vendorDocs[i].data() : null, u: userDocs[i].exists ? userDocs[i].data() : null }))
+            .filter(x => x.v && x.u && x.v.verificationStatus === 'approved' && !x.u.isSuspended)
+            .map(x => toVendorResponse(x.id, x.v, x.u));
 
-        if (error) throw error;
-
-        const vendorIds = (favorites || []).map(f => f.vendor_id);
-        if (vendorIds.length === 0) {
-            return res.status(200).json({ favorites: [] });
-        }
-
-        const { data: vendorList, error: vendorError } = await supabase
-            .from('vendors')
-            .select('*')
-            .in('uid', vendorIds);
-
-        if (vendorError) throw vendorError;
-
-        const mappedVendors = (vendorList || []).map(mapVendor);
-        res.status(200).json({ favorites: mappedVendors });
+        res.status(200).json({ favorites });
     } catch (error: any) {
         console.error('Get favorites error:', error);
-        res.status(500).json({ error: 'Failed to retrieve favorites', message: error.message });
+        res.status(500).json({ error: 'Failed to retrieve favorites' });
     }
 });
 
-/**
- * @route   POST /api/clients/:id/favorites
- * @desc    Add vendor to favorites
- * @access  Private (Client only)
- */
-router.post('/:id/favorites', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
+router.post('/:id/favorites', authenticateUser, requireSelfOrAdmin('id'), writeLimiter, async (req: Request, res: Response) => {
     try {
-        const { id } = req.params;
         const { vendorId } = req.body;
-
-        if (!vendorId) {
+        if (!vendorId || typeof vendorId !== 'string') {
             return res.status(400).json({ error: 'Vendor ID is required' });
         }
-
-        const { error } = await supabase
-            .from('favorites')
-            .insert({
-                client_id: id,
-                vendor_id: vendorId,
-            });
-
-        if (error) {
-            // If duplicate favorite, PostgreSQL throws unique violation (23505)
-            if (error.code === '23505') {
-                return res.status(400).json({ error: 'Vendor is already in favorites' });
-            }
-            throw error;
+        const vendor = await db.collection('vendors').doc(vendorId).get();
+        if (!vendor.exists || vendor.data()!.verificationStatus !== 'approved') {
+            return res.status(404).json({ error: 'Vendor not found' });
         }
 
+        const ref = db.collection('favorites').doc(favoriteIdFor(req.params.id, vendorId));
+        try {
+            await ref.create({ clientId: req.params.id, vendorId, createdAt: new Date().toISOString() });
+        } catch (e: any) {
+            if (e?.code === 6) return res.status(400).json({ error: 'Vendor is already in favorites' });
+            throw e;
+        }
         res.status(201).json({ message: 'Vendor added to favorites' });
     } catch (error: any) {
         console.error('Add favorite error:', error);
-        res.status(500).json({ error: 'Failed to add favorite', message: error.message });
+        res.status(500).json({ error: 'Failed to add favorite' });
     }
 });
 
-/**
- * @route   DELETE /api/clients/:id/favorites/:vendorId
- * @desc    Remove vendor from favorites
- * @access  Private (Client only)
- */
 router.delete('/:id/favorites/:vendorId', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
     try {
-        const { id, vendorId } = req.params;
-        console.log(`Comparing Remove Fav: Client ${id}, Vendor ${vendorId}`);
-
-        const { error, count } = await supabase
-            .from('favorites')
-            .delete({ count: 'exact' })
-            .eq('client_id', id)
-            .eq('vendor_id', vendorId);
-
-        if (error) throw error;
-
-        if (count === 0) {
-            console.log('Favorite not found during remove');
-            return res.status(404).json({ error: 'Favorite not found' });
-        }
-
-        console.log('Favorite removed successfully');
+        // Also matches legacy favourites stored under random ids
+        const [byId, legacy] = await Promise.all([
+            db.collection('favorites').doc(favoriteIdFor(req.params.id, req.params.vendorId)).get(),
+            db.collection('favorites').where('clientId', '==', req.params.id).get(),
+        ]);
+        const refs = [byId, ...legacy.docs.filter(d => d.data().vendorId === req.params.vendorId)]
+            .filter(d => d.exists).map(d => d.ref);
+        if (refs.length === 0) return res.status(404).json({ error: 'Favorite not found' });
+        const batch = db.batch();
+        refs.forEach(r => batch.delete(r));
+        await batch.commit();
         res.status(200).json({ message: 'Favorite removed' });
     } catch (error: any) {
         console.error('Remove favorite error:', error);
-        res.status(500).json({ error: 'Failed to remove favorite', message: error.message });
+        res.status(500).json({ error: 'Failed to remove favorite' });
     }
 });
 
 /**
  * @route   POST /api/clients/:id/convert-to-vendor
- * @desc    Submit request to upgrade/convert client account to vendor account
- * @access  Private (Client only)
+ * @desc    Ask to upgrade a client account to a vendor account (reviewed by an admin)
  */
-router.post('/:id/convert-to-vendor', authenticateUser, requireSelfOrAdmin('id'), async (req: Request, res: Response) => {
+router.post('/:id/convert-to-vendor', authenticateUser, requireSelfOrAdmin('id'), writeLimiter, async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { businessName, category, description, phoneNumber, address, documentUrl, documentType } = req.body;
+        const businessName = str(req.body.businessName, 100);
+        const category = str(req.body.category, 80);
+        const { documentUrl } = req.body;
 
-        if (!businessName || !category) {
+        if (businessName.length < 2 || !category) {
             return res.status(400).json({ error: 'Business name and category are required' });
+        }
+        if (documentUrl && !isOwnPrivateRef(documentUrl, 'upgrade', id) && !isOwnPrivateRef(documentUrl, 'kyc', id)) {
+            return res.status(400).json({ error: 'Please upload your business document again, then submit.' });
+        }
+
+        const userDoc = await db.collection('users').doc(id).get();
+        if (!userDoc.exists) return res.status(404).json({ error: 'User not found' });
+        const user = userDoc.data()!;
+        if (user.role === 'vendor' || user.role === 'admin') {
+            return res.status(409).json({ error: 'Your account is already a business account' });
+        }
+        if (user.hasPendingVendorConversion) {
+            return res.status(409).json({ error: 'You already have an upgrade request under review' });
         }
 
         const requestData = {
@@ -307,33 +246,28 @@ router.post('/:id/convert-to-vendor', authenticateUser, requireSelfOrAdmin('id')
             clientId: id,
             businessName,
             category,
-            description: description || '',
-            phoneNumber: phoneNumber || '',
-            address: address || '',
+            description: str(req.body.description, 2000),
+            phoneNumber: str(req.body.phoneNumber, 25),
+            address: str(req.body.address, 300),
             documentUrl: documentUrl || '',
-            documentType: documentType || 'Business Document',
+            documentType: str(req.body.documentType, 80) || 'Business Document',
             status: 'pending',
             createdAt: new Date().toISOString(),
         };
 
-        // Save in Firestore conversion_requests collection
-        await db.collection('conversion_requests').doc(requestData.id).set(requestData);
+        const batch = db.batch();
+        batch.set(db.collection('conversion_requests').doc(requestData.id), requestData);
+        batch.set(db.collection('users').doc(id), { hasPendingVendorConversion: true, pendingConversionId: requestData.id }, { merge: true });
+        await batch.commit();
 
-        // Update user doc with pending conversion indicator
-        try {
-            await db.collection('users').doc(id).set({
-                hasPendingVendorConversion: true,
-                pendingConversionId: requestData.id,
-            }, { merge: true });
-        } catch (_) {}
-
+        const { documentUrl: _private, ...publicRequest } = requestData;
         res.status(201).json({
             message: 'Vendor conversion request submitted! An administrator will review your application.',
-            request: requestData,
+            request: publicRequest,
         });
     } catch (error: any) {
         console.error('Convert to vendor error:', error);
-        res.status(500).json({ error: 'Failed to submit conversion request', message: error.message });
+        res.status(500).json({ error: 'Failed to submit conversion request' });
     }
 });
 

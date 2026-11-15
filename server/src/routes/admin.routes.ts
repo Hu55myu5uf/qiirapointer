@@ -1,1051 +1,536 @@
 import { Router, Request, Response } from 'express';
 import { auth, db } from '../config/firebase';
-import supabase from '../config/supabase';
 import { notifyVendorApproval } from '../utils/pushNotifications';
-import { authenticateUser, requireAdmin } from '../utils/authMiddleware';
+import { authenticateUser, requireAdmin, MASTER_ADMIN_UID, SUPPORT_UID } from '../utils/authMiddleware';
+import { signedUrlFor } from '../utils/fileStorage';
+import { clearProfileCache, getDisplayProfiles, usableImage } from '../utils/profiles';
+import { invalidateVendorList } from '../utils/vendors';
+import { deleteAccountData } from '../utils/accountDeletion';
+import { authLimiter } from '../utils/rateLimiter';
 
 const router = Router();
 
-// SAST Security Hardening: Enforce authentication and administrative verification on ALL admin routes
+// Every admin route requires a logged-in administrator
 router.use(authenticateUser, requireAdmin);
 
-// Helper mapper to convert database snake_case to client camelCase
-function mapVendor(v: any) {
-    if (!v) return null;
+const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Admins may not act on themselves, the root admin, or the Support identity through these routes. */
+function protectedTarget(req: Request, targetUid: string): string | null {
+    if (targetUid === req.user!.uid) return 'You cannot do this to your own account.';
+    if (targetUid === MASTER_ADMIN_UID) return 'The root administrator account is protected.';
+    if (targetUid === SUPPORT_UID) return 'The Support identity is protected.';
+    return null;
+}
+
+/** Turn a stored verification document into what the dashboard shows, with a short-lived link. */
+async function presentDocument(doc: any) {
+    if (!doc) return null;
+    const ref = doc.ref || doc.url || doc.documentUrl;
     return {
-        id: v.uid,
-        uid: v.uid,
-        businessName: v.business_name,
-        category: v.category,
-        description: v.description,
-        address: v.address,
-        services: v.services,
-        businessImage: v.business_image,
-        bannerImage: v.banner_image,
-        businessHours: v.business_hours,
-        verificationStatus: v.verification_status,
-        isActive: v.is_active,
-        documents: v.documents || [],
-        paymentStatus: v.payment_status,
-        paymentReference: v.payment_reference,
-        paymentAmount: v.payment_amount,
-        paidAt: v.paid_at,
-        averageRating: Number(v.average_rating || 0),
-        totalReviews: Number(v.total_reviews || 0),
-        rejectionReason: v.rejection_reason,
-        verifiedAt: v.verified_at,
-        createdAt: v.created_at,
-        updatedAt: v.updated_at,
-        userInfo: v.users ? {
-            uid: v.users.uid,
-            email: v.users.email,
-            fullName: v.users.full_name,
-            phoneNumber: v.users.phone_number,
-            role: v.users.role,
-            isVerified: v.users.is_verified,
-            profileImage: v.users.profile_image,
-            isSuspended: v.users.is_suspended,
-            createdAt: v.users.created_at
-        } : null
+        documentType: doc.type || doc.documentType || 'Identity Document',
+        documentName: doc.name || doc.documentName || 'Document',
+        documentFileType: doc.fileType || doc.documentFileType || 'image/jpeg',
+        documentUrl: await signedUrlFor(ref), // private files: valid for 15 minutes
+        notes: doc.notes || '',
+        submittedAt: doc.submittedAt || null,
     };
 }
 
-// Helper mapper for users
-function mapUser(u: any) {
-    if (!u) return null;
-    const vendorInfo = Array.isArray(u.vendors) ? u.vendors[0] : (u.vendors || null);
-    const businessName = vendorInfo?.business_name || u.business_name || u.businessName || null;
-    const fullName = u.full_name || u.fullName || u.displayName || businessName || (u.email ? u.email.split('@')[0] : 'User');
-
+function mapUser(id: string, u: any, v: any = null) {
     return {
-        uid: u.uid || u.id,
-        id: u.uid || u.id,
+        uid: id,
+        id,
         email: u.email || '',
-        fullName: fullName,
-        full_name: fullName,
-        businessName: businessName,
-        phoneNumber: u.phone_number || u.phoneNumber || null,
-        phone_number: u.phone_number || u.phoneNumber || null,
-        role: u.role || 'client',
-        isVerified: u.is_verified ?? u.isVerified ?? false,
-        isSuspended: u.is_suspended ?? u.isSuspended ?? false,
-        suspendedAt: u.suspended_at || u.suspendedAt || null,
-        pushToken: u.push_token || u.pushToken || null,
-        profileImage: u.profile_image || u.profileImage || null,
-        createdAt: u.created_at || u.createdAt || new Date().toISOString(),
-        updatedAt: u.updated_at || u.updatedAt || null
+        fullName: u.fullName || v?.businessName || 'User',
+        full_name: u.fullName || v?.businessName || 'User',
+        businessName: v?.businessName || null,
+        phoneNumber: u.phoneNumber || null,
+        phone_number: u.phoneNumber || null,
+        role: id === MASTER_ADMIN_UID ? 'admin' : (u.role || 'client'),
+        isVerified: Boolean(v ? v.isVerified : u.isVerified),
+        isSuspended: Boolean(u.isSuspended),
+        suspendedAt: u.suspendedAt || null,
+        vendorStatus: v?.verificationStatus || null,
+        profileImage: usableImage(u.profileImage) || usableImage(v?.businessImage) || null,
+        createdAt: u.createdAt || null,
+        updatedAt: u.updatedAt || null,
     };
 }
 
 /**
  * @route   GET /api/admin/vendors/pending
- * @desc    Get all accounts (vendors and clients) pending verification / badge approval
- * @access  Private (Admin only)
+ * @desc    Everything awaiting review: new vendor stores and identity-verification requests
  */
-router.get('/vendors/pending', async (req: Request, res: Response) => {
+router.get('/vendors/pending', async (_req: Request, res: Response) => {
     try {
-        const rawPendingList: any[] = [];
-        const seenIds = new Set<string>();
+        const [newStores, vendorRequests, clientRequests] = await Promise.all([
+            db.collection('vendors').where('verificationStatus', '==', 'pending').get(),
+            db.collection('vendors').where('verificationRequest', '==', 'pending').get(),
+            db.collection('users').where('verificationRequest', '==', 'pending').get(),
+        ]);
 
-        // 1. Fetch from Supabase vendors where verification_status == 'pending'
-        try {
-            const { data: sbVendors } = await supabase
-                .from('vendors')
-                .select('*, users(*)')
-                .eq('verification_status', 'pending');
+        const items = new Map<string, { id: string; v: any | null; u: any | null }>();
+        for (const d of [...newStores.docs, ...vendorRequests.docs]) items.set(d.id, { id: d.id, v: d.data(), u: null });
+        for (const d of clientRequests.docs) if (!items.has(d.id)) items.set(d.id, { id: d.id, v: null, u: d.data() });
 
-            (sbVendors || []).forEach((v: any) => {
-                const mapped = mapVendor(v);
-                if (mapped && mapped.id && !seenIds.has(mapped.id)) {
-                    seenIds.add(mapped.id);
-                    rawPendingList.push(mapped);
-                }
-            });
-        } catch (sbErr: any) {
-            console.warn('Supabase pending vendors query note:', sbErr.message);
-        }
+        // Load the missing user profiles
+        await Promise.all([...items.values()].filter(i => !i.u).map(async i => {
+            const doc = await db.collection('users').doc(i.id).get();
+            i.u = doc.exists ? doc.data() : {};
+        }));
 
-        // 2. Fetch from Supabase users where verification_status == 'pending'
-        try {
-            const { data: sbUsers } = await supabase
-                .from('users')
-                .select('*, vendors(*)')
-                .eq('verification_status', 'pending');
-
-            (sbUsers || []).forEach((u: any) => {
-                const id = u.uid || u.id;
-                if (id && !seenIds.has(id)) {
-                    seenIds.add(id);
-                    const vendorInfo = Array.isArray(u.vendors) ? u.vendors[0] : (u.vendors || null);
-                    rawPendingList.push({
-                        id: id,
+        const vendors = await Promise.all([...items.values()]
+            .filter(i => !i.u?.isSuspended)
+            .map(async ({ id, v, u }) => {
+                const isClientRequest = !v;
+                const src = v || u;
+                return {
+                    id,
+                    uid: id,
+                    requestType: isClientRequest ? 'client-verification' : (v.verificationStatus === 'pending' ? 'new-store' : 'vendor-verification'),
+                    businessName: v?.businessName || u.fullName || 'User',
+                    category: isClientRequest ? 'Client verification request' : (v.category || 'Vendor'),
+                    description: v?.description || '',
+                    address: v?.address || '',
+                    services: v?.services || [],
+                    verificationStatus: v?.verificationStatus || 'pending',
+                    verificationRequest: src.verificationRequest || null,
+                    isVerified: Boolean(src.isVerified),
+                    verificationDocument: await presentDocument(src.verificationDocument),
+                    createdAt: src.verificationDocument?.submittedAt || src.createdAt || null,
+                    userInfo: {
                         uid: id,
-                        businessName: vendorInfo?.business_name || u.business_name || u.full_name || u.email,
-                        category: u.role === 'vendor' ? (vendorInfo?.category || 'Vendor Verification') : 'Client Badge Request',
-                        description: `QIIRA Verified Badge application (${u.role?.toUpperCase()}). Payment Reference: ${u.payment_reference || 'BADGE_DIRECT'}`,
-                        address: u.address || 'N/A',
-                        services: 'Verified Badge Subscription (₦3,000)',
-                        verificationStatus: 'pending',
-                        isActive: false,
-                        paymentReference: u.payment_reference || null,
-                        paymentAmount: 3000,
-                        averageRating: 0,
-                        totalReviews: 0,
-                        createdAt: u.created_at || new Date().toISOString(),
-                        userInfo: {
-                            uid: id,
-                            email: u.email,
-                            fullName: u.full_name || u.displayName || 'User',
-                            phoneNumber: u.phone_number,
-                            role: u.role || 'client',
-                            isVerified: false,
-                        }
-                    });
-                }
-            });
-        } catch (sbErr: any) {
-            console.warn('Supabase pending users query note:', sbErr.message);
-        }
+                        email: u.email || '',
+                        fullName: u.fullName || 'User',
+                        phoneNumber: u.phoneNumber || v?.phoneNumber || '',
+                        role: u.role || (v ? 'vendor' : 'client'),
+                        isVerified: Boolean(src.isVerified),
+                    },
+                };
+            }));
 
-        // 3. Fetch from Firestore vendors collection where verificationStatus == 'pending'
-        try {
-            const fsVendorsSnap = await db.collection('vendors').where('verificationStatus', '==', 'pending').get();
-            for (const doc of fsVendorsSnap.docs) {
-                const id = doc.id;
-                if (!seenIds.has(id)) {
-                    seenIds.add(id);
-                    const data = doc.data();
-                    let userDocData: any = null;
-                    try {
-                        const uDoc = await db.collection('users').doc(id).get();
-                        userDocData = uDoc.data();
-                    } catch (_) {}
-
-                    rawPendingList.push({
-                        id: id,
-                        uid: id,
-                        businessName: data.businessName || data.business_name || userDocData?.businessName || userDocData?.fullName || 'Vendor',
-                        category: data.category || 'Vendor Verification',
-                        description: data.description || 'Pending approval for verified status',
-                        address: data.address || 'N/A',
-                        services: data.services || 'Verified Badge (₦3,000)',
-                        verificationStatus: 'pending',
-                        isActive: false,
-                        averageRating: Number(data.averageRating || 0),
-                        totalReviews: Number(data.totalReviews || 0),
-                        paymentReference: data.lastBadgePayment?.paymentReference || data.paymentReference || null,
-                        paymentAmount: data.lastBadgePayment?.amount || 3000,
-                        verificationDocument: data.verificationDocument || data.verification_document || userDocData?.verificationDocument || userDocData?.verification_document || null,
-                        createdAt: data.createdAt || new Date().toISOString(),
-                        userInfo: {
-                            uid: id,
-                            email: userDocData?.email || data.email || 'N/A',
-                            fullName: userDocData?.fullName || data.fullName || 'N/A',
-                            phoneNumber: userDocData?.phoneNumber || data.phoneNumber || 'N/A',
-                            role: userDocData?.role || 'vendor',
-                            isVerified: false,
-                        }
-                    });
-                }
-            }
-        } catch (fsErr: any) {
-            console.warn('Firestore pending vendors note:', fsErr.message);
-        }
-
-        // 4. Fetch from Firestore users collection where verificationStatus == 'pending'
-        try {
-            const fsUsersSnap = await db.collection('users').where('verificationStatus', '==', 'pending').get();
-            for (const doc of fsUsersSnap.docs) {
-                const id = doc.id;
-                if (!seenIds.has(id)) {
-                    seenIds.add(id);
-                    const data = doc.data();
-                    rawPendingList.push({
-                        id: id,
-                        uid: id,
-                        businessName: data.businessName || data.fullName || data.email || 'User',
-                        category: data.role === 'vendor' ? 'Vendor Verification' : 'Client Badge Request',
-                        description: `Verified Badge Request (${(data.role || 'client').toUpperCase()}). Payment Ref: ${data.lastBadgePayment?.paymentReference || 'N/A'}`,
-                        address: data.address || 'N/A',
-                        services: 'Verified Badge Subscription (₦3,000)',
-                        verificationStatus: 'pending',
-                        isActive: false,
-                        averageRating: 0,
-                        totalReviews: 0,
-                        paymentReference: data.lastBadgePayment?.paymentReference || null,
-                        paymentAmount: data.lastBadgePayment?.amount || 3000,
-                        verificationDocument: data.verificationDocument || data.verification_document || null,
-                        createdAt: data.createdAt || new Date().toISOString(),
-                        userInfo: {
-                            uid: id,
-                            email: data.email || 'N/A',
-                            fullName: data.fullName || data.displayName || 'User',
-                            phoneNumber: data.phoneNumber || 'N/A',
-                            role: data.role || 'client',
-                            isVerified: false,
-                        }
-                    });
-                }
-            }
-        } catch (fsErr: any) {
-            console.warn('Firestore pending users note:', fsErr.message);
-        }
-
-        // Cross-verify each candidate to make sure it is not already approved or rejected
-        const filteredList: any[] = [];
-        for (const item of rawPendingList) {
-            const id = item.id || item.uid;
-            if (!id) continue;
-
-            let isAlreadyApprovedOrRejected = false;
-
-            // Check Firestore vendor & user doc
-            try {
-                const [fVendorDoc, fUserDoc] = await Promise.all([
-                    db.collection('vendors').doc(id).get().catch(() => null),
-                    db.collection('users').doc(id).get().catch(() => null),
-                ]);
-                const fVendorData = fVendorDoc?.data();
-                const fUserData = fUserDoc?.data();
-
-                const fvStatus = fVendorData?.verificationStatus || fVendorData?.verification_status;
-                const fuStatus = fUserData?.verificationStatus || fUserData?.verification_status;
-
-                if (fvStatus === 'approved' || fuStatus === 'approved') {
-                    isAlreadyApprovedOrRejected = true;
-                    // Auto-heal Supabase if out of sync
-                    try {
-                        await supabase.from('vendors').update({ verification_status: 'approved', is_active: true }).eq('uid', id);
-                    } catch (_) {}
-                } else if (fvStatus === 'rejected' || fuStatus === 'rejected') {
-                    isAlreadyApprovedOrRejected = true;
-                }
-            } catch (_) {}
-
-            // Also check Supabase vendor doc directly
-            if (!isAlreadyApprovedOrRejected) {
-                try {
-                    const { data: sbV } = await supabase.from('vendors').select('verification_status').eq('uid', id).maybeSingle();
-                    if (sbV?.verification_status === 'approved' || sbV?.verification_status === 'rejected') {
-                        isAlreadyApprovedOrRejected = true;
-                    }
-                } catch (_) {}
-            }
-
-            if (!isAlreadyApprovedOrRejected) {
-                filteredList.push(item);
-            }
-        }
-
-        res.status(200).json({ vendors: filteredList, count: filteredList.length });
+        vendors.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+        res.status(200).json({ vendors, count: vendors.length });
     } catch (error: any) {
         console.error('Get pending vendors error:', error);
-        res.status(500).json({ error: 'Failed to retrieve pending verifications', message: error.message });
+        res.status(500).json({ error: 'Failed to retrieve pending verifications' });
     }
 });
 
 /**
  * @route   PUT /api/admin/vendors/:id/verify
- * @desc    Approve or reject vendor or client verification
- * @access  Private (Admin only)
+ * @desc    Approve / reject. For vendors this lists (or rejects) the store and grants (or refuses)
+ *          the identity-verified badge. For clients it grants or refuses the badge.
  */
 router.put('/vendors/:id/verify', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { status, rejectionReason, grantBadge } = req.body; // status: 'approved' or 'rejected'
-
+        const { status } = req.body;
         if (!['approved', 'rejected'].includes(status)) {
             return res.status(400).json({ error: 'Invalid status. Must be approved or rejected.' });
         }
+        const rejectionReason = str(req.body.rejectionReason, 500) || 'Your application did not meet our verification requirements.';
+        const approved = status === 'approved';
+        const now = new Date().toISOString();
 
-        const isApproved = status === 'approved';
-        const now = new Date();
-        const shouldGrantBadge = Boolean(grantBadge === true);
-        const expiresAt = shouldGrantBadge ? new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString() : null;
+        const [vDoc, uDoc] = await Promise.all([db.collection('vendors').doc(id).get(), db.collection('users').doc(id).get()]);
+        if (!uDoc.exists) return res.status(404).json({ error: 'User not found' });
+        const user = uDoc.data()!;
+        const isVendor = vDoc.exists && user.role === 'vendor';
 
-        const updateData: any = {
-            verification_status: status,
-            is_active: isApproved,
-            verified_at: isApproved ? now.toISOString() : null,
-            rejection_reason: isApproved ? null : (rejectionReason || 'Application rejected by administration'),
-            updated_at: now.toISOString(),
-        };
-
-        if (isApproved) {
-            updateData.is_verified = true;
-            updateData.isVerified = true;
-            updateData.badge_subscribed_at = now.toISOString();
-            updateData.badge_expires_at = expiresAt || new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
+        if (isVendor) {
+            const v = vDoc.data()!;
+            const update: Record<string, any> = { verificationRequest: null, updatedAt: now };
+            if (approved) {
+                Object.assign(update, { verificationStatus: 'approved', isVerified: true, verifiedAt: now, rejectionReason: null });
+            } else {
+                // Rejecting the badge never unlists an already-approved store
+                if (v.verificationStatus !== 'approved') update.verificationStatus = 'rejected';
+                Object.assign(update, { isVerified: false, rejectionReason });
+            }
+            await db.collection('vendors').doc(id).set(update, { merge: true });
         } else {
-            updateData.is_verified = false;
-            updateData.isVerified = false;
+            await db.collection('users').doc(id).set({
+                verificationRequest: null,
+                isVerified: approved,
+                verifiedAt: approved ? now : null,
+                rejectionReason: approved ? null : rejectionReason,
+                updatedAt: now,
+            }, { merge: true });
+        }
+        invalidateVendorList();
+        clearProfileCache(id);
+
+        if (user.pushToken) {
+            const name = (vDoc.exists && vDoc.data()!.businessName) || user.fullName || 'Your account';
+            notifyVendorApproval(user.pushToken, status, name, approved ? undefined : rejectionReason).catch(() => {});
         }
 
-        // 1. Update Supabase vendors table
-        try {
-            await supabase
-                .from('vendors')
-                .update(updateData)
-                .eq('uid', id);
-        } catch (sbErr: any) {
-            console.warn('Supabase vendor verify update note:', sbErr.message);
-        }
-
-        // 2. Update Supabase users table
-        try {
-            const userSbUpdate: any = {
-                verification_status: status,
-                is_verified: isApproved,
-                updated_at: now.toISOString(),
-            };
-            if (isApproved) {
-                userSbUpdate.badge_subscribed_at = now.toISOString();
-                userSbUpdate.badge_expires_at = expiresAt || new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
-            }
-
-            await supabase
-                .from('users')
-                .update(userSbUpdate)
-                .eq('uid', id);
-        } catch (sbErr: any) {
-            console.warn('Supabase user verify update note:', sbErr.message);
-        }
-
-        // 3. Update Firestore vendors collection (by direct doc ID and where uid == id)
-        try {
-            const vendorUpdate: any = {
-                verificationStatus: status,
-                verification_status: status,
-                isActive: isApproved,
-                is_active: isApproved,
-                isVerified: isApproved,
-                is_verified: isApproved,
-                verifiedAt: isApproved ? now.toISOString() : null,
-                rejectionReason: isApproved ? null : (rejectionReason || 'Application rejected by administration'),
-                updatedAt: now.toISOString(),
-            };
-
-            if (isApproved) {
-                vendorUpdate.badgeSubscribedAt = now.toISOString();
-                vendorUpdate.badgeExpiresAt = expiresAt || new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
-            }
-
-            await db.collection('vendors').doc(id).set(vendorUpdate, { merge: true });
-
-            const vByUid = await db.collection('vendors').where('uid', '==', id).get().catch(() => null);
-            if (vByUid && !vByUid.empty) {
-                for (const doc of vByUid.docs) {
-                    await doc.ref.set(vendorUpdate, { merge: true });
-                }
-            }
-        } catch (fsErr: any) {
-            console.warn('Firestore vendor verify note:', fsErr.message);
-        }
-
-        // 4. Update Firestore users collection (by direct doc ID and where uid == id)
-        try {
-            const userUpdate: any = {
-                verificationStatus: status,
-                verification_status: status,
-                isVerified: isApproved,
-                is_verified: isApproved,
-                updatedAt: now.toISOString(),
-            };
-
-            if (isApproved) {
-                userUpdate.badgeSubscribedAt = now.toISOString();
-                userUpdate.badgeExpiresAt = expiresAt || new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString();
-            }
-
-            await db.collection('users').doc(id).set(userUpdate, { merge: true });
-
-            const uByUid = await db.collection('users').where('uid', '==', id).get().catch(() => null);
-            if (uByUid && !uByUid.empty) {
-                for (const doc of uByUid.docs) {
-                    await doc.ref.set(userUpdate, { merge: true });
-                }
-            }
-        } catch (fsErr: any) {
-            console.warn('Firestore user verify note:', fsErr.message);
-        }
-
-        // 5. Send push notification if token exists
-        try {
-            const { data: userDoc } = await supabase.from('users').select('*').eq('uid', id).single();
-            const { data: vendorDoc } = await supabase.from('vendors').select('*').eq('uid', id).single();
-            
-            const pushToken = userDoc?.push_token;
-            const businessName = vendorDoc?.business_name || userDoc?.full_name || 'Your account';
-
-            if (pushToken) {
-                await notifyVendorApproval(pushToken, status, businessName, rejectionReason);
-            }
-        } catch (notifError) {
-            console.error('Error sending notification (non-blocking):', notifError);
-        }
-
-        res.status(200).json({
-            message: `Account ${status} successfully`,
-            isVerified: shouldGrantBadge,
-            status,
-        });
+        res.status(200).json({ message: `Account ${status} successfully`, isVerified: approved, status });
     } catch (error: any) {
         console.error('Verify vendor error:', error);
-        res.status(500).json({ error: 'Failed to update verification status', message: error.message });
+        res.status(500).json({ error: 'Failed to update verification status' });
     }
 });
 
 /**
  * @route   GET /api/admin/analytics
- * @desc    Get platform analytics
- * @access  Private (Admin only)
  */
-router.get('/analytics', async (req: Request, res: Response) => {
+router.get('/analytics', async (_req: Request, res: Response) => {
     try {
-        // Fast COUNT queries in PostgreSQL using head: true option
-        const [usersRes, vendorsRes, reviewsRes, approvedRes, pendingRes] = await Promise.all([
-            supabase.from('users').select('*', { count: 'exact', head: true }),
-            supabase.from('vendors').select('*', { count: 'exact', head: true }),
-            supabase.from('reviews').select('*', { count: 'exact', head: true }),
-            supabase.from('vendors').select('*', { count: 'exact', head: true }).eq('verification_status', 'approved'),
-            supabase.from('vendors').select('*', { count: 'exact', head: true }).eq('verification_status', 'pending')
+        const count = async (q: FirebaseFirestore.Query) => (await q.count().get()).data().count;
+        const [totalUsers, totalVendors, activeVendors, pendingVendors, totalReviews] = await Promise.all([
+            count(db.collection('users')),
+            count(db.collection('vendors')),
+            count(db.collection('vendors').where('verificationStatus', '==', 'approved')),
+            count(db.collection('vendors').where('verificationStatus', '==', 'pending')),
+            count(db.collection('reviews')),
         ]);
-
-        res.status(200).json({
-            totalUsers: usersRes.count || 0,
-            totalVendors: vendorsRes.count || 0,
-            activeVendors: approvedRes.count || 0,
-            pendingVendors: pendingRes.count || 0,
-            totalReviews: reviewsRes.count || 0,
-        });
+        res.status(200).json({ totalUsers, totalVendors, activeVendors, pendingVendors, totalReviews });
     } catch (error: any) {
         console.error('Get analytics error:', error);
-        res.status(500).json({ error: 'Failed to retrieve analytics', message: error.message });
+        res.status(500).json({ error: 'Failed to retrieve analytics' });
     }
 });
 
 /**
  * @route   DELETE /api/admin/users/:id
- * @desc    Delete a user
- * @access  Private (Admin only)
+ * @desc    Permanently delete a user and all their data
  */
 router.delete('/users/:id', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
+        const blocked = protectedTarget(req, id);
+        if (blocked) return res.status(403).json({ error: blocked });
 
-        // Cascade delete defined in DB schema handles deletes of corresponding vendor, reviews, favorites, chat rows
-        const { error } = await supabase
-            .from('users')
-            .delete()
-            .eq('uid', id);
-
-        if (error) throw error;
-
-        // Delete from Firebase Auth as well
-        try {
-            await auth.deleteUser(id);
-        } catch (firebaseErr) {
-            console.warn('User deleted from DB, but failed to delete from Firebase Auth (non-blocking):', firebaseErr);
+        const target = await db.collection('users').doc(id).get();
+        if (target.exists && target.data()!.role === 'admin' && req.user!.uid !== MASTER_ADMIN_UID) {
+            return res.status(403).json({ error: 'Only the root administrator can delete another administrator.' });
         }
 
+        const result = await deleteAccountData(id);
+        console.log(`🗑️ Admin ${req.user!.uid} deleted user ${id} (${result.deletedDocuments} documents)`);
         res.status(200).json({ message: 'User deleted successfully' });
     } catch (error: any) {
         console.error('Delete user error:', error);
-        res.status(500).json({ error: 'Failed to delete user', message: error.message });
+        res.status(500).json({ error: 'Failed to delete user' });
     }
 });
 
 /**
  * @route   POST /api/admin/vendors/create
- * @desc    Admin creates a new vendor account
- * @access  Private (Admin only)
+ * @desc    Admin creates a vendor account (store is listed immediately)
  */
-router.post('/vendors/create', async (req: Request, res: Response) => {
+router.post('/vendors/create', authLimiter, async (req: Request, res: Response) => {
     try {
-        const { email, password, fullName, businessName, category, description, address, services, phoneNumber } = req.body;
+        const email = str(req.body.email, 200);
+        const password = typeof req.body.password === 'string' ? req.body.password : '';
+        const fullName = str(req.body.fullName, 100);
+        const businessName = str(req.body.businessName, 100);
+        const category = str(req.body.category, 80);
+        const phoneNumber = str(req.body.phoneNumber, 25);
 
-        // Validation
-        if (!email || !password || !fullName || !businessName || !category) {
-            return res.status(400).json({ error: 'Missing required fields' });
+        if (!EMAIL_RE.test(email) || !fullName || !businessName || !category) {
+            return res.status(400).json({ error: 'Valid email, full name, business name and category are required' });
+        }
+        if (password.length < 8) {
+            return res.status(400).json({ error: 'Password must be at least 8 characters long' });
         }
 
-        // Create user in Firebase Auth
-        const userProperties: any = {
-            email,
-            password,
-            displayName: fullName,
-        };
-
-        if (phoneNumber && phoneNumber.trim() !== '') {
-            userProperties.phoneNumber = phoneNumber;
-        }
-
-        const userRecord = await auth.createUser(userProperties);
-
-        // Create user profile in Supabase
-        const { error: userError } = await supabase.from('users').insert({
-            uid: userRecord.uid,
-            email,
-            full_name: fullName,
-            phone_number: phoneNumber || null,
-            role: 'vendor',
-            is_verified: false,
+        const record = await auth.createUser({ email, password, displayName: fullName });
+        const now = new Date().toISOString();
+        const batch = db.batch();
+        batch.set(db.collection('users').doc(record.uid), {
+            uid: record.uid, email, fullName, phoneNumber: phoneNumber || null,
+            role: 'vendor', isVerified: false, isSuspended: false, createdAt: now, updatedAt: now,
         });
-
-        if (userError) throw userError;
-
-        // Create vendor profile in Supabase
-        const { error: vendorError } = await supabase.from('vendors').insert({
-            uid: userRecord.uid,
-            business_name: businessName,
+        batch.set(db.collection('vendors').doc(record.uid), {
+            uid: record.uid,
+            businessName,
             category,
-            description: description || '',
-            address: address || '',
-            services: services || '',
+            description: str(req.body.description, 2000),
+            address: str(req.body.address, 300),
+            services: Array.isArray(req.body.services) ? req.body.services.slice(0, 30).map((s: any) => String(s).slice(0, 80)) : [],
+            phoneNumber: phoneNumber || null,
+            verificationStatus: 'approved',
+            isVerified: false,
             location: null,
-            verification_status: 'pending',
-            is_active: false,
-            documents: [],
-            payment_status: 'unpaid',
+            averageRating: 0, totalReviews: 0, ratingSum: 0,
+            createdAt: now, updatedAt: now,
         });
+        await batch.commit();
+        invalidateVendorList();
 
-        if (vendorError) throw vendorError;
-
-        res.status(201).json({
-            message: 'Vendor created successfully',
-            vendor: {
-                uid: userRecord.uid,
-                email,
-                businessName,
-                category,
-            },
-        });
+        res.status(201).json({ message: 'Vendor created successfully', vendor: { uid: record.uid, email, businessName, category } });
     } catch (error: any) {
+        if (error?.code === 'auth/email-already-exists') return res.status(409).json({ error: 'An account with this email already exists' });
         console.error('Create vendor error:', error);
-        res.status(500).json({ error: 'Failed to create vendor', message: error.message });
+        res.status(500).json({ error: 'Failed to create vendor' });
     }
 });
 
 /**
  * @route   GET /api/admin/users
- * @desc    Get all users
- * @access  Private (Admin only)
  */
-router.get('/users', async (req: Request, res: Response) => {
+router.get('/users', async (_req: Request, res: Response) => {
     try {
-        let dbUsers: any[] = [];
-
-        // 1. Try Supabase
-        try {
-            const { data: users, error } = await supabase
-                .from('users')
-                .select('*, vendors(*)')
-                .order('created_at', { ascending: false });
-
-            if (!error && users) {
-                dbUsers = users;
-            }
-        } catch (e: any) {
-            console.warn('Supabase get users error:', e.message);
-        }
-
-        // 2. Try Firestore fallback / merge
-        try {
-            const firestoreUsers = await db.collection('users').get();
-            const firestoreMap = new Map();
-            firestoreUsers.docs.forEach((doc: any) => {
-                firestoreMap.set(doc.id, doc.data());
-            });
-
-            if (dbUsers.length === 0) {
-                firestoreUsers.docs.forEach((doc: any) => {
-                    const d = doc.data();
-                    const isVerified = d.isVerified ?? d.is_verified ?? (d.role === 'admin');
-                    dbUsers.push({
-                        uid: doc.id,
-                        email: d.email,
-                        full_name: d.fullName || d.full_name || d.displayName,
-                        phone_number: d.phoneNumber || d.phone_number,
-                        role: d.role || 'client',
-                        is_verified: Boolean(isVerified),
-                        isVerified: Boolean(isVerified),
-                        is_suspended: Boolean(d.isSuspended ?? d.is_suspended ?? false),
-                        isSuspended: Boolean(d.isSuspended ?? d.is_suspended ?? false),
-                        profile_image: d.profileImage || d.profile_image,
-                        created_at: d.createdAt || d.created_at || new Date().toISOString(),
-                    });
-                });
-            } else {
-                dbUsers = dbUsers.map(u => {
-                    const fData = firestoreMap.get(u.uid);
-                    if (fData) {
-                        const isVerified = fData.isVerified ?? fData.is_verified ?? u.is_verified ?? (u.role === 'admin');
-                        return {
-                            ...u,
-                            full_name: u.full_name || fData.fullName || fData.full_name || fData.displayName,
-                            phone_number: u.phone_number || fData.phoneNumber || fData.phone_number,
-                            profile_image: u.profile_image || fData.profileImage || fData.profile_image,
-                            is_verified: Boolean(isVerified),
-                            isVerified: Boolean(isVerified),
-                            is_suspended: Boolean(fData.isSuspended ?? fData.is_suspended ?? u.is_suspended ?? false),
-                            isSuspended: Boolean(fData.isSuspended ?? fData.is_suspended ?? u.is_suspended ?? false),
-                        };
-                    }
-                    return u;
-                });
-            }
-        } catch (e: any) {
-            console.warn('Firestore get users error:', e.message);
-        }
-
-        // 3. Fallback to Firebase Auth user display names
-        try {
-            const listUsersResult = await auth.listUsers(100);
-            const authMap = new Map();
-            listUsersResult.users.forEach((u: any) => {
-                authMap.set(u.uid, u);
-            });
-
-            dbUsers = dbUsers.map(u => {
-                const aUser = authMap.get(u.uid);
-                const vendorInfo = Array.isArray(u.vendors) ? u.vendors[0] : (u.vendors || null);
-                const businessName = vendorInfo?.business_name || u.business_name;
-                const fullName = u.full_name || u.fullName || aUser?.displayName || businessName || (u.email ? u.email.split('@')[0] : 'User');
-                return {
-                    ...u,
-                    full_name: fullName,
-                    fullName: fullName,
-                    businessName: businessName || null,
-                    email: u.email || aUser?.email || '',
-                    phoneNumber: u.phone_number || u.phoneNumber || aUser?.phoneNumber || null,
-                };
-            });
-        } catch (e: any) {
-            console.warn('Firebase Auth list users error:', e.message);
-        }
-
-        const mappedUsers = (dbUsers || []).map(mapUser).filter(Boolean);
-
-        res.status(200).json({ users: mappedUsers, count: mappedUsers.length });
+        const [usersSnap, vendorsSnap] = await Promise.all([
+            db.collection('users').limit(2000).get(),
+            db.collection('vendors').limit(2000).get(),
+        ]);
+        const vendors = new Map(vendorsSnap.docs.map(d => [d.id, d.data()]));
+        const users = usersSnap.docs
+            .filter(d => d.id !== SUPPORT_UID)
+            .map(d => mapUser(d.id, d.data(), d.data().role === 'vendor' ? vendors.get(d.id) : null))
+            .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+        res.status(200).json({ users, count: users.length });
     } catch (error: any) {
         console.error('Get users error:', error);
-        res.status(500).json({ error: 'Failed to retrieve users', message: error.message });
+        res.status(500).json({ error: 'Failed to retrieve users' });
     }
 });
 
 /**
  * @route   GET /api/admin/reviews
- * @desc    Get all reviews across all vendors
- * @access  Private (Admin only)
  */
-router.get('/reviews', async (req: Request, res: Response) => {
+router.get('/reviews', async (_req: Request, res: Response) => {
     try {
-        const { data: rawReviews, error } = await supabase
-            .from('reviews')
-            .select('*')
-            .order('created_at', { ascending: false });
+        const snap = await db.collection('reviews').limit(1000).get();
+        const raw = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }))
+            .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+        const people = await getDisplayProfiles(raw.flatMap(r => [r.vendorId, r.clientId]));
 
-        if (error) throw error;
-
-        const reviews = rawReviews || [];
-        let vendorMap = new Map<string, { name: string; isVerified: boolean }>();
-        let userMap = new Map<string, { name: string; isVerified: boolean; isAdmin: boolean }>();
-
-        if (reviews.length > 0) {
-            const vendorIds = Array.from(new Set(reviews.map((r: any) => r.vendor_id).filter(Boolean)));
-            const clientIds = Array.from(new Set(reviews.map((r: any) => r.client_id).filter(Boolean)));
-
-            if (vendorIds.length > 0) {
-                const { data: vendors } = await supabase
-                    .from('vendors')
-                    .select('uid, business_name, is_verified')
-                    .in('uid', vendorIds);
-                (vendors || []).forEach((v: any) => vendorMap.set(v.uid, {
-                    name: v.business_name || 'Vendor',
-                    isVerified: Boolean(v.is_verified)
-                }));
-            }
-
-            if (clientIds.length > 0) {
-                const { data: users } = await supabase
-                    .from('users')
-                    .select('uid, full_name, email, is_verified, role')
-                    .in('uid', clientIds);
-                (users || []).forEach((u: any) => userMap.set(u.uid, {
-                    name: u.full_name || u.email?.split('@')[0] || 'Anonymous',
-                    isVerified: Boolean(u.is_verified),
-                    isAdmin: u.role === 'admin'
-                }));
-            }
-        }
-
-        const mappedReviews = reviews.map((r: any) => {
-            const vendor = vendorMap.get(r.vendor_id);
-            const user = userMap.get(r.client_id);
+        const reviews = raw.map(r => {
+            const vendor = people.get(r.vendorId);
+            const client = people.get(r.clientId);
             return {
                 id: r.id,
-                rating: Number(r.rating || 0),
+                rating: Number(r.rating) || 0,
                 comment: r.comment || '',
-                vendorId: r.vendor_id,
+                vendorId: r.vendorId,
                 vendorName: vendor?.name || 'Vendor',
-                vendorIsVerified: vendor?.isVerified ?? false,
-                clientId: r.client_id,
-                clientName: user?.name || r.client_name || 'Anonymous',
-                clientIsVerified: user?.isVerified ?? false,
-                clientIsAdmin: user?.isAdmin ?? false,
-                createdAt: r.created_at,
+                vendorIsVerified: Boolean(vendor?.isVerified),
+                clientId: r.clientId,
+                clientName: client?.name || 'QIIRA user',
+                clientIsVerified: Boolean(client?.isVerified),
+                clientIsAdmin: Boolean(client?.isAdmin),
+                createdAt: r.createdAt,
             };
         });
-
-        res.status(200).json({ reviews: mappedReviews, count: mappedReviews.length });
+        res.status(200).json({ reviews, count: reviews.length });
     } catch (error: any) {
         console.error('Get admin reviews error:', error);
-        res.status(500).json({ error: 'Failed to retrieve reviews', message: error.message });
+        res.status(500).json({ error: 'Failed to retrieve reviews' });
+    }
+});
+
+/**
+ * @route   DELETE /api/admin/reviews/:vendorId/:clientId
+ * @desc    Remove an abusive review (the vendor's rating is corrected)
+ */
+router.delete('/reviews/:vendorId/:clientId', async (req: Request, res: Response) => {
+    try {
+        const { deleteReview } = await import('./client.routes');
+        const deleted = await deleteReview(req.params.vendorId, req.params.clientId);
+        if (!deleted) return res.status(404).json({ error: 'Review not found' });
+        res.status(200).json({ message: 'Review removed' });
+    } catch (error: any) {
+        console.error('Admin delete review error:', error);
+        res.status(500).json({ error: 'Failed to remove review' });
     }
 });
 
 /**
  * @route   PUT /api/admin/users/:id/suspend
- * @desc    Suspend or unsuspend a user
- * @access  Private (Admin only)
+ * @desc    Suspend (signs the user out everywhere and hides their store) or unsuspend
  */
 router.put('/users/:id/suspend', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { suspended } = req.body; // true to suspend, false to unsuspend
+        const suspended = Boolean(req.body.suspended);
+        const blocked = protectedTarget(req, id);
+        if (blocked) return res.status(403).json({ error: blocked });
 
-        const suspendedAt = suspended ? new Date().toISOString() : null;
-
-        // 1. Update Firestore users collection
-        try {
-            await db.collection('users').doc(id).set({
-                isSuspended: Boolean(suspended),
-                suspendedAt: suspendedAt,
-                updatedAt: new Date().toISOString()
-            }, { merge: true });
-        } catch (fsErr: any) {
-            console.warn('Firestore user suspend warning:', fsErr.message);
+        const doc = await db.collection('users').doc(id).get();
+        if (!doc.exists) return res.status(404).json({ error: 'User not found' });
+        if (doc.data()!.role === 'admin' && req.user!.uid !== MASTER_ADMIN_UID) {
+            return res.status(403).json({ error: 'Only the root administrator can suspend another administrator.' });
         }
 
-        // 2. Update Supabase users table
-        try {
-            await supabase
-                .from('users')
-                .update({
-                    is_suspended: Boolean(suspended),
-                    suspended_at: suspendedAt,
-                })
-                .eq('uid', id);
-        } catch (sbErr: any) {
-            console.warn('Supabase user suspend warning:', sbErr.message);
+        const now = new Date().toISOString();
+        await db.collection('users').doc(id).set({
+            isSuspended: suspended,
+            suspendedAt: suspended ? now : null,
+            suspendedBy: suspended ? req.user!.uid : null,
+            updatedAt: now,
+        }, { merge: true });
+        if (suspended) {
+            try { await auth.revokeRefreshTokens(id); } catch (_) {}
         }
+        invalidateVendorList();
+        clearProfileCache(id);
 
-        res.status(200).json({
-            message: suspended ? 'User suspended successfully' : 'User unsuspended successfully',
-            isSuspended: Boolean(suspended)
-        });
+        res.status(200).json({ message: suspended ? 'User suspended successfully' : 'User unsuspended successfully', isSuspended: suspended });
     } catch (error: any) {
         console.error('Suspend user error:', error);
-        res.status(500).json({ error: 'Failed to update user status', message: error.message });
+        res.status(500).json({ error: 'Failed to update user status' });
     }
 });
 
 /**
  * @route   PUT /api/admin/users/:id/verified
- * @desc    Admin: Grant or revoke verified badge for any user (vendor or client)
- * @access  Private (Admin only)
+ * @desc    Grant or revoke the verified badge directly
  */
 router.put('/users/:id/verified', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { isVerified } = req.body; // true to grant, false to revoke
-
+        const { isVerified } = req.body;
         if (typeof isVerified !== 'boolean') {
             return res.status(400).json({ error: 'isVerified must be a boolean (true or false).' });
         }
+        const [uDoc, vDoc] = await Promise.all([db.collection('users').doc(id).get(), db.collection('vendors').doc(id).get()]);
+        if (!uDoc.exists) return res.status(404).json({ error: 'User not found' });
 
-        const now = new Date();
-        const expiresAt = isVerified ? new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString() : null;
-
-        const updateData: any = {
-            isVerified,
-            badgeSubscribedAt: isVerified ? now.toISOString() : null,
-            badgeExpiresAt: expiresAt,
-            updatedAt: now.toISOString(),
-        };
-
-        // Write to Firestore users collection
-        try {
-            await db.collection('users').doc(id).set(updateData, { merge: true });
-        } catch (fsErr: any) {
-            console.warn('Firestore user badge update warning:', fsErr.message);
-        }
-
-        // Also write to Firestore vendors collection (in case the user is a vendor)
-        try {
-            await db.collection('vendors').doc(id).set(updateData, { merge: true });
-        } catch (fsErr: any) {
-            console.warn('Firestore vendor badge update warning:', fsErr.message);
-        }
-
-        // Write to Supabase users table
-        try {
-            await supabase
-                .from('users')
-                .update({
-                    is_verified: isVerified,
-                    badge_subscribed_at: isVerified ? now.toISOString() : null,
-                    badge_expires_at: expiresAt,
-                })
-                .eq('uid', id);
-        } catch (_) {}
-
-        // Write to Supabase vendors table
-        try {
-            await supabase
-                .from('vendors')
-                .update({
-                    is_verified: isVerified,
-                    badge_subscribed_at: isVerified ? now.toISOString() : null,
-                    badge_expires_at: expiresAt,
-                })
-                .eq('uid', id);
-        } catch (_) {}
+        const now = new Date().toISOString();
+        const update = { isVerified, verifiedAt: isVerified ? now : null, verificationRequest: null, updatedAt: now };
+        const isVendor = vDoc.exists && uDoc.data()!.role === 'vendor';
+        await db.collection(isVendor ? 'vendors' : 'users').doc(id).set(update, { merge: true });
+        invalidateVendorList();
+        clearProfileCache(id);
 
         res.status(200).json({
-            message: isVerified
-                ? `Verified badge granted to user ${id}`
-                : `Verified badge revoked from user ${id}`,
+            message: isVerified ? 'Verified badge granted' : 'Verified badge revoked',
             isVerified,
-            expiresAt,
+            expiresAt: null,
         });
     } catch (error: any) {
         console.error('Admin badge update error:', error);
-        res.status(500).json({ error: 'Failed to update badge status', message: error.message });
+        res.status(500).json({ error: 'Failed to update badge status' });
     }
 });
 
 /**
  * @route   GET /api/admin/conversions/pending
- * @desc    Get pending client-to-vendor conversion requests
- * @access  Private (Admin only)
  */
-router.get('/conversions/pending', async (req: Request, res: Response) => {
+router.get('/conversions/pending', async (_req: Request, res: Response) => {
     try {
         const snap = await db.collection('conversion_requests').where('status', '==', 'pending').get();
-        const requests = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const raw = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        const users = await Promise.all(raw.map(r => db.collection('users').doc(r.clientId).get()));
+        const requests = await Promise.all(raw.map(async (r, i) => ({
+            ...r,
+            clientName: users[i].data()?.fullName || 'User',
+            clientEmail: users[i].data()?.email || '',
+            documentUrl: r.documentUrl ? await signedUrlFor(r.documentUrl) : '',
+        })));
         res.status(200).json({ requests });
     } catch (error: any) {
         console.error('Get conversion requests error:', error);
-        res.status(500).json({ error: 'Failed to fetch conversion requests', message: error.message });
+        res.status(500).json({ error: 'Failed to fetch conversion requests' });
     }
 });
 
 /**
  * @route   PUT /api/admin/conversions/:id
- * @desc    Approve or reject client-to-vendor conversion
- * @access  Private (Admin only)
+ * @desc    Approve (client becomes a listed vendor) or reject an upgrade request
  */
 router.put('/conversions/:id', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { status, notes } = req.body; // 'approved' or 'rejected'
-
-        const reqDoc = await db.collection('conversion_requests').doc(id).get();
-        if (!reqDoc.exists) {
-            return res.status(404).json({ error: 'Conversion request not found' });
+        const { status } = req.body;
+        if (!['approved', 'rejected'].includes(status)) {
+            return res.status(400).json({ error: 'Invalid status. Must be approved or rejected.' });
         }
+        const reqRef = db.collection('conversion_requests').doc(id);
+        const reqDoc = await reqRef.get();
+        if (!reqDoc.exists) return res.status(404).json({ error: 'Conversion request not found' });
+        const r = reqDoc.data()!;
+        if (r.status !== 'pending') return res.status(409).json({ error: `This request was already ${r.status}` });
 
-        const reqData = reqDoc.data()!;
-        const clientId = reqData.clientId;
         const now = new Date().toISOString();
-
-        await db.collection('conversion_requests').doc(id).set({
-            status,
-            adminNotes: notes || '',
-            resolvedAt: now,
+        const batch = db.batch();
+        batch.set(reqRef, { status, adminNotes: str(req.body.notes, 500), resolvedAt: now, resolvedBy: req.user!.uid }, { merge: true });
+        batch.set(db.collection('users').doc(r.clientId), {
+            hasPendingVendorConversion: false,
+            pendingConversionId: null,
+            ...(status === 'approved' ? { role: 'vendor', updatedAt: now } : {}),
         }, { merge: true });
-
         if (status === 'approved') {
-            // 1. Upgrade user role in Firestore users
-            await db.collection('users').doc(clientId).set({
-                role: 'vendor',
-                businessName: reqData.businessName,
-                category: reqData.category,
-                description: reqData.description,
-                phoneNumber: reqData.phoneNumber || '',
-                address: reqData.address || '',
-                hasPendingVendorConversion: false,
-                isVerified: true,
+            batch.set(db.collection('vendors').doc(r.clientId), {
+                uid: r.clientId,
+                businessName: r.businessName,
+                category: r.category,
+                description: r.description || '',
+                address: r.address || '',
+                phoneNumber: r.phoneNumber || null,
                 verificationStatus: 'approved',
-                updatedAt: now,
-            }, { merge: true });
-
-            // 2. Create/update vendor in Firestore vendors
-            await db.collection('vendors').doc(clientId).set({
-                uid: clientId,
-                id: clientId,
-                businessName: reqData.businessName,
-                business_name: reqData.businessName,
-                category: reqData.category,
-                description: reqData.description,
-                phoneNumber: reqData.phoneNumber || '',
-                address: reqData.address || '',
-                isVerified: true,
-                is_verified: true,
-                verificationStatus: 'approved',
-                verification_status: 'approved',
-                isActive: true,
-                is_active: true,
+                isVerified: false, // the identity badge is a separate (free) request
+                location: null,
+                averageRating: 0, totalReviews: 0, ratingSum: 0,
                 createdAt: now,
                 updatedAt: now,
             }, { merge: true });
-
-            // 3. Update Supabase
-            try {
-                await supabase.from('users').update({ role: 'vendor', is_verified: true, verification_status: 'approved' }).eq('uid', clientId);
-            } catch (_) {}
-            try {
-                await supabase.from('vendors').upsert({
-                    uid: clientId,
-                    business_name: reqData.businessName,
-                    category: reqData.category,
-                    description: reqData.description,
-                    phone_number: reqData.phoneNumber,
-                    address: reqData.address,
-                    is_active: true,
-                    is_verified: true,
-                    verification_status: 'approved',
-                    created_at: now,
-                });
-            } catch (_) {}
-
-            // 4. Update Firebase Auth Custom Claims if possible
-            try {
-                await auth.setCustomUserClaims(clientId, { role: 'vendor' });
-            } catch (_) {}
-        } else {
-            // Rejected
-            try {
-                await db.collection('users').doc(clientId).set({
-                    hasPendingVendorConversion: false,
-                }, { merge: true });
-            } catch (_) {}
         }
+        await batch.commit();
+        invalidateVendorList();
+        clearProfileCache(r.clientId);
 
-        res.status(200).json({
-            message: `Conversion request ${status}`,
-            status,
-        });
+        res.status(200).json({ message: `Conversion request ${status}`, status });
     } catch (error: any) {
         console.error('Resolve conversion error:', error);
-        res.status(500).json({ error: 'Failed to process conversion', message: error.message });
+        res.status(500).json({ error: 'Failed to process conversion' });
     }
 });
 
 /**
  * @route   GET /api/admin/adverts/pending
- * @desc    Get pending post/product advert requests
- * @access  Private (Admin only)
  */
-router.get('/adverts/pending', async (req: Request, res: Response) => {
+router.get('/adverts/pending', async (_req: Request, res: Response) => {
     try {
         const snap = await db.collection('advert_requests').where('status', '==', 'pending').get();
-        const adverts = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        res.status(200).json({ adverts });
+        res.status(200).json({ adverts: snap.docs.map(d => ({ id: d.id, ...d.data() })) });
     } catch (error: any) {
         console.error('Get advert requests error:', error);
-        res.status(500).json({ error: 'Failed to fetch advert requests', message: error.message });
+        res.status(500).json({ error: 'Failed to fetch advert requests' });
     }
 });
 
 /**
  * @route   PUT /api/admin/adverts/:id
- * @desc    Approve or reject advert request
- * @access  Private (Admin only)
  */
 router.put('/adverts/:id', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { status, notes } = req.body; // 'approved' or 'rejected'
-
-        const advDoc = await db.collection('advert_requests').doc(id).get();
-        if (!advDoc.exists) {
-            return res.status(404).json({ error: 'Advert request not found' });
+        const { status } = req.body;
+        if (!['approved', 'rejected'].includes(status)) {
+            return res.status(400).json({ error: 'Invalid status. Must be approved or rejected.' });
         }
+        const advRef = db.collection('advert_requests').doc(id);
+        const advDoc = await advRef.get();
+        if (!advDoc.exists) return res.status(404).json({ error: 'Advert request not found' });
+        const adv = advDoc.data()!;
 
-        const advData = advDoc.data()!;
         const now = new Date();
-        const durationDays = Number(advData.durationDays) || 7;
-        const expiresAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
-
-        await db.collection('advert_requests').doc(id).set({
+        const expiresAt = new Date(now.getTime() + (Number(adv.durationDays) || 7) * 86400000).toISOString();
+        await advRef.set({
             status,
-            adminNotes: notes || '',
+            adminNotes: str(req.body.notes, 500),
             resolvedAt: now.toISOString(),
             expiresAt: status === 'approved' ? expiresAt : null,
         }, { merge: true });
 
-        if (status === 'approved' && advData.postId) {
-            // Update the post in Firestore to make it an active advert
-            try {
-                await db.collection('posts').doc(advData.postId).set({
-                    isAdvert: true,
-                    is_advert: true,
-                    promoted: true,
-                    promotedUntil: expiresAt,
-                    boostPlan: advData.plan || 'Standard Boost',
-                }, { merge: true });
-            } catch (_) {}
+        if (status === 'approved' && adv.postId) {
+            const post = await db.collection('posts').doc(adv.postId).get();
+            if (post.exists) {
+                await post.ref.set({ promoted: true, promotedUntil: expiresAt, boostPlan: adv.plan || 'Standard Boost' }, { merge: true });
+            }
         }
-
-        res.status(200).json({
-            message: `Advert request ${status}`,
-            status,
-        });
+        res.status(200).json({ message: `Advert request ${status}`, status });
     } catch (error: any) {
         console.error('Resolve advert error:', error);
-        res.status(500).json({ error: 'Failed to process advert', message: error.message });
+        res.status(500).json({ error: 'Failed to process advert' });
     }
 });
 

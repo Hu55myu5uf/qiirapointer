@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { auth, db } from '../config/firebase';
-import supabase from '../config/supabase';
 import { authenticateUser, optionalAuthenticateUser, requireSelfOrAdmin, MASTER_ADMIN_UID, SUPPORT_UID } from '../utils/authMiddleware';
 import { authLimiter } from '../utils/rateLimiter';
+import { deleteAccountData } from '../utils/accountDeletion';
+import { clearProfileCache } from '../utils/profiles';
 
 const router = Router();
 
@@ -38,17 +39,16 @@ function toPublicProfile(user: any) {
     };
 }
 
-// Resilient user profile retriever (checks Firestore, Supabase, and Firebase Auth)
+// User profile from Firestore (falls back to the Firebase Auth record for accounts with no profile)
 async function getUserProfile(uid: string) {
     if (uid === SUPPORT_UID) {
         return {
             uid: SUPPORT_UID,
-            email: 'support@qiira.com',
             fullName: 'QIIRA Customer Support',
             displayName: 'QIIRA Customer Support',
             role: 'support',
             isVerified: true,
-            isAdmin: true,
+            isAdmin: false,
             isSupport: true,
             profileImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
         };
@@ -56,34 +56,12 @@ async function getUserProfile(uid: string) {
 
     let rawData: any = null;
 
-    // 1. Fast check in Firestore (primary working database)
-    try {
-        const userDoc = await db.collection('users').doc(uid).get();
-        if (userDoc.exists) {
-            rawData = userDoc.data();
-        }
-    } catch (e: any) {
-        console.warn('Firestore user lookup error:', e.message);
+    const userDoc = await db.collection('users').doc(uid).get();
+    if (userDoc.exists) {
+        rawData = userDoc.data();
     }
 
-    // 2. Try Supabase if available
-    if (!rawData) {
-        try {
-            const { data: userData, error } = await supabase
-                .from('users')
-                .select('*')
-                .eq('uid', uid)
-                .single();
-
-            if (!error && userData) {
-                rawData = userData;
-            }
-        } catch (e: any) {
-            // Supabase unreachable
-        }
-    }
-
-    // 3. Fallback to Firebase Auth user record
+    // Fallback to the Firebase Auth user record
     if (!rawData) {
         try {
             const fbUser = await auth.getUser(uid);
@@ -188,57 +166,43 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
         // }
 
         const userRecord = await auth.createUser(userProperties);
+        const now = new Date().toISOString();
+        const name = fullName.trim();
 
-        // Always save to Firestore
+        // Profile (and store, for vendors) are written together. If that fails, the login is
+        // removed again so no half-created account is left behind.
         try {
-            await db.collection('users').doc(userRecord.uid).set({
+            const batch = db.batch();
+            batch.set(db.collection('users').doc(userRecord.uid), {
                 uid: userRecord.uid,
-                email,
-                fullName,
-                phoneNumber: phoneNumber || null,
+                email: email.trim(),
+                fullName: name,
+                phoneNumber: phoneNumber ? phoneNumber.trim() : null,
                 role,
-                isVerified: role === 'admin',
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
+                isVerified: false,
+                isSuspended: false,
+                createdAt: now,
+                updatedAt: now,
             });
-
             if (role === 'vendor') {
-                await db.collection('vendors').doc(userRecord.uid).set({
+                batch.set(db.collection('vendors').doc(userRecord.uid), {
                     uid: userRecord.uid,
-                    verificationStatus: 'pending',
-                    isActive: false,
-                    documents: [],
-                    paymentStatus: 'unpaid',
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
+                    businessName: name,
+                    phoneNumber: phoneNumber ? phoneNumber.trim() : null,
+                    verificationStatus: 'pending', // listed after an administrator approves it
+                    isVerified: false,
+                    location: null,
+                    averageRating: 0,
+                    totalReviews: 0,
+                    ratingSum: 0,
+                    createdAt: now,
+                    updatedAt: now,
                 });
             }
+            await batch.commit();
         } catch (fsErr: any) {
-            console.warn('Firestore write warning:', fsErr.message);
-        }
-
-        // Attempt Supabase insert as well if available
-        try {
-            await supabase.from('users').insert({
-                uid: userRecord.uid,
-                email,
-                full_name: fullName,
-                phone_number: phoneNumber || null,
-                role,
-                is_verified: role === 'admin',
-            });
-
-            if (role === 'vendor') {
-                await supabase.from('vendors').insert({
-                    uid: userRecord.uid,
-                    verification_status: 'pending',
-                    is_active: false,
-                    documents: [],
-                    payment_status: 'unpaid',
-                });
-            }
-        } catch (sbErr) {
-            console.warn('Supabase write warning:', sbErr);
+            await auth.deleteUser(userRecord.uid).catch(() => {});
+            throw fsErr;
         }
 
         res.status(201).json({
@@ -276,7 +240,12 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
         }
 
         // Verify the ID token with Firebase Auth
-        const decodedToken = await auth.verifyIdToken(idToken);
+        let decodedToken;
+        try {
+            decodedToken = await auth.verifyIdToken(idToken);
+        } catch {
+            return res.status(401).json({ error: 'Invalid or expired token' });
+        }
         const uid = decodedToken.uid;
 
         // Get user profile (with automatic fallback)
@@ -299,10 +268,7 @@ router.post('/login', authLimiter, async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error('Login error:', error);
-        res.status(500).json({
-            error: 'Login failed',
-            message: error.message
-        });
+        res.status(500).json({ error: 'Login failed' });
     }
 });
 
@@ -336,7 +302,9 @@ router.post('/oauth', authLimiter, async (req: Request, res: Response) => {
             return res.status(401).json({ error: 'Invalid or expired token' });
         }
 
-        let userData = await getUserProfile(uid);
+        // Look at the stored profile directly (getUserProfile would auto-create a client profile)
+        const existingProfile = await db.collection('users').doc(uid).get();
+        let userData = existingProfile.exists ? await getUserProfile(uid) : null;
 
         if (!userData) {
             const userEmail = tokenEmail || '';
@@ -344,43 +312,35 @@ router.post('/oauth', authLimiter, async (req: Request, res: Response) => {
             const userPhoto = photoURL || tokenPicture || '';
             const userRole = ['client', 'vendor'].includes(role) ? role : 'client';
 
-            const newUserData = {
+            const now = new Date().toISOString();
+            const batch = db.batch();
+            batch.set(db.collection('users').doc(uid), {
                 uid,
                 email: userEmail,
-                fullName: userName,
-                full_name: userName,
-                profileImage: userPhoto,
-                profile_image: userPhoto,
+                fullName: String(userName).slice(0, 100),
+                profileImage: /^https:\/\//.test(userPhoto) ? userPhoto : '',
                 phoneNumber: null,
                 role: userRole,
-                isVerified: userRole === 'admin',
-                provider: provider || 'google',
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-            };
-
-            try {
-                await db.collection('users').doc(uid).set(newUserData, { merge: true });
-
-                if (userRole === 'vendor') {
-                    await db.collection('vendors').doc(uid).set({
-                        uid,
-                        businessName: userName,
-                        category: 'General',
-                        verificationStatus: 'pending',
-                        isVerified: false,
-                        isActive: true,
-                        documents: [],
-                        paymentStatus: 'unpaid',
-                        createdAt: new Date().toISOString(),
-                        updatedAt: new Date().toISOString(),
-                    }, { merge: true });
-                }
-            } catch (fsErr: any) {
-                console.warn('Firestore OAuth user write warning:', fsErr.message);
+                isVerified: false,
+                isSuspended: false,
+                provider: provider === 'apple' ? 'apple' : 'google',
+                createdAt: now,
+                updatedAt: now,
+            });
+            if (userRole === 'vendor') {
+                batch.set(db.collection('vendors').doc(uid), {
+                    uid,
+                    businessName: String(userName).slice(0, 100),
+                    verificationStatus: 'pending',
+                    isVerified: false,
+                    location: null,
+                    averageRating: 0, totalReviews: 0, ratingSum: 0,
+                    createdAt: now,
+                    updatedAt: now,
+                });
             }
-
-            userData = await getUserProfile(uid) || newUserData;
+            await batch.commit();
+            userData = await getUserProfile(uid);
         }
 
         if (userData?.isSuspended) {
@@ -396,10 +356,7 @@ router.post('/oauth', authLimiter, async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error('OAuth endpoint error:', error);
-        res.status(500).json({
-            error: 'OAuth sign-in failed',
-            message: error.message,
-        });
+        res.status(500).json({ error: 'OAuth sign-in failed' });
     }
 });
 
@@ -450,71 +407,44 @@ router.put('/user/:uid', authenticateUser, requireSelfOrAdmin('uid'), async (req
         const resolvedImage = profileImage !== undefined ? profileImage : profile_image;
         const resolvedPushToken = pushToken !== undefined ? pushToken : push_token;
 
-        // 1. Primary update in Firestore
-        const fsUpdate: any = {
-            updatedAt: new Date().toISOString()
-        };
+        const update: Record<string, any> = { updatedAt: new Date().toISOString() };
 
         if (resolvedName !== undefined) {
-            fsUpdate.fullName = resolvedName;
-            fsUpdate.full_name = resolvedName;
+            if (typeof resolvedName !== 'string' || resolvedName.trim().length < 2 || resolvedName.length > 100) {
+                return res.status(400).json({ error: 'Name must be 2–100 characters' });
+            }
+            update.fullName = resolvedName.trim();
         }
         if (resolvedPhone !== undefined) {
-            fsUpdate.phoneNumber = resolvedPhone;
-            fsUpdate.phone_number = resolvedPhone;
+            if (resolvedPhone !== null && (typeof resolvedPhone !== 'string' || resolvedPhone.length > 25 || !/^[+\d\s()-]*$/.test(resolvedPhone))) {
+                return res.status(400).json({ error: 'Invalid phone number' });
+            }
+            update.phoneNumber = resolvedPhone ? resolvedPhone.trim() : null;
         }
         if (resolvedImage !== undefined) {
-            fsUpdate.profileImage = resolvedImage;
-            fsUpdate.profile_image = resolvedImage;
+            if (resolvedImage !== null && resolvedImage !== '' && (typeof resolvedImage !== 'string' || !/^https:\/\/[^\s]+$/i.test(resolvedImage) || resolvedImage.length > 2048)) {
+                return res.status(400).json({ error: 'Invalid profile image' });
+            }
+            update.profileImage = resolvedImage || '';
         }
         if (resolvedPushToken !== undefined) {
-            fsUpdate.pushToken = resolvedPushToken;
-            fsUpdate.push_token = resolvedPushToken;
-            fsUpdate.push_token_updated_at = new Date().toISOString();
+            if (resolvedPushToken !== null && (typeof resolvedPushToken !== 'string' || !/^Expo(nent)?PushToken\[[^\]]{10,200}\]$/.test(resolvedPushToken))) {
+                return res.status(400).json({ error: 'Invalid push token' });
+            }
+            update.pushToken = resolvedPushToken;
+            update.pushTokenUpdatedAt = update.updatedAt;
         }
 
-        try {
-            await db.collection('users').doc(uid).set(fsUpdate, { merge: true });
-        } catch (fsErr: any) {
-            console.warn('Firestore user update warning:', fsErr.message);
+        await db.collection('users').doc(uid).set(update, { merge: true });
+        clearProfileCache(uid);
+
+        // Keep the Firebase Auth display name / photo in step
+        const authUpdate: Record<string, any> = {};
+        if (update.fullName) authUpdate.displayName = update.fullName;
+        if (update.profileImage) authUpdate.photoURL = update.profileImage;
+        if (Object.keys(authUpdate).length > 0) {
+            await auth.updateUser(uid, authUpdate).catch((e: any) => console.warn('Auth profile sync note:', e.message));
         }
-
-        // 2. Update Firebase Auth displayName & photoURL if applicable
-        const fbUpdate: any = {};
-        if (resolvedName) fbUpdate.displayName = resolvedName;
-        if (resolvedImage !== undefined && resolvedImage !== null) {
-            // Note: Firebase Auth photoURL accepts valid URL string
-            if (typeof resolvedImage === 'string' && (resolvedImage.startsWith('http://') || resolvedImage.startsWith('https://'))) {
-                fbUpdate.photoURL = resolvedImage;
-            }
-        }
-
-        if (Object.keys(fbUpdate).length > 0) {
-            try {
-                await auth.updateUser(uid, fbUpdate);
-            } catch (fbErr: any) {
-                console.warn('Firebase Auth updateUser warning:', fbErr.message);
-            }
-        }
-
-        // 3. Fallback/sync to Supabase if available
-        try {
-            const updateData: any = {};
-            if (resolvedName !== undefined) updateData.full_name = resolvedName;
-            if (resolvedPhone !== undefined) updateData.phone_number = resolvedPhone;
-            if (resolvedImage !== undefined) updateData.profile_image = resolvedImage;
-            if (resolvedPushToken !== undefined) {
-                updateData.push_token = resolvedPushToken;
-                updateData.push_token_updated_at = new Date().toISOString();
-            }
-
-            if (Object.keys(updateData).length > 0) {
-                await supabase
-                    .from('users')
-                    .update(updateData)
-                    .eq('uid', uid);
-            }
-        } catch (_) {}
 
         // Return updated user profile
         const updatedUser = await getUserProfile(uid);
@@ -575,59 +505,25 @@ router.post('/change-password', authenticateUser, authLimiter, async (req: Reque
 
 /**
  * @route   DELETE /api/auth/delete-account
- * @desc    Permanently delete the authenticated user's account and associated data (App Store & Google Play compliance)
- * @access  Private (requires authentication)
+ * @desc    Permanently delete the caller's account and ALL associated data
+ *          (App Store 5.1.1(v) and Google Play account-deletion requirements)
+ * @access  Private
  */
-router.delete('/delete-account', authenticateUser, async (req: Request, res: Response) => {
+router.delete('/delete-account', authenticateUser, authLimiter, async (req: Request, res: Response) => {
     try {
-        const callerUid = req.user!.uid;
-        console.log(`🗑️ Initiating account deletion for user: ${callerUid}`);
-
-        // 1. Delete user from Supabase (cascades to related tables if foreign keys configured)
-        try {
-            await supabase.from('users').delete().eq('uid', callerUid);
-            await supabase.from('vendors').delete().eq('uid', callerUid);
-            await supabase.from('reviews').delete().or(`client_id.eq.${callerUid},vendor_id.eq.${callerUid}`);
-            await supabase.from('favorites').delete().eq('client_id', callerUid);
-            await supabase.from('cart_items').delete().eq('user_id', callerUid);
-        } catch (sbErr: any) {
-            console.warn('Supabase cleanup note during account deletion:', sbErr.message);
+        const uid = req.user!.uid;
+        if (uid === MASTER_ADMIN_UID) {
+            return res.status(403).json({ error: 'The root administrator account cannot be deleted from the app.' });
         }
-
-        // 2. Delete from Firestore
-        try {
-            await db.collection('users').doc(callerUid).delete();
-            await db.collection('vendors').doc(callerUid).delete();
-
-            // Mark posts by this author as deleted or remove them
-            const postsSnap = await db.collection('posts').where('authorId', '==', callerUid).get();
-            const batch = db.batch();
-            postsSnap.forEach(doc => {
-                batch.delete(doc.ref);
-            });
-            await batch.commit();
-        } catch (fsErr: any) {
-            console.warn('Firestore cleanup note during account deletion:', fsErr.message);
-        }
-
-        // 3. Delete from Firebase Authentication
-        try {
-            await auth.deleteUser(callerUid);
-        } catch (authErr: any) {
-            console.warn('Firebase Auth delete note:', authErr.message);
-        }
-
-        console.log(`✅ User ${callerUid} account completely deleted.`);
+        const result = await deleteAccountData(uid);
+        console.log(`🗑️ Account ${uid} deleted (${result.deletedDocuments} documents)`);
         res.status(200).json({
             success: true,
-            message: 'Your account and all associated data have been permanently deleted.'
+            message: 'Your account and all associated data have been permanently deleted.',
         });
     } catch (error: any) {
         console.error('Account deletion error:', error);
-        res.status(500).json({
-            error: 'Failed to delete account',
-            message: error.message || 'An error occurred while deleting your account. Please try again.'
-        });
+        res.status(500).json({ error: 'Failed to delete account. Please try again or contact support.' });
     }
 });
 
