@@ -269,3 +269,20 @@ describe('app start-up profile load', () => {
         expect((await api().get('/api/auth/user/bad')).status).toBe(200);
     });
 });
+
+describe('calls stored in Firestore', () => {
+    it('survive a server restart, and hanging up before an answer is a missed call', async () => {
+        const { __resetCallState } = await import('../src/routes/call.routes');
+        await seedUser('alice'); await seedUser('bob');
+        const callId = (await api().post('/api/calls/initiate').set('Authorization', bearer('alice')).send({ receiverId: 'bob' })).body.call.id;
+        expect(fakeDb.raw(`calls/${callId}`).status).toBe('ringing');
+
+        __resetCallState(); // simulate a restart: in-memory state is gone
+        const incoming = await api().get('/api/calls/incoming/bob').set('Authorization', bearer('bob'));
+        expect(incoming.body.incomingCall.id).toBe(callId);
+
+        const end = await api().post(`/api/calls/${callId}/end`).set('Authorization', bearer('alice'));
+        expect(end.body.call.status).toBe('missed');
+        expect((await api().get('/api/calls/incoming/bob').set('Authorization', bearer('bob'))).body.incomingCall).toBeNull();
+    });
+});

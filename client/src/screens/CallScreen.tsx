@@ -19,6 +19,7 @@ import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { callAPI, authAPI, vendorAPI, API_URL } from '../services/api';
+import { subscribeToCall } from '../services/realtime';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 
 const { width, height } = Dimensions.get('window');
@@ -173,33 +174,43 @@ export default function CallScreen({ route, navigation }: any) {
         };
     }, [callStatus]);
 
-    // Poll status from server if currently ringing
+    // Live call status (answered / ended by the other person). The end of a call is handled exactly
+    // once — the old polling scheduled a "go back" on every tick and could leave several screens.
+    const endedRef = useRef(false);
     useEffect(() => {
         if (!callId) return;
 
-        const interval = setInterval(async () => {
-            try {
-                const res = await callAPI.getCallStatus(callId);
-                const call = res.data.call;
-                if (call) {
-                    if (call.status === 'connected' && callStatus !== 'connected') {
-                        setCallStatus('connected');
-                        setCurrentCall(call);
-                    } else if (call.status === 'rejected' || call.status === 'ended' || call.status === 'missed') {
-                        setCallStatus('ended');
-                        setTimeout(() => {
-                            endCurrentCall();
-                            navigation.goBack();
-                        }, 1500);
-                    }
-                }
-            } catch (error) {
-                // If 404 or ended
+        const handle = (call: any) => {
+            if (!call || endedRef.current) return;
+            if (call.status === 'connected') {
+                setCallStatus(prev => (prev === 'connected' ? prev : 'connected'));
+                setCurrentCall(call);
+            } else if (call.status === 'rejected' || call.status === 'ended' || call.status === 'missed') {
+                endedRef.current = true;
+                setCallStatus('ended');
+                setTimeout(() => {
+                    endCurrentCall();
+                    if (navigation.canGoBack()) navigation.goBack();
+                }, 1500);
             }
-        }, 2000);
+        };
 
-        return () => clearInterval(interval);
-    }, [callId, callStatus]);
+        let fallback: ReturnType<typeof setInterval> | null = null;
+        const unsubscribe = subscribeToCall(callId, handle, () => {
+            if (!fallback) {
+                fallback = setInterval(async () => {
+                    try {
+                        handle((await callAPI.getCallStatus(callId)).data.call);
+                    } catch (_) {}
+                }, 2000);
+            }
+        });
+
+        return () => {
+            unsubscribe();
+            if (fallback) clearInterval(fallback);
+        };
+    }, [callId]);
 
     const handleToggleMute = () => {
         toggleMute();

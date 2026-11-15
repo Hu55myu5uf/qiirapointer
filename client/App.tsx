@@ -6,7 +6,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { onAuthStateChanged } from 'firebase/auth';
-import { ActivityIndicator, View, Text, Alert, Platform, TouchableOpacity } from 'react-native';
+import { ActivityIndicator, View, Text, Alert, Platform, TouchableOpacity, AppState } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { auth } from './src/config/firebase';
@@ -15,6 +15,7 @@ import { useChatStore } from './src/store/chatStore';
 import { authAPI } from './src/services/api';
 import { registerForPushNotifications, savePushToken } from './src/services/notifications';
 import { getCachedProfile, fetchProfileWithRetry, clearCachedProfile } from './src/services/session';
+import { subscribeToIncomingCalls } from './src/services/realtime';
 import * as SplashScreen from 'expo-splash-screen';
 
 // Screens
@@ -746,16 +747,39 @@ function MainApp() {
   const { checkForIncomingCall } = useCallStore();
   const [initializing, setInitializing] = useState(true);
 
-  // Listen for incoming calls every 3.5 seconds when authenticated
+  // Incoming calls arrive instantly through a live listener. If it can't be used, fall back to
+  // checking every 5 seconds — but only while the app is in the foreground.
+  const setIncomingCall = useCallStore(s => s.setIncomingCall);
   useEffect(() => {
-    if (user?.uid) {
-      checkForIncomingCall(user.uid);
-      const interval = setInterval(() => {
-        checkForIncomingCall(user.uid);
-      }, 3500);
-      return () => clearInterval(interval);
-    }
-  }, [user]);
+    if (!user?.uid) return;
+    const uid = user.uid;
+    let fallback: ReturnType<typeof setInterval> | null = null;
+    let appState = AppState.currentState;
+
+    const unsubscribe = subscribeToIncomingCalls(
+      uid,
+      (call) => {
+        // Don't interrupt a call that's already connected
+        const current = useCallStore.getState().currentCall;
+        if (current && current.status === 'connected') return;
+        setIncomingCall(call);
+      },
+      () => {
+        if (!fallback) {
+          fallback = setInterval(() => {
+            if (appState === 'active') checkForIncomingCall(uid);
+          }, 5000);
+        }
+      },
+    );
+    const sub = AppState.addEventListener('change', (next) => { appState = next; });
+
+    return () => {
+      unsubscribe();
+      sub.remove();
+      if (fallback) clearInterval(fallback);
+    };
+  }, [user?.uid]);
 
   // One real-time chat subscription for the whole app (inbox, unread badge, chat screens)
   const startChats = useChatStore(s => s.start);

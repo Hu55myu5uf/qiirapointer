@@ -88,6 +88,37 @@ export function subscribeToMessages(
     }, err => onError?.(err));
 }
 
+const RING_TIMEOUT_MS = 45_000;
+
+/** The newest call ringing for `uid` (or null). Fires instantly when someone calls. */
+export function subscribeToIncomingCalls(
+    uid: string,
+    onChange: (call: any | null) => void,
+    onError?: (e: Error) => void,
+): Unsubscribe {
+    // Equality filter only (status is checked here), so no composite index is needed
+    const q = query(collection(firestore, 'calls'), where('receiverId', '==', uid));
+    return onSnapshot(q, snap => {
+        const now = Date.now();
+        const ringing = snap.docs
+            .map(d => ({ id: d.id, ...(d.data() as any) }))
+            .filter(c => c.status === 'ringing' && now - new Date(c.createdAt).getTime() <= RING_TIMEOUT_MS)
+            .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+        onChange(ringing[0] || null);
+    }, err => onError?.(err));
+}
+
+/** Live status of one call (connected / ended / rejected / missed). */
+export function subscribeToCall(
+    callId: string,
+    onChange: (call: any | null) => void,
+    onError?: (e: Error) => void,
+): Unsubscribe {
+    return onSnapshot(doc(firestore, 'calls', callId), snap => {
+        onChange(snap.exists() ? { id: snap.id, ...(snap.data() as any) } : null);
+    }, err => onError?.(err));
+}
+
 /** Count conversations with a message from someone else that arrived after we last read it. */
 export function countUnread(conversations: ConversationSummary[], uid: string, readTimestamps: Record<string, string>): number {
     let count = 0;

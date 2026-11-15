@@ -2,10 +2,18 @@ import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { db } from '../config/firebase';
 import { authenticateUser } from '../utils/authMiddleware';
+import { getDisplayProfile } from '../utils/profiles';
 import { writeLimiter } from '../utils/rateLimiter';
 
 const router = Router();
 
+/**
+ * In-app calls.
+ *
+ * Call sessions live in Firestore (calls/{callId}) so the app can listen for incoming calls and
+ * status changes in real time (security rules: only the caller and receiver can read a call), and
+ * calls survive server restarts. Only the short-lived WebRTC signalling messages stay in memory.
+ */
 export interface CallSession {
     id: string;
     callerId: string;
@@ -23,56 +31,78 @@ export interface CallSession {
 }
 
 const RING_TIMEOUT_MS = 45_000;
-const HISTORY_TTL_MS = 60 * 60 * 1000;      // finished calls are kept 1 hour for status lookups
-const HISTORY_MAX = 500;
+const MAX_CALL_MS = 3 * 60 * 60 * 1000;        // calls are force-ended after 3 hours
 const SIGNAL_TTL_MS = 10 * 60 * 1000;
-const ROOM_TOKEN_TTL_MS = 3 * 60 * 60 * 1000; // a room link works for at most 3 hours
+const ROOM_TOKEN_TTL_MS = MAX_CALL_MS;
+const SESSION_CACHE_MS = 3_000;                 // the call page polls signals ~1x/second
 
-// In-memory call state. (A single server instance is assumed; Phase 3 moves calls to Firestore
-// real-time documents so state survives restarts and multiple instances.)
-const activeCalls: Map<string, CallSession> = new Map();
-const callHistory: Map<string, CallSession & { archivedAt: number }> = new Map();
+const calls = () => db.collection('calls');
 const callSignals = new Map<string, { to: string; from: string; data: any; timestamp: number }[]>();
+const sessionCache = new Map<string, { at: number; value: CallSession | null }>();
 
-/** Test helper: clear all in-memory call state. */
+/** Test helper: clear in-memory call state. */
 export function __resetCallState() {
-    activeCalls.clear();
-    callHistory.clear();
     callSignals.clear();
+    sessionCache.clear();
 }
 
-function archive(session: CallSession) {
-    callHistory.set(session.id, { ...session, archivedAt: Date.now() });
-    activeCalls.delete(session.id);
-    callSignals.delete(session.id);
+async function getCall(callId: string, fresh = false): Promise<CallSession | null> {
+    const hit = sessionCache.get(callId);
+    if (!fresh && hit && Date.now() - hit.at < SESSION_CACHE_MS) return hit.value;
+    const doc = await calls().doc(callId).get();
+    const value = doc.exists ? ({ id: doc.id, ...(doc.data() as any) } as CallSession) : null;
+    sessionCache.set(callId, { at: Date.now(), value });
+    return value;
 }
 
-const cleanup = setInterval(() => {
+async function updateCall(callId: string, update: Partial<CallSession>) {
+    await calls().doc(callId).set(update, { merge: true });
+    sessionCache.delete(callId);
+    if (update.status && ['rejected', 'ended', 'missed'].includes(update.status)) callSignals.delete(callId);
+}
+
+const isActive = (s: CallSession) => s.status === 'ringing' || s.status === 'connected';
+const isParticipant = (s: CallSession, uid: string) => s.callerId === uid || s.receiverId === uid;
+const otherParty = (s: CallSession, uid: string) => (s.callerId === uid ? s.receiverId : s.callerId);
+
+/** Ringing calls that nobody answered become "missed"; very long calls are ended. */
+async function expireStaleCalls() {
     const now = Date.now();
-    for (const session of activeCalls.values()) {
-        const created = new Date(session.createdAt).getTime();
-        if (session.status === 'ringing' && now - created > RING_TIMEOUT_MS) {
-            session.status = 'missed';
-            session.endedAt = new Date().toISOString();
-            archive(session);
-        } else if (session.status === 'connected' && now - created > ROOM_TOKEN_TTL_MS) {
-            session.status = 'ended';
-            session.endedAt = new Date().toISOString();
-            archive(session);
+    for (const status of ['ringing', 'connected'] as const) {
+        const snap = await calls().where('status', '==', status).limit(200).get();
+        for (const d of snap.docs) {
+            const s = d.data() as CallSession;
+            const age = now - new Date(s.createdAt).getTime();
+            if (status === 'ringing' && age > RING_TIMEOUT_MS) {
+                await updateCall(d.id, { status: 'missed', endedAt: new Date().toISOString() });
+            } else if (status === 'connected' && age > MAX_CALL_MS) {
+                await updateCall(d.id, { status: 'ended', endedAt: new Date().toISOString() });
+            }
         }
-    }
-    for (const [id, h] of callHistory) {
-        if (now - h.archivedAt > HISTORY_TTL_MS) callHistory.delete(id);
-    }
-    while (callHistory.size > HISTORY_MAX) {
-        callHistory.delete(callHistory.keys().next().value as string);
     }
     for (const [id, list] of callSignals) {
         const fresh = list.filter(s => now - s.timestamp < SIGNAL_TTL_MS);
         if (fresh.length === 0) callSignals.delete(id); else callSignals.set(id, fresh);
     }
-}, 5000);
-cleanup.unref();
+}
+if (process.env.NODE_ENV !== 'test') {
+    setInterval(() => { expireStaleCalls().catch(e => console.warn('Call cleanup note:', e.message)); }, 15_000).unref();
+}
+
+/** Is this user already ringing or on a call? (equality queries only: no composite index needed) */
+async function isBusy(uid: string): Promise<boolean> {
+    const [asCaller, asReceiver] = await Promise.all([
+        calls().where('callerId', '==', uid).limit(50).get(),
+        calls().where('receiverId', '==', uid).limit(50).get(),
+    ]);
+    const now = Date.now();
+    return [...asCaller.docs, ...asReceiver.docs].some(d => {
+        const s = d.data() as CallSession;
+        if (s.status === 'connected') return now - new Date(s.createdAt).getTime() < MAX_CALL_MS;
+        if (s.status === 'ringing') return now - new Date(s.createdAt).getTime() < RING_TIMEOUT_MS;
+        return false;
+    });
+}
 
 // ─── Room tokens ────────────────────────────────────────────────────────────
 // The call screen is a WebView page that can't carry the user's Firebase session, so it gets a
@@ -120,36 +150,9 @@ function getIceServers() {
     }
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-function findCall(callId: string): CallSession | undefined {
-    return activeCalls.get(callId) || callHistory.get(callId);
-}
-
-const isParticipant = (s: CallSession, uid: string) => s.callerId === uid || s.receiverId === uid;
-const otherParty = (s: CallSession, uid: string) => (s.callerId === uid ? s.receiverId : s.callerId);
-
-async function getDisplayInfo(uid: string) {
-    try {
-        const [u, v] = await Promise.all([
-            db.collection('users').doc(uid).get(),
-            db.collection('vendors').doc(uid).get(),
-        ]);
-        if (!u.exists) return null;
-        const ud = u.data() || {};
-        const vd = v.exists ? v.data() || {} : {};
-        return {
-            name: vd.businessName || ud.fullName || ud.displayName || 'User',
-            avatar: vd.businessImage || ud.profileImage || ud.photoURL || '',
-            blocked: (ud.blockedUserIds || []) as string[],
-        };
-    } catch {
-        return null;
-    }
-}
-
 /**
- * Identify the signalling party: either a logged-in user (Bearer token) or the call WebView
- * (X-Call-Token room token, which is only valid for that one call).
+ * Identify the signalling party: a logged-in user (Bearer token) or the call WebView
+ * (X-Call-Token room token, valid for that one call only).
  */
 async function signalAuth(req: Request, res: Response, next: NextFunction) {
     const roomToken = req.get('X-Call-Token');
@@ -168,8 +171,7 @@ async function signalAuth(req: Request, res: Response, next: NextFunction) {
 }
 
 /**
- * POST /api/calls/initiate
- * Start an in-app voice or video call. The caller is always the logged-in user.
+ * POST /api/calls/initiate — the caller is always the logged-in user
  */
 router.post('/initiate', authenticateUser, writeLimiter, async (req: Request, res: Response): Promise<any> => {
     try {
@@ -183,27 +185,23 @@ router.post('/initiate', authenticateUser, writeLimiter, async (req: Request, re
             return res.status(400).json({ error: 'You cannot call yourself' });
         }
 
-        const [caller, receiver] = await Promise.all([getDisplayInfo(callerId), getDisplayInfo(receiverId)]);
-        if (!receiver) {
+        const [caller, receiver] = await Promise.all([getDisplayProfile(callerId), getDisplayProfile(receiverId)]);
+        if (!receiver.exists || receiver.role === 'support') {
             return res.status(404).json({ error: 'User not found' });
         }
-        if (receiver.blocked.includes(callerId) || caller?.blocked.includes(receiverId)) {
+        if (receiver.blockedUserIds.includes(callerId) || caller.blockedUserIds.includes(receiverId)) {
             return res.status(403).json({ error: 'You cannot call this user' });
         }
-
-        // Busy if either party is already ringing or connected in another call
-        for (const s of activeCalls.values()) {
-            if (isParticipant(s, receiverId) && (s.status === 'connected' || s.status === 'ringing')) {
-                return res.status(409).json({ error: 'User is busy on another call', status: 'busy' });
-            }
+        if (await isBusy(receiverId)) {
+            return res.status(409).json({ error: 'User is busy on another call', status: 'busy' });
         }
 
         const callId = `call_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
         const session: CallSession = {
             id: callId,
             callerId,
-            callerName: caller?.name || 'User',
-            callerAvatar: caller?.avatar || '',
+            callerName: caller.name,
+            callerAvatar: caller.avatar,
             receiverId,
             receiverName: receiver.name,
             receiverAvatar: receiver.avatar,
@@ -211,7 +209,7 @@ router.post('/initiate', authenticateUser, writeLimiter, async (req: Request, re
             status: 'ringing',
             createdAt: new Date().toISOString(),
         };
-        activeCalls.set(callId, session);
+        await calls().doc(callId).set(session);
 
         res.status(201).json({ message: 'Call initiated successfully', call: session });
     } catch (error: any) {
@@ -221,28 +219,31 @@ router.post('/initiate', authenticateUser, writeLimiter, async (req: Request, re
 });
 
 /**
- * GET /api/calls/incoming/:userId
- * Check for a ringing call addressed to the logged-in user.
+ * GET /api/calls/incoming/:userId — fallback for apps without the live listener
  */
-router.get('/incoming/:userId', authenticateUser, (req: Request, res: Response): any => {
-    if (req.params.userId !== req.user!.uid) {
-        return res.status(403).json({ error: 'Forbidden' });
-    }
-    const now = Date.now();
-    for (const session of activeCalls.values()) {
-        if (session.receiverId === req.user!.uid && session.status === 'ringing' &&
-            now - new Date(session.createdAt).getTime() <= RING_TIMEOUT_MS) {
-            return res.json({ incomingCall: session });
+router.get('/incoming/:userId', authenticateUser, async (req: Request, res: Response): Promise<any> => {
+    try {
+        if (req.params.userId !== req.user!.uid) {
+            return res.status(403).json({ error: 'Forbidden' });
         }
+        const snap = await calls().where('receiverId', '==', req.user!.uid).limit(20).get();
+        const now = Date.now();
+        const incoming = snap.docs
+            .map(d => ({ id: d.id, ...(d.data() as any) }) as CallSession)
+            .filter(s => s.status === 'ringing' && now - new Date(s.createdAt).getTime() <= RING_TIMEOUT_MS)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] || null;
+        res.json({ incomingCall: incoming });
+    } catch (error: any) {
+        console.error('Incoming call check error:', error);
+        res.status(500).json({ error: 'Failed to check incoming calls' });
     }
-    res.json({ incomingCall: null });
 });
 
 /**
  * GET /api/calls/:callId/status
  */
-router.get('/:callId/status', authenticateUser, (req: Request, res: Response): any => {
-    const session = findCall(req.params.callId);
+router.get('/:callId/status', authenticateUser, async (req: Request, res: Response): Promise<any> => {
+    const session = await getCall(req.params.callId);
     if (!session || !isParticipant(session, req.user!.uid)) {
         return res.status(404).json({ error: 'Call session not found' });
     }
@@ -250,12 +251,11 @@ router.get('/:callId/status', authenticateUser, (req: Request, res: Response): a
 });
 
 /**
- * GET /api/calls/:callId/room-token
- * Short-lived token for the call WebView (participants only).
+ * GET /api/calls/:callId/room-token — participants of an active call only
  */
-router.get('/:callId/room-token', authenticateUser, (req: Request, res: Response): any => {
-    const session = activeCalls.get(req.params.callId);
-    if (!session || !isParticipant(session, req.user!.uid)) {
+router.get('/:callId/room-token', authenticateUser, async (req: Request, res: Response): Promise<any> => {
+    const session = await getCall(req.params.callId, true);
+    if (!session || !isParticipant(session, req.user!.uid) || !isActive(session)) {
         return res.status(404).json({ error: 'Call session not found' });
     }
     res.json({ roomToken: createRoomToken(session.id, req.user!.uid) });
@@ -264,77 +264,94 @@ router.get('/:callId/room-token', authenticateUser, (req: Request, res: Response
 /**
  * POST /api/calls/:callId/answer — receiver only
  */
-router.post('/:callId/answer', authenticateUser, (req: Request, res: Response): any => {
-    const session = activeCalls.get(req.params.callId);
-    if (!session || !isParticipant(session, req.user!.uid)) {
-        return res.status(404).json({ error: 'Call session not found' });
+router.post('/:callId/answer', authenticateUser, async (req: Request, res: Response): Promise<any> => {
+    try {
+        const ref = calls().doc(req.params.callId);
+        const outcome = await db.runTransaction(async tx => {
+            const snap = await tx.get(ref);
+            if (!snap.exists) return { code: 404 };
+            const s = { id: snap.id, ...(snap.data() as any) } as CallSession;
+            if (!isParticipant(s, req.user!.uid)) return { code: 404 };
+            if (s.receiverId !== req.user!.uid) return { code: 403 };
+            if (s.status !== 'ringing') return { code: 409, status: s.status };
+            const answeredAt = new Date().toISOString();
+            tx.update(ref, { status: 'connected', answeredAt });
+            return { code: 200, call: { ...s, status: 'connected', answeredAt } };
+        });
+        sessionCache.delete(req.params.callId);
+        if (outcome.code === 404) return res.status(404).json({ error: 'Call session not found' });
+        if (outcome.code === 403) return res.status(403).json({ error: 'Only the person being called can answer' });
+        if (outcome.code === 409) return res.status(409).json({ error: `Call is ${outcome.status}` });
+        res.json({ message: 'Call connected', call: outcome.call });
+    } catch (error: any) {
+        console.error('Answer call error:', error);
+        res.status(500).json({ error: 'Failed to answer call' });
     }
-    if (session.receiverId !== req.user!.uid) {
-        return res.status(403).json({ error: 'Only the person being called can answer' });
-    }
-    if (session.status !== 'ringing') {
-        return res.status(409).json({ error: `Call is ${session.status}` });
-    }
-    session.status = 'connected';
-    session.answeredAt = new Date().toISOString();
-    res.json({ message: 'Call connected', call: session });
 });
 
 /**
  * POST /api/calls/:callId/reject — receiver only
  */
-router.post('/:callId/reject', authenticateUser, (req: Request, res: Response): any => {
-    const session = activeCalls.get(req.params.callId);
-    if (!session || !isParticipant(session, req.user!.uid)) {
-        return res.status(404).json({ error: 'Call session not found' });
+router.post('/:callId/reject', authenticateUser, async (req: Request, res: Response): Promise<any> => {
+    try {
+        const session = await getCall(req.params.callId, true);
+        if (!session || !isParticipant(session, req.user!.uid)) {
+            return res.status(404).json({ error: 'Call session not found' });
+        }
+        if (session.receiverId !== req.user!.uid) {
+            return res.status(403).json({ error: 'Only the person being called can reject' });
+        }
+        if (!isActive(session)) return res.json({ message: `Call already ${session.status}`, call: session });
+        const update = { status: 'rejected' as const, endedAt: new Date().toISOString() };
+        await updateCall(session.id, update);
+        res.json({ message: 'Call rejected', call: { ...session, ...update } });
+    } catch (error: any) {
+        console.error('Reject call error:', error);
+        res.status(500).json({ error: 'Failed to reject call' });
     }
-    if (session.receiverId !== req.user!.uid) {
-        return res.status(403).json({ error: 'Only the person being called can reject' });
-    }
-    session.status = 'rejected';
-    session.endedAt = new Date().toISOString();
-    archive(session);
-    res.json({ message: 'Call rejected', call: session });
 });
 
 /**
  * POST /api/calls/:callId/end — either participant
  */
-router.post('/:callId/end', authenticateUser, (req: Request, res: Response): any => {
-    const session = activeCalls.get(req.params.callId);
-    if (!session) {
-        const past = callHistory.get(req.params.callId);
-        if (past && isParticipant(past, req.user!.uid)) return res.json({ message: 'Call already ended', call: past });
-        return res.status(404).json({ error: 'Call session not found' });
+router.post('/:callId/end', authenticateUser, async (req: Request, res: Response): Promise<any> => {
+    try {
+        const session = await getCall(req.params.callId, true);
+        if (!session || !isParticipant(session, req.user!.uid)) {
+            return res.status(404).json({ error: 'Call session not found' });
+        }
+        if (!isActive(session)) return res.json({ message: 'Call already ended', call: session });
+
+        const endedAt = new Date().toISOString();
+        // Duration is computed by the server, never trusted from the client
+        const durationSeconds = session.answeredAt
+            ? Math.max(0, Math.floor((new Date(endedAt).getTime() - new Date(session.answeredAt).getTime()) / 1000))
+            : 0;
+        // A caller hanging up before an answer is a missed call for the receiver
+        const status = session.status === 'ringing' ? 'missed' : 'ended';
+        await updateCall(session.id, { status, endedAt, durationSeconds });
+        res.json({ message: 'Call ended successfully', call: { ...session, status, endedAt, durationSeconds } });
+    } catch (error: any) {
+        console.error('End call error:', error);
+        res.status(500).json({ error: 'Failed to end call' });
     }
-    if (!isParticipant(session, req.user!.uid)) {
-        return res.status(404).json({ error: 'Call session not found' });
-    }
-    session.status = 'ended';
-    session.endedAt = new Date().toISOString();
-    // Duration is computed by the server, not trusted from the client
-    if (session.answeredAt) {
-        session.durationSeconds = Math.max(0, Math.floor(
-            (new Date(session.endedAt).getTime() - new Date(session.answeredAt).getTime()) / 1000
-        ));
-    }
-    archive(session);
-    res.json({ message: 'Call ended successfully', call: session });
 });
 
 /**
- * POST /api/calls/:callId/signal
- * Send a WebRTC offer/answer/ICE candidate to the other participant.
+ * POST /api/calls/:callId/signal — WebRTC offer/answer/ICE candidate for the other participant
  */
-router.post('/:callId/signal', signalAuth, (req: Request, res: Response): any => {
+router.post('/:callId/signal', signalAuth, async (req: Request, res: Response): Promise<any> => {
     const uid: string = (req as any).callUid;
-    const session = activeCalls.get(req.params.callId);
-    if (!session || !isParticipant(session, uid)) {
+    const session = await getCall(req.params.callId);
+    if (!session || !isParticipant(session, uid) || !isActive(session)) {
         return res.status(404).json({ error: 'Call session not found' });
     }
     const { data } = req.body || {};
     if (!data || typeof data !== 'object' || !['offer', 'answer', 'candidate'].includes(data.type)) {
         return res.status(400).json({ error: 'Invalid signal' });
+    }
+    if (JSON.stringify(data).length > 20_000) {
+        return res.status(413).json({ error: 'Signal too large' });
     }
 
     const signals = callSignals.get(session.id) || [];
@@ -342,20 +359,18 @@ router.post('/:callId/signal', signalAuth, (req: Request, res: Response): any =>
     signals.push({ from: uid, to: otherParty(session, uid), data, timestamp: Date.now() });
     if (signals.length > 100) signals.splice(0, signals.length - 100);
     callSignals.set(session.id, signals);
-
     res.json({ success: true });
 });
 
 /**
- * GET /api/calls/:callId/signal/:userId
- * Poll pending signals for the authenticated participant.
+ * GET /api/calls/:callId/signal/:userId — pending signals for the authenticated participant
  */
-router.get('/:callId/signal/:userId', signalAuth, (req: Request, res: Response): any => {
+router.get('/:callId/signal/:userId', signalAuth, async (req: Request, res: Response): Promise<any> => {
     const uid: string = (req as any).callUid;
     if (req.params.userId !== uid) {
         return res.status(403).json({ error: 'Forbidden' });
     }
-    const session = findCall(req.params.callId);
+    const session = await getCall(req.params.callId);
     if (!session || !isParticipant(session, uid)) {
         return res.status(404).json({ error: 'Call session not found' });
     }
@@ -365,14 +380,14 @@ router.get('/:callId/signal/:userId', signalAuth, (req: Request, res: Response):
     res.json({ signals: pending, status: session.status });
 });
 
-router.get('/room/:callId', (req: Request, res: Response): any => {
+router.get('/room/:callId', async (req: Request, res: Response): Promise<any> => {
     const { callId } = req.params;
     const { type = 'voice', token } = req.query;
 
     // The room only opens with a valid token for THIS call; who you are comes from the token
     const t = verifyRoomToken(token);
-    const session = activeCalls.get(callId);
-    if (!t || t.callId !== callId || !session || !isParticipant(session, t.uid)) {
+    const session = await getCall(callId);
+    if (!t || t.callId !== callId || !session || !isParticipant(session, t.uid) || !isActive(session)) {
         res.status(403).setHeader('Content-Type', 'text/plain');
         return res.send('This call link is invalid or has expired.');
     }
