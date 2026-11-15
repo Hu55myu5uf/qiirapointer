@@ -374,7 +374,7 @@ export default function ClientProfileScreen() {
                             {isVerified ? 'Verified Account ✓' : 'Get Verified ✓'}
                         </Text>
                         <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
-                            {isVerified ? 'Your golden verified badge is active' : 'Get a verified badge on your profile for ₦3,000/month'}
+                            {isVerified ? 'Your golden verified badge is active' : 'Get a free verified badge on your profile'}
                         </Text>
                     </View>
                     <Text style={[styles.chevron, { color: '#B28A45', fontWeight: 'bold' }]}>›</Text>

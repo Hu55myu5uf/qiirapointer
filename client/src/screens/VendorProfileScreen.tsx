@@ -45,6 +45,10 @@ import TabSwipeHandler from '../components/TabSwipeHandler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import VendorVerificationModal from '../components/VendorVerificationModal';
 import VendorAdvertModal from '../components/VendorAdvertModal';
+
+// Paid post promotions are off at launch (Apple/Google payment rules). Turn on together with the
+// server's ADVERTS_ENABLED once promotions are sold through in-app purchase.
+const ADVERTS_ENABLED = false;
 import AddCatalogItemModal from '../components/AddCatalogItemModal';
 
 // Enable Debug Logs for Firebase
@@ -1057,6 +1061,8 @@ export default function VendorProfileScreen({ navigation }: any) {
                                                             ) : null}
                                                         </View>
                                                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: SPACING.xs, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 }}>
+                                                            {/* Paid promotions are switched off for launch (app store payment rules) */}
+                                                            {ADVERTS_ENABLED ? (
                                                             <TouchableOpacity
                                                                 style={{
                                                                     flexDirection: 'row',
@@ -1077,6 +1083,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                                                                 <Ionicons name="rocket-outline" size={14} color="#B28A45" />
                                                                 <Text style={{ fontSize: 12, fontWeight: '700', color: '#B28A45' }}>Promote / Advert 🚀</Text>
                                                             </TouchableOpacity>
+                                                            ) : <View />}
 
                                                             <TouchableOpacity
                                                                 style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, borderRadius: BORDER_RADIUS.sm, backgroundColor: 'rgba(239, 68, 68, 0.1)' }}

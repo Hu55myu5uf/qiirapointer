@@ -1,137 +1,71 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     TouchableOpacity,
-    Alert,
     ActivityIndicator,
     ScrollView,
-    Dimensions,
-    Modal,
+    RefreshControl,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useFocusEffect } from '@react-navigation/native';
 import { vendorAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { QIIRA_PALETTE } from '../constants/theme';
-
-const { width } = Dimensions.get('window');
+import VendorVerificationModal from '../components/VendorVerificationModal';
 
 const BADGE_GRADIENT = [QIIRA_PALETTE.shade20, QIIRA_PALETTE.base, QIIRA_PALETTE.tint20];
 
 const BADGE_BENEFITS = [
     { icon: 'checkmark-circle', text: 'Verified badge on your profile' },
-    { icon: 'shield-checkmark', text: 'Increased trust & credibility' },
-    { icon: 'people', text: 'Stand out to customers & vendors' },
-    { icon: 'search', text: 'Priority in search results' },
-    { icon: 'trending-up', text: 'Boost your visibility' },
+    { icon: 'shield-checkmark', text: 'Shows people your identity has been checked' },
+    { icon: 'people', text: 'More trust from customers & vendors' },
     { icon: 'ribbon', text: 'Show you are authentic' },
 ];
 
+const HOW_IT_WORKS = [
+    { step: '1', title: 'Upload an ID document', desc: 'NIN, driver\'s licence, international passport or CAC certificate. It is stored privately.' },
+    { step: '2', title: 'We review it', desc: 'A QIIRA administrator checks your document, usually within 1–2 working days.' },
+    { step: '3', title: 'Get your badge', desc: 'The verified badge appears on your profile as soon as you are approved.' },
+];
+
+type Status = 'none' | 'pending' | 'approved' | 'rejected';
+
+/**
+ * Free identity verification. There is no payment: the user uploads an identity document
+ * (stored privately), an administrator reviews it, and the verified badge is granted.
+ */
 export default function GetVerifiedScreen() {
     const { theme, colors } = useTheme();
     const styles = getStyles(colors, theme);
+    const { user } = useAuthStore();
 
-    const { user, userRole } = useAuthStore();
     const [loading, setLoading] = useState(true);
-    const [purchasing, setPurchasing] = useState(false);
-    const [isVerified, setIsVerified] = useState(false);
-    const [isPending, setIsPending] = useState(false);
-    const [expiresAt, setExpiresAt] = useState<string | null>(null);
-    const [badgeInfo, setBadgeInfo] = useState<any>(null);
-    const [showConfirmModal, setShowConfirmModal] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
+    const [status, setStatus] = useState<Status>('none');
+    const [loadError, setLoadError] = useState(false);
+    const [showUpload, setShowUpload] = useState(false);
 
-    useEffect(() => {
-        fetchBadgeData();
-    }, []);
-
-    const fetchBadgeData = async () => {
+    const fetchStatus = useCallback(async () => {
+        if (!user) return;
         try {
-            // Fetch badge pricing info
-            const infoRes = await vendorAPI.getBadgeInfo();
-            setBadgeInfo(infoRes.data.badge);
-
-            // Fetch current user's badge status
-            if (user) {
-                const statusRes = await vendorAPI.getBadgeStatus(user.uid);
-                setIsVerified(statusRes.data.isVerified || false);
-                setIsPending(statusRes.data.isPending || false);
-                setExpiresAt(statusRes.data.expiresAt);
-            }
-        } catch (error) {
-            console.error('Error fetching badge data:', error);
-            // Fallback badge info
-            setBadgeInfo({
-                price: 3000,
-                currency: '₦',
-                period: '/month',
-                badgeColor: '#B28A45',
-                features: [
-                    'Verified badge on your profile',
-                    'Increased trust & credibility',
-                    'Stand out to customers',
-                    'Priority in search results',
-                ],
-            });
+            const res = await vendorAPI.getBadgeStatus(user.uid);
+            const d = res.data || {};
+            setStatus(d.isVerified ? 'approved' : d.isPending ? 'pending' : d.verificationStatus === 'rejected' ? 'rejected' : 'none');
+            setLoadError(false);
+        } catch {
+            setLoadError(true);
         } finally {
             setLoading(false);
+            setRefreshing(false);
         }
-    };
+    }, [user]);
 
-    const handlePurchase = () => {
-        if (isVerified) {
-            Alert.alert('Already Verified', 'You already have a verified badge! 🎉');
-            return;
-        }
-        if (isPending) {
-            Alert.alert('Pending Review', 'Your verification request is currently under review by the administrator.');
-            return;
-        }
-        setShowConfirmModal(true);
-    };
-
-    const confirmPurchase = async () => {
-        if (!user) return;
-        setShowConfirmModal(false);
-        setPurchasing(true);
-
-        try {
-            // Simulate payment processing
-            await new Promise(resolve => setTimeout(resolve, 1500));
-
-            const paymentRef = `QIIRA_${Date.now()}`;
-            await vendorAPI.purchaseBadge(
-                user.uid,
-                paymentRef
-            );
-
-            setIsPending(true);
-            setIsVerified(false);
-
-            Alert.alert(
-                '⏳ Payment Submitted for Review',
-                'Your payment reference has been submitted to the QIIRA administration. Your verified golden badge will be activated as soon as it is verified!'
-            );
-        } catch (error) {
-            console.error('Badge purchase error:', error);
-            Alert.alert('Error', 'Failed to process payment. Please try again.');
-        } finally {
-            setPurchasing(false);
-        }
-    };
-
-    const getExpiryText = () => {
-        if (!expiresAt) return null;
-        const expiry = new Date(expiresAt);
-        const now = new Date();
-        const daysLeft = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-        if (daysLeft <= 0) return 'Expired';
-        if (daysLeft === 1) return '1 day remaining';
-        return `${daysLeft} days remaining`;
-    };
+    useFocusEffect(useCallback(() => { fetchStatus(); }, [fetchStatus]));
 
     if (loading) {
         return (
@@ -142,46 +76,44 @@ export default function GetVerifiedScreen() {
         );
     }
 
-    const price = badgeInfo?.price || 3000;
-    const currency = badgeInfo?.currency || '₦';
+    const isVerified = status === 'approved';
+    const isPending = status === 'pending';
+    const canApply = !isVerified && !isPending;
 
     return (
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.container}>
+        <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.container}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchStatus(); }} />}
+        >
             {/* Header */}
             <View style={styles.header}>
-                <LinearGradient
-                    colors={BADGE_GRADIENT as any}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.headerBadgeCircle}
-                >
+                <LinearGradient colors={BADGE_GRADIENT as any} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.headerBadgeCircle}>
                     <Ionicons name="checkmark-circle" size={48} color="#FFF" />
                 </LinearGradient>
-                <Text style={styles.title}>Get Verified</Text>
+                <Text style={styles.title} accessibilityRole="header">Get Verified</Text>
                 <Text style={styles.subtitle}>
-                    {userRole === 'vendor'
-                        ? 'Build trust with your customers'
-                        : 'Stand out in the community'}
+                    Free identity verification. Show people on QIIRA that you are who you say you are.
                 </Text>
             </View>
 
-            {/* Current Status Banner */}
-            {isVerified ? (
-                <LinearGradient
-                    colors={[QIIRA_PALETTE.shade20, QIIRA_PALETTE.base] as any}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.statusBanner}
-                >
+            {loadError ? (
+                <View style={[styles.statusBanner, { backgroundColor: colors.surfaceLight }]}>
+                    <View style={styles.statusContent}>
+                        <Ionicons name="cloud-offline-outline" size={24} color={colors.textSecondary} />
+                        <View style={styles.statusTextContainer}>
+                            <Text style={[styles.statusTitle, { color: colors.textPrimary }]}>Couldn't load your status</Text>
+                            <Text style={[styles.statusExpiry, { color: colors.textSecondary }]}>Pull down to try again.</Text>
+                        </View>
+                    </View>
+                </View>
+            ) : isVerified ? (
+                <LinearGradient colors={BADGE_GRADIENT as any} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.statusBanner}>
                     <View style={styles.statusContent}>
                         <Ionicons name="checkmark-circle" size={24} color="#FFF" />
                         <View style={styles.statusTextContainer}>
                             <Text style={styles.statusTitle}>You're Verified! ✓</Text>
-                            {expiresAt && (
-                                <Text style={styles.statusExpiry}>
-                                    {getExpiryText()}
-                                </Text>
-                            )}
+                            <Text style={styles.statusExpiry}>Your badge is shown on your profile.</Text>
                         </View>
                     </View>
                 </LinearGradient>
@@ -190,93 +122,78 @@ export default function GetVerifiedScreen() {
                     <View style={styles.statusContent}>
                         <Ionicons name="time" size={24} color="#B28A45" />
                         <View style={styles.statusTextContainer}>
-                            <Text style={[styles.statusTitle, { color: '#B28A45' }]}>⏳ Application Under Review</Text>
+                            <Text style={[styles.statusTitle, { color: '#B28A45' }]}>Under review</Text>
                             <Text style={[styles.statusExpiry, { color: colors.textSecondary }]}>
-                                Your payment reference has been submitted. An admin will verify and activate your Golden Badge.
+                                We've received your document. You'll be notified once an administrator has reviewed it.
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+            ) : status === 'rejected' ? (
+                <View style={[styles.statusBanner, { backgroundColor: colors.surfaceLight, borderColor: colors.error || '#DC2626', borderWidth: 1 }]}>
+                    <View style={styles.statusContent}>
+                        <Ionicons name="alert-circle" size={24} color={colors.error || '#DC2626'} />
+                        <View style={styles.statusTextContainer}>
+                            <Text style={[styles.statusTitle, { color: colors.textPrimary }]}>Not approved</Text>
+                            <Text style={[styles.statusExpiry, { color: colors.textSecondary }]}>
+                                Your last document couldn't be verified. Please upload a clear photo of a valid ID.
                             </Text>
                         </View>
                     </View>
                 </View>
             ) : null}
 
-            {/* Main Card */}
+            {/* Benefits + action */}
             <View style={styles.mainCard}>
-                {/* Price Section */}
-                <LinearGradient
-                    colors={BADGE_GRADIENT as any}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.priceSection}
-                >
-                    <Ionicons name="checkmark-circle" size={36} color="#FFF" />
+                <View style={styles.priceSection}>
                     <Text style={styles.badgeLabel}>Verified Badge</Text>
                     <View style={styles.priceRow}>
-                        <Text style={styles.priceCurrency}>{currency}</Text>
-                        <Text style={styles.priceAmount}>{price.toLocaleString()}</Text>
-                        <Text style={styles.pricePeriod}>{badgeInfo?.period || '/month'}</Text>
+                        <Text style={styles.priceAmount}>Free</Text>
                     </View>
-                </LinearGradient>
+                </View>
 
-                {/* Benefits List */}
                 <View style={styles.benefitsContainer}>
                     <Text style={styles.benefitsTitle}>What you get</Text>
                     {BADGE_BENEFITS.map((benefit, index) => (
                         <View key={index} style={styles.benefitRow}>
                             <View style={styles.benefitIconCircle}>
-                                <Ionicons
-                                    name={benefit.icon as any}
-                                    size={18}
-                                    color={QIIRA_PALETTE.base}
-                                />
+                                <Ionicons name={benefit.icon as any} size={18} color={QIIRA_PALETTE.base} />
                             </View>
                             <Text style={styles.benefitText}>{benefit.text}</Text>
                         </View>
                     ))}
                 </View>
 
-                {/* CTA Button */}
                 <TouchableOpacity
-                    style={[
-                        styles.ctaButton,
-                        (isVerified || isPending) && styles.ctaButtonVerified,
-                    ]}
-                    onPress={handlePurchase}
-                    disabled={purchasing || isVerified || isPending}
+                    style={[styles.ctaButton, !canApply && styles.ctaButtonVerified]}
+                    onPress={() => setShowUpload(true)}
+                    disabled={!canApply || loadError}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: !canApply }}
                 >
-                    {purchasing ? (
-                        <ActivityIndicator color="#FFF" />
-                    ) : (
-                        <LinearGradient
-                            colors={(isVerified || isPending) ? [colors.surfaceLight, colors.surfaceLight] as any : BADGE_GRADIENT as any}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={styles.ctaGradient}
-                        >
-                            <Ionicons
-                                name={isVerified ? 'checkmark-circle' : isPending ? 'time' : 'card'}
-                                size={20}
-                                color={(isVerified || isPending) ? QIIRA_PALETTE.base : '#FFF'}
-                            />
-                            <Text style={[
-                                styles.ctaText,
-                                (isVerified || isPending) && { color: QIIRA_PALETTE.base },
-                            ]}>
-                                {isVerified ? 'Already Verified ✓' : isPending ? '⏳ Verification Pending Admin Review' : 'Get Verified Now'}
-                            </Text>
-                        </LinearGradient>
-                    )}
+                    <LinearGradient
+                        colors={!canApply ? [colors.surfaceLight, colors.surfaceLight] as any : BADGE_GRADIENT as any}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={styles.ctaGradient}
+                    >
+                        <Ionicons
+                            name={isVerified ? 'checkmark-circle' : isPending ? 'time' : 'cloud-upload-outline'}
+                            size={20}
+                            color={!canApply ? QIIRA_PALETTE.base : '#FFF'}
+                        />
+                        <Text style={[styles.ctaText, !canApply && { color: QIIRA_PALETTE.base }]}>
+                            {isVerified ? 'Already Verified ✓' : isPending ? 'Under review' : status === 'rejected' ? 'Upload a new document' : 'Upload ID document'}
+                        </Text>
+                    </LinearGradient>
                 </TouchableOpacity>
             </View>
 
             {/* How It Works */}
             <View style={styles.howItWorks}>
                 <Text style={styles.sectionTitle}>How it works</Text>
-                {[
-                    { step: '1', title: 'Pay the verification fee', desc: `One-time payment of ${currency}${price.toLocaleString()}/month` },
-                    { step: '2', title: 'Admin reviews your payment', desc: 'Our team verifies your payment' },
-                    { step: '3', title: 'Badge activated!', desc: 'Your verified badge appears on your profile' },
-                ].map((item, index) => (
-                    <View key={index} style={styles.stepRow}>
+                {HOW_IT_WORKS.map((item) => (
+                    <View key={item.step} style={styles.stepRow}>
                         <View style={styles.stepCircle}>
                             <Text style={styles.stepNumber}>{item.step}</Text>
                         </View>
@@ -288,65 +205,20 @@ export default function GetVerifiedScreen() {
                 ))}
             </View>
 
-            {/* Footer Note */}
             <View style={styles.footer}>
-                <Ionicons name="information-circle-outline" size={16} color={colors.textTertiary} />
                 <Text style={styles.footerText}>
-                    Badge subscription renews monthly. Cancel anytime from your profile settings.
+                    Your document is only visible to QIIRA administrators and is used solely to verify your identity.
                 </Text>
             </View>
 
-            {/* Confirmation Modal */}
-            <Modal
-                visible={showConfirmModal}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setShowConfirmModal(false)}
-            >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <LinearGradient
-                            colors={BADGE_GRADIENT as any}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={styles.modalHeader}
-                        >
-                            <Ionicons name="checkmark-circle" size={48} color="#FFF" />
-                            <Text style={styles.modalTitle}>Get Verified</Text>
-                        </LinearGradient>
-
-                        <View style={styles.modalBody}>
-                            <Text style={styles.modalPriceLabel}>Total Due Today</Text>
-                            <Text style={styles.modalPrice}>
-                                {currency}{price.toLocaleString()}
-                            </Text>
-                            <Text style={styles.modalPriceSub}>
-                                Billed monthly • Cancel anytime
-                            </Text>
-
-                            <View style={styles.modalActions}>
-                                <TouchableOpacity
-                                    style={styles.modalCancelButton}
-                                    onPress={() => setShowConfirmModal(false)}
-                                >
-                                    <Text style={[styles.modalCancelText, { color: colors.textSecondary }]}>
-                                        Cancel
-                                    </Text>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    style={[styles.modalConfirmButton, { backgroundColor: QIIRA_PALETTE.base }]}
-                                    onPress={confirmPurchase}
-                                >
-                                    <Text style={styles.modalConfirmText}>
-                                        Pay & Verify
-                                    </Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
+            {user ? (
+                <VendorVerificationModal
+                    visible={showUpload}
+                    onClose={() => setShowUpload(false)}
+                    vendorId={user.uid}
+                    onSuccess={() => setStatus('pending')}
+                />
+            ) : null}
         </ScrollView>
     );
 }
@@ -577,7 +449,8 @@ const getStyles = (colors: any, theme: string) => StyleSheet.create({
         padding: SPACING.lg,
     },
     modalContent: {
-        width: width - SPACING.xl * 2,
+        width: '100%',
+        maxWidth: 420,
         backgroundColor: colors.surface,
         borderRadius: BORDER_RADIUS.xl,
         overflow: 'hidden',

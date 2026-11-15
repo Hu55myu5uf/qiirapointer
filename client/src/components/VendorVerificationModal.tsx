@@ -123,22 +123,10 @@ export default function VendorVerificationModal({
 
         setSubmitting(true);
         try {
-            let uploadedUrl = pickedFile.uri;
-
-            if (pickedFile.type === 'pdf') {
-                try {
-                    const res = await uploadDocumentViaBackend(pickedFile.uri, pickedFile.name);
-                    uploadedUrl = res?.fileUrl || pickedFile.uri;
-                } catch (pdfErr) {
-                    console.warn('PDF upload via backend fallback to local URI:', pdfErr);
-                }
-            } else {
-                try {
-                    uploadedUrl = await uploadImageViaBackend(pickedFile.uri, 'vendor-kyc');
-                } catch (imgErr) {
-                    console.warn('Image upload fallback:', imgErr);
-                }
-            }
+            // Upload privately first; if that fails, stop and tell the user (never send a local path)
+            const uploadedUrl = pickedFile.type === 'pdf'
+                ? (await uploadDocumentViaBackend(pickedFile.uri, pickedFile.name, undefined, 'application/pdf', 'kyc')).fileUrl
+                : await uploadImageViaBackend(pickedFile.uri, 'vendor-kyc');
 
             const docTypeLabel = DOCUMENT_TYPES.find(d => d.id === selectedDocType)?.label || selectedDocType;
 
@@ -164,7 +152,7 @@ export default function VendorVerificationModal({
             );
         } catch (error: any) {
             console.error('Submit verification error:', error);
-            Alert.alert('Error', error.message || 'Failed to submit document. Please try again.');
+            Alert.alert('Could not submit', error.response?.data?.error || error.message || 'Failed to submit document. Please try again.');
         } finally {
             setSubmitting(false);
         }
