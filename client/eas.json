@@ -12,7 +12,8 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://qiirapointer.onrender.com/api",
-        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://6c03e7b67881bd2838eeb4428c80b8c6@o4512442565853184.ingest.de.sentry.io/4512442587611216"
       }
     },
     "preview": {
@@ -21,7 +22,8 @@
         "buildType": "apk"
       },
       "env": {
-        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://6c03e7b67881bd2838eeb4428c80b8c6@o4512442565853184.ingest.de.sentry.io/4512442587611216"
       }
     },
     "production": {
@@ -30,7 +32,8 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://6c03e7b67881bd2838eeb4428c80b8c6@o4512442565853184.ingest.de.sentry.io/4512442587611216"
       }
     }
   },
