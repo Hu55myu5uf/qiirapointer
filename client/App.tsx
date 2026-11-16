@@ -2,7 +2,7 @@ import { useTheme, ThemeProvider } from './src/context/ThemeContext';
 import React, { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -50,7 +50,7 @@ import { initGlobalAlertPatch } from './src/store/alertStore';
 
 export const navigationRef = createNavigationContainerRef<any>();
 
-const Stack = createStackNavigator();
+const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 // Auth Stack (Login/Register)
@@ -62,7 +62,7 @@ function AuthStack() {
       initialRouteName={authEntry}
       screenOptions={{
         headerShown: false,
-        cardStyle: { backgroundColor: colors.background },
+        contentStyle: { backgroundColor: colors.background },
       }}
     >
       <Stack.Screen name="Login" component={LoginScreen} />
