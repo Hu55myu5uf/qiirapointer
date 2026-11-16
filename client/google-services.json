@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "970982686292",
+    "project_id": "qiirapointer",
+    "storage_bucket": "qiirapointer.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:970982686292:android:56ed94a44bc1cfdfd7f7c1",
+        "android_client_info": {
+          "package_name": "com.qiira.pointer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCXhSZwSakckjWy9UyG3K4cH5-bTmJzKNQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
