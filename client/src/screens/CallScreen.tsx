@@ -21,6 +21,7 @@ import { PLACEHOLDER_AVATARS } from '../assets';
 import { callAPI, authAPI, vendorAPI, API_URL } from '../services/api';
 import { subscribeToCall } from '../services/realtime';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
+import { openChat } from '../navigation/openChat';
 
 
 export default function CallScreen({ route, navigation }: any) {
@@ -440,7 +441,7 @@ export default function CallScreen({ route, navigation }: any) {
                     <TouchableOpacity
                         style={styles.controlBtn}
                         onPress={() => {
-                            navigation.navigate('Chat', {
+                            openChat(navigation, {
                                 otherUserId,
                                 otherUserName,
                                 otherUserImage: otherUserAvatar,

@@ -18,6 +18,7 @@ import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { AvatarVerificationBadge, VerificationBadgeInline } from '../components/VerificationBadge';
 import TabSwipeHandler from '../components/TabSwipeHandler';
+import { openChat } from '../navigation/openChat';
 
 interface Review {
     id: string;
@@ -179,7 +180,7 @@ export default function VendorReviewsScreen({ navigation }: any) {
                     {navigation && (
                         <TouchableOpacity
                             style={styles.chatActionBtn}
-                            onPress={() => navigation.navigate('Chat', {
+                            onPress={() => openChat(navigation, {
                                 otherUserId: item.userId,
                                 otherUserName: name,
                                 otherUserImage: userAvatar,

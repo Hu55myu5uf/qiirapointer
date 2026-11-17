@@ -19,6 +19,7 @@ import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
 import { chatAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
+import { openChat } from '../navigation/openChat';
 
 interface PlaceOrderModalProps {
     visible: boolean;
@@ -106,7 +107,7 @@ export default function PlaceOrderModal({
                     {
                         text: 'View in Chat',
                         onPress: () => {
-                            navigation.navigate('Chat', {
+                            openChat(navigation, {
                                 otherUserId: vendorId,
                                 otherUserName: vendorName,
                                 otherUserImage: vendorImage || 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=200',

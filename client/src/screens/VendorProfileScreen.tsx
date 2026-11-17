@@ -51,6 +51,9 @@ import VendorAdvertModal from '../components/VendorAdvertModal';
 // server's ADVERTS_ENABLED once promotions are sold through in-app purchase.
 const ADVERTS_ENABLED = false;
 import AddCatalogItemModal from '../components/AddCatalogItemModal';
+import { openChat } from '../navigation/openChat';
+import CategoryLabel from '../components/CategoryLabel';
+import ProfileTabs from '../components/ProfileTabs';
 
 // Enable Debug Logs for Firebase
 setLogLevel('debug');
@@ -874,7 +877,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                                 <Text style={styles.businessName}>{businessName || (isAdmin ? 'System Administrator' : 'Business Name')}</Text>
                                 <VerificationBadgeInline isVerified={Boolean(isVerified || isAdmin)} isAdmin={isAdmin} size={20} />
                             </View>
-                            <Text style={styles.categoryText}>@{category.replace(/\s+/g, '').toLowerCase() || 'category'}</Text>
+                            <CategoryLabel category={category} emptyText="Add a business category (tap Edit) so customers can find you on Discover" />
 
                             {address ? (
                                 <Text style={styles.locationText}>📍 {address}</Text>
@@ -1037,32 +1040,22 @@ export default function VendorProfileScreen({ navigation }: any) {
                         </View>
 
                         {/* Tabs */}
-                        <View style={styles.tabBar}>
-                            {['posts', 'catalog', 'about', 'services', 'docs'].map((tab) => (
-                                <TouchableOpacity
-                                    key={tab}
-                                    style={[styles.tabItem, activeTab === tab && styles.tabItemActive]}
-                                    onPress={() => {
-                                        setActiveTab(tab as any);
-                                        if (tab === 'posts') fetchVendorPosts();
-                                        if (tab === 'catalog') fetchCatalogItems();
-                                        if (tab === 'docs') fetchMenuDocuments();
-                                    }}
-                                >
-                                    <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                                        {tab === 'posts'
-                                            ? 'Posts'
-                                            : tab === 'catalog'
-                                            ? '📖 Catalog'
-                                            : tab === 'docs'
-                                            ? '📄 Docs'
-                                            : tab === 'about'
-                                            ? 'About us'
-                                            : 'Services'}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
+                        <ProfileTabs
+                            tabs={[
+                                { key: 'posts', label: 'Posts' },
+                                { key: 'catalog', label: 'Catalog' },
+                                { key: 'about', label: 'About us' },
+                                { key: 'services', label: 'Services' },
+                                { key: 'docs', label: 'Docs' },
+                            ]}
+                            active={activeTab}
+                            onChange={(tab) => {
+                                setActiveTab(tab);
+                                if (tab === 'posts') fetchVendorPosts();
+                                if (tab === 'catalog') fetchCatalogItems();
+                                if (tab === 'docs') fetchMenuDocuments();
+                            }}
+                        />
 
                         {/* Content */}
                         <View style={styles.contentArea}>
@@ -1543,8 +1536,8 @@ export default function VendorProfileScreen({ navigation }: any) {
                                 onPress={() => confirmAction('Logout', 'Are you sure you want to logout of your vendor account?', () => auth.signOut(), 'Logout')}
                                 activeOpacity={0.8}
                             >
-                                <Ionicons name="log-out-outline" size={20} color="#EF4444" />
-                                <Text style={{ color: '#EF4444', fontWeight: 'bold', fontSize: FONT_SIZES.md }}>🚪 Log Out</Text>
+                                <Ionicons name="log-out-outline" size={20} color={theme === 'dark' ? '#FF8A80' : '#C62828'} />
+                                <Text style={{ color: theme === 'dark' ? '#FF8A80' : '#C62828', fontWeight: 'bold', fontSize: FONT_SIZES.md }}>Log Out</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -1639,7 +1632,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                                 style={styles.settingsItem}
                                 onPress={() => {
                                     setSettingsModalVisible(false);
-                                    navigation.navigate('Chat', {
+                                    openChat(navigation, {
                                         otherUserId: 'qiira_official_support',
                                         otherUserName: 'Pointer Customer Support',
                                         otherUserImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',

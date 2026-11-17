@@ -33,6 +33,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import TabSwipeHandler from '../components/TabSwipeHandler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UpgradeToVendorModal from '../components/UpgradeToVendorModal';
+import { openChat } from '../navigation/openChat';
 
 export default function ClientProfileScreen() {
     const navigation = useNavigation<any>();
@@ -478,7 +479,7 @@ export default function ClientProfileScreen() {
                     <TouchableOpacity
                         style={styles.settingRow}
                         onPress={() =>
-                            navigation.navigate('Chat', {
+                            openChat(navigation, {
                                 otherUserId: 'qiira_official_support',
                                 otherUserName: 'Pointer Customer Support',
                                 otherUserImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
@@ -500,8 +501,15 @@ export default function ClientProfileScreen() {
                 </View>
 
                 {/* Logout Button */}
-                <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} activeOpacity={0.8}>
-                    <Text style={styles.logoutButtonText}>🚪 Logout</Text>
+                <TouchableOpacity
+                    style={styles.logoutButton}
+                    onPress={handleLogout}
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Log out"
+                >
+                    <Ionicons name="log-out-outline" size={20} color={theme === 'dark' ? '#FF8A80' : '#C62828'} />
+                    <Text style={[styles.logoutButtonText, { color: theme === 'dark' ? '#FF8A80' : '#C62828' }]}>Log Out</Text>
                 </TouchableOpacity>
             </ScrollView>
 
@@ -697,21 +705,22 @@ const getStyles = (colors: any, topInset: number = 0) => {
         color: colors.textTertiary,
         fontWeight: 'bold',
     },
+    // Readable in light and dark mode: tinted red background, red outline, strong red text
     logoutButton: {
-        backgroundColor: colors.error || '#E53935',
-        padding: SPACING.md,
-        borderRadius: BORDER_RADIUS.md,
+        flexDirection: 'row',
         alignItems: 'center',
-        marginTop: SPACING.sm,
+        justifyContent: 'center',
+        gap: 8,
+        minHeight: 50,
+        paddingVertical: 14,
+        backgroundColor: 'rgba(239, 68, 68, 0.10)',
+        borderRadius: BORDER_RADIUS.md,
+        borderWidth: 1.5,
+        borderColor: 'rgba(239, 68, 68, 0.45)',
+        marginTop: SPACING.md,
         marginBottom: SPACING.xl,
-        shadowColor: colors.error || '#E53935',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.25,
-        shadowRadius: 4,
-        elevation: 3,
     },
     logoutButtonText: {
-        color: '#FFFFFF',
         fontWeight: 'bold',
         fontSize: FONT_SIZES.md,
     },

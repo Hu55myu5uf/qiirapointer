@@ -1380,3 +1380,23 @@ export function searchCategoriesAndSubcategories(query: string): { category: str
     }
     return results;
 }
+
+/**
+ * Vendor categories are saved as "Main category - Subcategory" (e.g.
+ * "Media, Content & Digital Creators - Journalist"). These split them for display and filtering.
+ */
+export function mainCategoryOf(category?: string | null): string {
+    return String(category || '').split(' - ')[0].trim();
+}
+
+export function subCategoryOf(category?: string | null): string {
+    const parts = String(category || '').split(' - ');
+    return parts.length > 1 ? parts.slice(1).join(' - ').trim() : '';
+}
+
+/** Icon for a main category (falls back to a generic storefront icon). */
+export function categoryIconOf(category?: string | null): string {
+    const main = mainCategoryOf(category).toLowerCase();
+    const def = CATEGORY_DEFINITIONS.find(c => c.name.toLowerCase() === main);
+    return def?.icon || 'storefront-outline';
+}

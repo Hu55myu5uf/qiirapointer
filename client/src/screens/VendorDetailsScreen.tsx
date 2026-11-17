@@ -33,6 +33,9 @@ import CallOptionModal from '../components/CallOptionModal';
 import SharePostModal from '../components/SharePostModal';
 import PlaceOrderModal from '../components/PlaceOrderModal';
 import ReportModal from '../components/ReportModal';
+import { openChat } from '../navigation/openChat';
+import CategoryLabel from '../components/CategoryLabel';
+import ProfileTabs from '../components/ProfileTabs';
 
 
 // X-Style Theme Customizations
@@ -434,7 +437,7 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                 size={20}
                             />
                         </View>
-                        <Text style={styles.category}>@{vendor.category ? vendor.category.replace(/\s+/g, '').toLowerCase() : 'vendor'}</Text>
+                        <CategoryLabel category={vendor.category} />
 
                         {/* Stats Row */}
                         <View style={styles.statsRow}>
@@ -473,7 +476,7 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                 style={styles.chatActionButton}
                                 onPress={() => {
                                     const targetUserId = vendor?.uid || vendor?.id || (vendor as any)?.userInfo?.uid || vendorId;
-                                    navigation.navigate('Chat', {
+                                    openChat(navigation, {
                                         otherUserId: targetUserId,
                                         otherUserName: vendor?.businessName || '',
                                         otherUserImage: vendor?.businessImage || vendor?.business_image || '',
@@ -514,24 +517,23 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                     </View>
 
                     {/* Tabs */}
-                    <View style={styles.tabBar}>
-                        {(['posts', 'catalog', 'services', 'about', 'docs', 'reviews'] as const).map((tab) => (
-                            <TouchableOpacity
-                                key={tab}
-                                style={[styles.tabItem, activeTab === tab && styles.tabItemActive]}
-                                onPress={() => {
-                                    setActiveTab(tab);
-                                    if (tab === 'posts') fetchVendorPosts();
-                                    if (tab === 'catalog') fetchCatalogItems();
-                                    if (tab === 'docs') fetchVendorDocuments();
-                                }}
-                            >
-                                <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                                    {tab === 'posts' ? 'Posts' : tab === 'catalog' ? '📖 Catalog' : tab === 'docs' ? '📄 Docs' : tab === 'about' ? 'About us' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
+                    <ProfileTabs
+                        tabs={[
+                            { key: 'posts', label: 'Posts' },
+                            { key: 'catalog', label: 'Catalog' },
+                            { key: 'about', label: 'About us' },
+                            { key: 'services', label: 'Services' },
+                            { key: 'docs', label: 'Docs' },
+                            { key: 'reviews', label: 'Reviews' },
+                        ]}
+                        active={activeTab}
+                        onChange={(tab) => {
+                            setActiveTab(tab);
+                            if (tab === 'posts') fetchVendorPosts();
+                            if (tab === 'catalog') fetchCatalogItems();
+                            if (tab === 'docs') fetchVendorDocuments();
+                        }}
+                    />
 
                     {/* Tab Content */}
                     <View style={styles.contentArea}>

@@ -1,7 +1,7 @@
 import { useTheme, ThemeProvider } from './src/context/ThemeContext';
 import React, { useEffect, useMemo, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef, getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider, SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -49,6 +49,12 @@ import { useCallStore } from './src/store/callStore';
 import { initGlobalAlertPatch } from './src/store/alertStore';
 
 export const navigationRef = createNavigationContainerRef<any>();
+
+// Chats and calls use the whole screen (no tab bar), like other messaging apps
+const FULL_SCREEN_ROUTES = ['Chat', 'CallScreen', 'Call'];
+function hideTabBar(route: any) {
+  return FULL_SCREEN_ROUTES.includes(getFocusedRouteNameFromRoute(route) ?? '');
+}
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -256,7 +262,7 @@ function ClientTabs() {
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: {
+        tabBarStyle: hideTabBar(route) ? { display: 'none' } : {
           borderTopColor: colors.border,
           backgroundColor: colors.surface,
           paddingBottom: bottomInset,
@@ -376,6 +382,8 @@ function ClientMessagesStack() {
         name="Chat"
         component={isGuest ? SignInRequiredScreen : ChatScreen}
         options={{ title: 'Chat' }}
+        // Each conversation is its own screen, so opening another chat doesn't overwrite this one
+        getId={({ params }: any) => params?.conversationId || params?.otherUserId || params?.receiverId}
       />
       <Stack.Screen
         name="UserProfileView"
@@ -426,6 +434,8 @@ function VendorMessagesStack() {
         name="Chat"
         component={isGuest ? SignInRequiredScreen : ChatScreen}
         options={{ title: 'Chat' }}
+        // Each conversation is its own screen, so opening another chat doesn't overwrite this one
+        getId={({ params }: any) => params?.conversationId || params?.otherUserId || params?.receiverId}
       />
       <Stack.Screen
         name="UserProfileView"
@@ -529,7 +539,7 @@ function VendorTabs() {
         headerTintColor: colors.textInverse,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: {
+        tabBarStyle: hideTabBar(route) ? { display: 'none' } : {
           borderTopColor: colors.border,
           backgroundColor: colors.surface,
           paddingBottom: bottomInset,
@@ -644,6 +654,8 @@ function AdminDashboardStack() {
         name="Chat"
         component={isGuest ? SignInRequiredScreen : ChatScreen}
         options={{ title: 'Chat' }}
+        // Each conversation is its own screen, so opening another chat doesn't overwrite this one
+        getId={({ params }: any) => params?.conversationId || params?.otherUserId || params?.receiverId}
       />
       <Stack.Screen
         name="UserProfileView"
@@ -675,7 +687,7 @@ function AdminTabs() {
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: {
+        tabBarStyle: hideTabBar(route) ? { display: 'none' } : {
           borderTopColor: colors.border,
           backgroundColor: colors.surface,
           paddingBottom: bottomInset,
@@ -804,6 +816,7 @@ function MainApp() {
         navigationRef.navigate('Messages', {
           screen: 'Chat',
           params: { conversationId: target.conversationId, otherUserId: target.senderId },
+          initial: false,
         });
       };
       open();

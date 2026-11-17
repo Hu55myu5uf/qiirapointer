@@ -19,6 +19,7 @@ import { FlashList } from '@shopify/flash-list';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { chatAPI } from '../services/api';
+import { auth } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '../constants/theme';
@@ -27,6 +28,7 @@ import { PLACEHOLDER_AVATARS } from '../assets';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 import TabSwipeHandler from '../components/TabSwipeHandler';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { openChat } from '../navigation/openChat';
 
 interface Conversation {
     id: string;
@@ -98,14 +100,22 @@ export default function ConversationsScreen({ navigation }: any) {
     }, [loadReadTimestamps]);
 
     const fetchServerDetails = useCallback(async () => {
-        if (!user) return;
+        // Only once Firebase has a signed-in session for this same user (not while signing in / out)
+        if (!user || auth.currentUser?.uid !== user.uid) {
+            setServerLoaded(true);
+            setRefreshing(false);
+            return;
+        }
         try {
             const response = await chatAPI.getConversations(user.uid);
             const byId: Record<string, Conversation> = {};
             for (const c of response.data.conversations || []) byId[c.id] = c;
             setServerConversations(byId);
-        } catch (error) {
-            console.error('Error fetching conversation details:', error);
+        } catch (error: any) {
+            // The list itself is live from Firestore; these are only extra names / photos, so a
+            // failed refresh (e.g. a session that is just ending) is not worth an error screen.
+            const status = error?.response?.status;
+            if (status !== 401 && status !== 403) console.warn('Could not refresh conversation details:', error?.message);
         } finally {
             setServerLoaded(true);
             setRefreshing(false);
@@ -214,7 +224,7 @@ export default function ConversationsScreen({ navigation }: any) {
                 style={[styles.conversationItem, unread && styles.conversationItemUnread]}
                 onPress={() => {
                     markAsRead(item.id);
-                    navigation.navigate('Chat', {
+                    openChat(navigation, {
                         conversationId: item.id,
                         otherUserId: otherId,
                         otherUserName: otherName,
@@ -336,7 +346,7 @@ export default function ConversationsScreen({ navigation }: any) {
                 <TouchableOpacity
                     style={styles.pinnedSupportCard}
                     onPress={() =>
-                        navigation.navigate('Chat', {
+                        openChat(navigation, {
                             otherUserId: 'qiira_official_support',
                             otherUserName: 'Pointer Customer Support',
                             otherUserImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',

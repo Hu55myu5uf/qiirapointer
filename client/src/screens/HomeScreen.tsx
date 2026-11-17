@@ -34,6 +34,8 @@ import { useAuthStore } from '../store/authStore';
 import { confirmAction } from '../utils/alert';
 import CallOptionModal from '../components/CallOptionModal';
 import TabSwipeHandler from '../components/TabSwipeHandler';
+import { openChat } from '../navigation/openChat';
+import { POPULAR_CATEGORIES, mainCategoryOf } from '../constants/categories';
 
 // Haversine formula to calculate distance between two coordinates in km
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -152,7 +154,7 @@ const SwipeableVendorCard = ({
 
     const handleChat = () => {
         closeSwipe();
-        navigation.navigate('Chat', {
+        openChat(navigation, {
             otherUserId: vendorId,
             otherUserName: item.businessName,
             otherUserImage: imageUri,
@@ -367,47 +369,25 @@ export default function HomeScreen({ navigation }: any) {
         }
     };
 
-function matchesCategory(vendorCategory: string | undefined, selected: string): boolean {
-    if (!selected || selected === 'All') return true;
-    const cat = (vendorCategory || '').toLowerCase();
-    const sel = selected.toLowerCase();
-    if (cat === sel) return true;
-    if (cat.includes(sel) || sel.includes(cat)) return true;
+    // Every vendor from the server (search applied); category / rating / sort are applied on the device
+    const [allVendors, setAllVendors] = useState<Vendor[]>([]);
 
-    if (sel.includes('restaurant') || sel.includes('food') || sel.includes('cafe')) {
-        return cat.includes('restaurant') || cat.includes('cafe') || cat.includes('food') || cat.includes('dining');
-    }
-    if (sel.includes('retail') || sel.includes('shop') || sel.includes('fashion')) {
-        return cat.includes('retail') || cat.includes('shop') || cat.includes('fashion') || cat.includes('apparel') || cat.includes('grocery') || cat.includes('supermarket');
-    }
-    if (sel.includes('service')) {
-        return cat.includes('service') || cat.includes('repair') || cat.includes('auto') || cat.includes('clean') || cat.includes('beauty') || cat.includes('spa');
-    }
-    if (sel.includes('health') || sel.includes('wellness')) {
-        return cat.includes('health') || cat.includes('wellness') || cat.includes('medic') || cat.includes('clinic') || cat.includes('pharm') || cat.includes('gym') || cat.includes('fit');
-    }
-    if (sel.includes('beauty') || sel.includes('spa')) {
-        return cat.includes('beauty') || cat.includes('spa') || cat.includes('saloon') || cat.includes('hair');
-    }
-    if (sel.includes('education') || sel.includes('train')) {
-        return cat.includes('educat') || cat.includes('train') || cat.includes('school') || cat.includes('academ');
-    }
-    if (sel.includes('tech') || sel.includes('electron')) {
-        return cat.includes('tech') || cat.includes('electron') || cat.includes('gadget') || cat.includes('softwar') || cat.includes('it');
-    }
-    return false;
-}
+    // Category chips: the app's real main categories. Ones that currently have vendors come
+    // first (with a count), so every chip a person taps actually leads somewhere.
+    const categoryCounts = useMemo(() => {
+        const counts: Record<string, number> = {};
+        for (const v of allVendors) {
+            const main = mainCategoryOf(v.category);
+            if (main) counts[main] = (counts[main] || 0) + 1;
+        }
+        return counts;
+    }, [allVendors]);
 
-    const categories = [
-        'All',
-        'Restaurants & Cafes',
-        'Retail & Shopping',
-        'Services',
-        'Health & Wellness',
-        'Beauty & Spa',
-        'Technology & Electronics',
-        'Education',
-    ];
+    const categories = useMemo(() => {
+        const withVendors = Object.keys(categoryCounts).sort((a, b) => categoryCounts[b] - categoryCounts[a] || a.localeCompare(b));
+        const others = POPULAR_CATEGORIES.filter(c => c !== 'All' && !categoryCounts[c]);
+        return ['All', ...withVendors, ...others];
+    }, [categoryCounts]);
 
     useEffect(() => {
         (async () => {
@@ -435,70 +415,20 @@ function matchesCategory(vendorCategory: string | undefined, selected: string): 
 
     useEffect(() => {
         fetchVendors();
-    }, [selectedCategory, debouncedSearch, minRating, sortBy]);
+    }, [debouncedSearch]);
 
     const fetchVendors = async () => {
         try {
             setLoading(true);
-            // Filtering and sorting happen on the device, so request the full list (server max 100)
+            // Request the full list (server max 100); filtering and sorting happen on the device
             const params: any = { limit: 100 };
-            if (selectedCategory && selectedCategory !== 'All') {
-                params.category = selectedCategory;
-            }
             if (debouncedSearch) {
                 params.search = debouncedSearch;
             }
-
             const response = await vendorAPI.getAll(params);
-            let filteredVendors = response.data.vendors || [];
-
-            // Category filter with alias tolerance
-            if (selectedCategory && selectedCategory !== 'All') {
-                filteredVendors = filteredVendors.filter((v: Vendor) =>
-                    matchesCategory(v.category, selectedCategory)
-                );
-            }
-
-            // Client-side filtering by minimum rating
-            if (minRating > 0) {
-                filteredVendors = filteredVendors.filter(
-                    (v: Vendor) => (v.averageRating || 0) >= minRating
-                );
-            }
-
-            // Client-side sorting
-            if (sortBy === 'rating') {
-                filteredVendors.sort(
-                    (a: Vendor, b: Vendor) => (b.averageRating || 0) - (a.averageRating || 0)
-                );
-            } else if (sortBy === 'nearest' && userLocation) {
-                filteredVendors.sort((a: Vendor, b: Vendor) => {
-                    const distA = a.location
-                        ? calculateDistance(
-                              userLocation.latitude,
-                              userLocation.longitude,
-                              a.location.latitude,
-                              a.location.longitude
-                          )
-                        : Infinity;
-                    const distB = b.location
-                        ? calculateDistance(
-                              userLocation.latitude,
-                              userLocation.longitude,
-                              b.location.latitude,
-                              b.location.longitude
-                          )
-                        : Infinity;
-                    return distA - distB;
-                });
-            } else if (sortBy === 'newest') {
-                filteredVendors.sort(
-                    (a: any, b: any) =>
-                        new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-                );
-            }
-
-            setVendors(filteredVendors);
+            // Only businesses that have finished their profile (a category) are listed
+            const list: Vendor[] = (response.data.vendors || []).filter((v: Vendor) => Boolean(mainCategoryOf(v.category)));
+            setAllVendors(list);
         } catch (error) {
             console.error('Error fetching vendors:', error);
             Alert.alert('Error', 'Failed to load vendors');
@@ -506,6 +436,39 @@ function matchesCategory(vendorCategory: string | undefined, selected: string): 
             setLoading(false);
         }
     };
+
+    // Apply the category tab, minimum rating and sort order
+    useEffect(() => {
+        let filteredVendors = [...allVendors];
+
+        if (selectedCategory && selectedCategory !== 'All') {
+            filteredVendors = filteredVendors.filter((v: Vendor) => mainCategoryOf(v.category) === selectedCategory);
+        }
+
+        if (minRating > 0) {
+            filteredVendors = filteredVendors.filter(
+                (v: Vendor) => (v.averageRating || 0) >= minRating
+            );
+        }
+
+        if (sortBy === 'rating') {
+            filteredVendors.sort(
+                (a: Vendor, b: Vendor) => (b.averageRating || 0) - (a.averageRating || 0)
+            );
+        } else if (sortBy === 'nearest' && userLocation) {
+            const dist = (v: Vendor) => v.location
+                ? calculateDistance(userLocation.latitude, userLocation.longitude, v.location.latitude, v.location.longitude)
+                : Infinity;
+            filteredVendors.sort((a: Vendor, b: Vendor) => dist(a) - dist(b));
+        } else if (sortBy === 'newest') {
+            filteredVendors.sort(
+                (a: any, b: any) =>
+                    new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+            );
+        }
+
+        setVendors(filteredVendors);
+    }, [allVendors, selectedCategory, minRating, sortBy, userLocation]);
 
     const renderVendorCard = ({ item }: { item: Vendor }) => {
         return (
@@ -587,25 +550,23 @@ function matchesCategory(vendorCategory: string | undefined, selected: string): 
                 style={styles.categoriesContainer}
                 contentContainerStyle={styles.categoriesContent}
             >
-                {categories.map((item) => (
-                    <TouchableOpacity
-                        key={item}
-                        style={[
-                            styles.categoryChip,
-                            selectedCategory === item && styles.categoryChipActive,
-                        ]}
-                        onPress={() => setSelectedCategory(item === 'All' ? '' : item)}
-                    >
-                        <Text
-                            style={[
-                                styles.categoryText,
-                                selectedCategory === item && styles.categoryTextActive,
-                            ]}
+                {categories.map((item) => {
+                    const isActive = item === 'All' ? !selectedCategory : selectedCategory === item;
+                    const count = item === 'All' ? allVendors.length : (categoryCounts[item] || 0);
+                    return (
+                        <TouchableOpacity
+                            key={item}
+                            style={[styles.categoryChip, isActive && styles.categoryChipActive]}
+                            onPress={() => setSelectedCategory(item === 'All' ? '' : item)}
+                            accessibilityRole="button"
+                            accessibilityState={{ selected: isActive }}
                         >
-                            {item}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
+                            <Text style={[styles.categoryText, isActive && styles.categoryTextActive]}>
+                                {item}{count > 0 ? `  ${count}` : ''}
+                            </Text>
+                        </TouchableOpacity>
+                    );
+                })}
             </ScrollView>
 
             {/* Content */}
@@ -659,7 +620,9 @@ function matchesCategory(vendorCategory: string | undefined, selected: string): 
                 </View>
             ) : vendors.length === 0 ? (
                 <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>No vendors found</Text>
+                    <Text style={styles.emptyText}>
+                        {selectedCategory ? `No vendors in ${selectedCategory} yet` : 'No vendors found'}
+                    </Text>
                 </View>
             ) : (
                 <View style={styles.listColumn}>

@@ -29,6 +29,7 @@ import ChangePasswordModal from '../components/ChangePasswordModal';
 import { useAuthStore } from '../store/authStore';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import CategoryPickerModal from '../components/CategoryPickerModal';
+import { openChat } from '../navigation/openChat';
 
 const SUPPORT_QUICK_RESPONSES = [
     'Hello! We are currently looking into this and will assist you immediately.',
@@ -246,7 +247,7 @@ export default function AdminDashboardScreen({ navigation }: any) {
         const otherImage = item.participantImages?.[otherId] || '';
         const isVerified = Boolean(item.participantVerified?.[otherId]);
 
-        navigation.navigate('Chat', {
+        openChat(navigation, {
             conversationId: item.id,
             otherUserId: otherId,
             otherUserName: otherName,

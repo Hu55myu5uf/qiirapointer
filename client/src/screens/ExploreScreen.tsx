@@ -40,6 +40,7 @@ import ShowcaseFeed from '../components/ShowcaseFeed';
 import { auth } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
 import { useCartStore } from '../store/cartStore';
+import { openChat } from '../navigation/openChat';
 
 
 // Multi-media carousel component for posts with multiple images
@@ -805,7 +806,7 @@ export default function ExploreScreen({ navigation, route }: any) {
                     <TouchableOpacity
                         style={styles.chatVendorButton}
                         onPress={() =>
-                            navigation.navigate('Chat', {
+                            openChat(navigation, {
                                 otherUserId: item.authorId || item.vendorId,
                                 otherUserName: item.vendorName,
                                 otherUserImage: item.vendorImage,
@@ -1002,7 +1003,7 @@ export default function ExploreScreen({ navigation, route }: any) {
                     onComment={handleOpenComments}
                     onShare={handleShare}
                     onChat={(item) =>
-                        navigation.navigate('Chat', {
+                        openChat(navigation, {
                             otherUserId: item.authorId || item.vendorId,
                             otherUserName: item.vendorName,
                             otherUserImage: item.vendorImage,

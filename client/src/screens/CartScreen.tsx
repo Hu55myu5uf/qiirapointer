@@ -19,6 +19,7 @@ import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '
 import { useCartStore, CartItem } from '../store/cartStore';
 import { auth } from '../config/firebase';
 import { VerificationBadgeInline } from '../components/VerificationBadge';
+import { openChat } from '../navigation/openChat';
 
 export default function CartScreen({ navigation }: any) {
     const { colors } = useTheme();
@@ -66,7 +67,7 @@ export default function CartScreen({ navigation }: any) {
                     text: 'Chat with Vendor',
                     onPress: () => {
                         const firstItem = items[0];
-                        navigation.navigate('Chat', {
+                        openChat(navigation, {
                             receiverId: firstItem.vendorId,
                             receiverName: firstItem.vendorName,
                             initialMessage: `Hello! I would like to order: ${items.map((it) => `${it.title} (x${it.quantity})`).join(', ')}. Total: ₦${subtotal.toLocaleString()}`,

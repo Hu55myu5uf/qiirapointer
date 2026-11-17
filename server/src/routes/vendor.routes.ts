@@ -40,12 +40,14 @@ const LIMITS = {
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : undefined);
 const isHttpsUrl = (v: unknown) => typeof v === 'string' && v.length <= 2048 && /^https:\/\/[^\s]+$/i.test(v);
 
+/** Categories are stored as "Main category - Subcategory"; filtering is by the main category. */
+const mainCategoryOf = (category: string) => String(category || '').split(' - ')[0].trim().toLowerCase();
+
 function matchesCategory(vendorCategory: string, wanted: string) {
-    const v = vendorCategory.toLowerCase();
-    const w = wanted.toLowerCase();
-    if (!v) return false;
-    const root = w.split('&')[0].trim().split(' ')[0].trim();
-    return v.includes(w) || w.includes(v) || (root.length > 3 && v.includes(root));
+    const v = mainCategoryOf(vendorCategory);
+    const w = mainCategoryOf(wanted);
+    if (!v || !w) return false;
+    return v === w;
 }
 
 async function loadVendor(uid: string) {
@@ -76,7 +78,8 @@ router.get('/', async (req: Request, res: Response) => {
         const origin = validLatLng({ latitude: req.query.latitude, longitude: req.query.longitude });
         const radius = Number(req.query.radius) || 0;
 
-        let vendors: any[] = await getApprovedVendors();
+        // Discover lists businesses only: a vendor appears once their profile has a category
+        let vendors: any[] = (await getApprovedVendors()).filter(v => Boolean(mainCategoryOf(v.category)));
 
         if (typeof category === 'string' && category && category !== 'All') {
             vendors = vendors.filter(v => matchesCategory(v.category, category));
