@@ -6,7 +6,6 @@ import {
     TouchableOpacity,
     StyleSheet,
     Animated,
-    Dimensions,
     Platform,
     TouchableWithoutFeedback,
 } from 'react-native';
@@ -15,7 +14,6 @@ import { useTheme } from '../context/ThemeContext';
 import { useAlertStore, ThemedAlertButton, AlertType } from '../store/alertStore';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 
-const { width } = Dimensions.get('window');
 
 export default function ThemedAlertModal() {
     const { colors, theme } = useTheme();

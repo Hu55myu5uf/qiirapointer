@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import {
     View,
@@ -13,10 +13,11 @@ import {
     ScrollView,
     Platform,
     Alert,
-    Dimensions,
+    useWindowDimensions,
     StatusBar,
     KeyboardAvoidingView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Cached, downscaled images (expo-image) with the same props as React Native Image
 import { Image } from '../components/CachedImage';
 import { FlashList } from '@shopify/flash-list';
@@ -40,7 +41,6 @@ import { auth } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
 import { useCartStore } from '../store/cartStore';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Multi-media carousel component for posts with multiple images
 function PostMediaCarousel({ item, colors, styles }: { item: any; colors: any; styles: any }) {
@@ -50,7 +50,10 @@ function PostMediaCarousel({ item, colors, styles }: { item: any; colors: any; s
         : [item.mediaUrl || item.thumbnailUrl || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800'];
     const isReel = item.type === 'reel';
     const isMulti = mediaList.length > 1;
-    const containerWidth = Math.min(SCREEN_WIDTH, 680);
+    // Measured from the card itself, so it follows rotation, split screen and tablet widths
+    const { width: windowWidth } = useWindowDimensions();
+    const [measuredWidth, setMeasuredWidth] = React.useState(0);
+    const containerWidth = measuredWidth || Math.min(windowWidth, 680);
 
     const handleScroll = (event: any) => {
         const x = event.nativeEvent.contentOffset.x;
@@ -59,7 +62,10 @@ function PostMediaCarousel({ item, colors, styles }: { item: any; colors: any; s
     };
 
     return (
-        <View style={styles.mediaContainer}>
+        <View style={styles.mediaContainer} onLayout={(e) => {
+            const w = Math.round(e.nativeEvent.layout.width);
+            if (w > 0 && w !== measuredWidth) setMeasuredWidth(w);
+        }}>
             {isMulti ? (
                 <ScrollView
                     horizontal
@@ -143,7 +149,8 @@ export default function ExploreScreen({ navigation, route }: any) {
     const { colors } = useTheme();
     const { userRole } = useAuthStore();
     const { addItem, isInCart } = useCartStore();
-    const styles = getStyles(colors);
+    const insets = useSafeAreaInsets();
+    const styles = useMemo(() => getStyles(colors, insets.top), [colors, insets.top]);
     const isScreenFocused = useIsFocused();
 
     const [activeTab, setActiveTab] = useState<'feed' | 'reels'>('feed');
@@ -1375,8 +1382,9 @@ export default function ExploreScreen({ navigation, route }: any) {
     );
 }
 
-const getStyles = (colors: any) => {
-    const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : (Platform.OS === 'web' ? 0 : 48);
+const getStyles = (colors: any, topInset: number = 0) => {
+    // Real safe-area inset (notch, punch-hole camera, landscape); fall back to the status bar height
+    const statusBarHeight = topInset || (Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
     return StyleSheet.create({
         container: {
             flex: 1,
@@ -1700,6 +1708,10 @@ const getStyles = (colors: any) => {
             justifyContent: 'flex-end',
         },
         modalContent: {
+            // Bottom sheet: full width on phones, a centred card-width sheet on tablets / landscape
+            width: '100%',
+            maxWidth: 640,
+            alignSelf: 'center',
             backgroundColor: colors.surface,
             borderTopLeftRadius: BORDER_RADIUS.lg,
             borderTopRightRadius: BORDER_RADIUS.lg,

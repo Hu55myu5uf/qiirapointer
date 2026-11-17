@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { vendorAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
-import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, FORM_MAX_WIDTH } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { VerificationBadgeInline } from '../components/VerificationBadge';
 
@@ -115,6 +115,9 @@ const getStyles = (colors: any) => StyleSheet.create({
         backgroundColor: colors.background,
     },
     content: {
+        width: '100%',
+        maxWidth: FORM_MAX_WIDTH,
+        alignSelf: 'center',
         padding: SPACING.lg,
     },
     title: {

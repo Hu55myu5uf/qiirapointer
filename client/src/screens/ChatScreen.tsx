@@ -24,7 +24,7 @@ import { subscribeToMessages } from '../services/realtime';
 import { chatAPI, vendorAPI, authAPI, moderationAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
-import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, CHAT_MAX_WIDTH } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -1178,6 +1178,10 @@ const getStyles = (colors: any) =>
         },
         keyboardView: {
             flex: 1,
+            // Centred conversation column on tablets / landscape
+            width: '100%',
+            maxWidth: CHAT_MAX_WIDTH,
+            alignSelf: 'center',
         },
         loadingContainer: {
             flex: 1,

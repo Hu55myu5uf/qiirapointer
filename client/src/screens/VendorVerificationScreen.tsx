@@ -12,7 +12,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useFocusEffect } from '@react-navigation/native';
 import { vendorAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
-import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { QIIRA_PALETTE } from '../constants/theme';
@@ -229,6 +229,9 @@ const getStyles = (colors: any, theme: string) => StyleSheet.create({
         backgroundColor: colors.background,
     },
     container: {
+        width: '100%',
+        maxWidth: CONTENT_MAX_WIDTH,
+        alignSelf: 'center',
         padding: SPACING.lg,
         paddingBottom: SPACING.xxl + 40,
     },

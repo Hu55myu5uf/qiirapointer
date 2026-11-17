@@ -6,7 +6,6 @@ import {
     Modal,
     TouchableOpacity,
     Animated,
-    Dimensions,
 } from 'react-native';
 // Cached, downscaled images (expo-image) with the same props as React Native Image
 import { Image } from './CachedImage';
@@ -17,7 +16,6 @@ import { PLACEHOLDER_AVATARS } from '../assets';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 
-const { width } = Dimensions.get('window');
 
 interface IncomingCallModalProps {
     navigation?: any;
@@ -178,7 +176,8 @@ const styles = StyleSheet.create({
         padding: SPACING.lg,
     },
     card: {
-        width: Math.min(width - 40, 360),
+        width: '90%',
+        maxWidth: 360,
         borderRadius: 24,
         paddingVertical: 32,
         paddingHorizontal: 24,

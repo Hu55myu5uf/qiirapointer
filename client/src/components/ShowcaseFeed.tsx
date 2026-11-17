@@ -51,7 +51,8 @@ import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
 import { AvatarVerificationBadge, VerificationBadgeInline } from './VerificationBadge';
 import { PLACEHOLDER_AVATARS } from '../assets';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+// Initial guess only; the real size comes from onLayout (and updates on rotation / split screen)
+const INITIAL = Dimensions.get('window');
 
 // Curated high quality showcase reels when feed has no reels yet
 const CURATED_SHOWCASES = [
@@ -416,8 +417,12 @@ export default function ShowcaseFeed({
     const { colors } = useTheme();
     const [activeIndex, setActiveIndex] = useState(0);
     const [isMuted, setIsMuted] = useState(false);
-    const [containerHeight, setContainerHeight] = useState(SCREEN_HEIGHT - 170);
-    const containerWidth = Math.min(SCREEN_WIDTH, 680);
+    const [layout, setLayout] = useState({ width: INITIAL.width, height: INITIAL.height - 170 });
+    const containerHeight = layout.height;
+    const containerWidth = Math.min(layout.width, 680);
+    const listRef = useRef<FlatList<any>>(null);
+    const activeIndexRef = useRef(0);
+    activeIndexRef.current = activeIndex;
 
     // Filter reels or showcase items; fallback to curated showcase list if empty
     const showcasePosts = React.useMemo(() => {
@@ -443,15 +448,24 @@ export default function ShowcaseFeed({
     }).current;
 
     const handleLayout = (event: any) => {
-        const h = event.nativeEvent.layout.height;
-        if (h > 200) {
-            setContainerHeight(h);
+        const { width: w, height: h } = event.nativeEvent.layout;
+        if (h > 200 && (Math.abs(h - layout.height) > 1 || Math.abs(w - layout.width) > 1)) {
+            setLayout({ width: w, height: h });
         }
     };
+
+    // After a rotation / resize every page changes height, so keep the current reel in view
+    useEffect(() => {
+        const idx = activeIndexRef.current;
+        if (idx > 0) {
+            requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: idx * containerHeight, animated: false }));
+        }
+    }, [containerHeight]);
 
     return (
         <View style={styles.container} onLayout={handleLayout}>
             <FlatList
+                ref={listRef}
                 data={showcasePosts}
                 keyExtractor={(item) => item.id}
                 renderItem={({ item, index }) => (
@@ -474,6 +488,7 @@ export default function ShowcaseFeed({
                 pagingEnabled
                 showsVerticalScrollIndicator={false}
                 snapToInterval={containerHeight}
+                getItemLayout={(_, index) => ({ length: containerHeight, offset: containerHeight * index, index })}
                 snapToAlignment="start"
                 decelerationRate="fast"
                 onViewableItemsChanged={onViewableItemsChanged}

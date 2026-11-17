@@ -222,6 +222,10 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     container: {
+        // Bottom sheet: full width on phones, a centred card-width sheet on tablets / landscape
+        width: '100%',
+        maxWidth: 640,
+        alignSelf: 'center',
         maxHeight: '85%',
         borderTopLeftRadius: BORDER_RADIUS.xl || 20,
         borderTopRightRadius: BORDER_RADIUS.xl || 20,

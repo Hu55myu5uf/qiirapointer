@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     View,
     Text,
@@ -12,8 +12,9 @@ import {
     Platform,
     StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { adminAPI } from '../services/api';
-import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { VerificationBadgeInline } from '../components/VerificationBadge';
 import { confirmAction } from '../utils/alert';
@@ -21,7 +22,8 @@ import { auth } from '../config/firebase';
 
 export default function UserManagementScreen({ route }: any) {
     const { colors } = useTheme();
-    const styles = getStyles(colors);
+    const insets = useSafeAreaInsets();
+    const styles = useMemo(() => getStyles(colors, insets.top), [colors, insets.top]);
 
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -318,8 +320,9 @@ export default function UserManagementScreen({ route }: any) {
     );
 }
 
-const getStyles = (colors: any) => {
-    const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : (Platform.OS === 'web' ? 0 : 48);
+const getStyles = (colors: any, topInset: number = 0) => {
+    // Real safe-area inset (notch, punch-hole camera, landscape); fall back to the status bar height
+    const statusBarHeight = topInset || (Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
     return StyleSheet.create({
         container: {
             flex: 1,
@@ -400,6 +403,9 @@ const getStyles = (colors: any) => {
         color: colors.textInverse,
     },
     listContent: {
+        width: '100%',
+        maxWidth: CONTENT_MAX_WIDTH,
+        alignSelf: 'center',
         padding: SPACING.md,
     },
     userCard: {

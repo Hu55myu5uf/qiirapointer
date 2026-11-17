@@ -271,6 +271,10 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     content: {
+        // Bottom sheet: full width on phones, a centred card-width sheet on tablets / landscape
+        width: '100%',
+        maxWidth: 640,
+        alignSelf: 'center',
         borderTopLeftRadius: BORDER_RADIUS.xl,
         borderTopRightRadius: BORDER_RADIUS.xl,
         padding: SPACING.lg,

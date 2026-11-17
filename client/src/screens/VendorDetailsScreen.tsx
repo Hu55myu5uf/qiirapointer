@@ -8,7 +8,6 @@ import {
     ActivityIndicator,
     Alert,
     Linking,
-    Dimensions,
     Platform,
     Modal,
     TextInput,
@@ -19,7 +18,7 @@ import { Image } from '../components/CachedImage';
 import { vendorAPI, clientAPI, postAPI, moderationAPI } from '../services/api';
 import { canDeleteComment, confirmDeleteComment } from '../utils/comments';
 import { useAuthStore } from '../store/authStore';
-import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '../constants/theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { isCurrentlyOpen, getHoursDisplayString, DAY_LABELS } from '../utils/businessHours';
 import { useTheme } from '../context/ThemeContext';
@@ -35,7 +34,6 @@ import SharePostModal from '../components/SharePostModal';
 import PlaceOrderModal from '../components/PlaceOrderModal';
 import ReportModal from '../components/ReportModal';
 
-const { width } = Dimensions.get('window');
 
 // X-Style Theme Customizations
 const X_THEME = {
@@ -1199,6 +1197,9 @@ const getStyles = (colors: any) => StyleSheet.create({
         alignItems: 'center',
     },
     scrollContent: {
+        width: '100%',
+        maxWidth: CONTENT_MAX_WIDTH,
+        alignSelf: 'center',
         paddingBottom: 50,
     },
     // Banner
@@ -1594,6 +1595,10 @@ const getStyles = (colors: any) => StyleSheet.create({
         justifyContent: 'flex-end',
     },
     modalContent: {
+        // Bottom sheet: full width on phones, a centred card-width sheet on tablets / landscape
+        width: '100%',
+        maxWidth: 640,
+        alignSelf: 'center',
         backgroundColor: colors.surface,
         borderTopLeftRadius: BORDER_RADIUS.xl,
         borderTopRightRadius: BORDER_RADIUS.xl,

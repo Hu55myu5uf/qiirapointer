@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import {
     View,
@@ -13,12 +13,13 @@ import {
     Platform,
     StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Cached, downscaled images (expo-image) with the same props as React Native Image
 import { Image } from '../components/CachedImage';
 import { confirmAction } from '../utils/alert';
 import { authAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
-import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '../constants/theme';
 import { auth } from '../config/firebase';
 import { updateProfile } from 'firebase/auth';
 import * as ImagePicker from 'expo-image-picker';
@@ -36,7 +37,8 @@ import UpgradeToVendorModal from '../components/UpgradeToVendorModal';
 export default function ClientProfileScreen() {
     const navigation = useNavigation<any>();
     const { theme, colors, toggleTheme } = useTheme();
-    const styles = getStyles(colors);
+    const insets = useSafeAreaInsets();
+    const styles = useMemo(() => getStyles(colors, insets.top), [colors, insets.top]);
 
     const { user, userRole, realRole } = useAuthStore();
     const isAdmin = Boolean(realRole === 'admin' || userRole === 'admin' || user?.email === 'admin@qiira.com' || user?.uid === 'v8MwaOet0ISfZAWXIDAPAGcg1td2');
@@ -525,8 +527,9 @@ export default function ClientProfileScreen() {
     );
 }
 
-const getStyles = (colors: any) => {
-    const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : (Platform.OS === 'web' ? 0 : 48);
+const getStyles = (colors: any, topInset: number = 0) => {
+    // Real safe-area inset (notch, punch-hole camera, landscape); fall back to the status bar height
+    const statusBarHeight = topInset || (Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
     return StyleSheet.create({
         container: {
             flex: 1,
@@ -585,6 +588,9 @@ const getStyles = (colors: any) => {
         borderRadius: BORDER_RADIUS.sm,
     },
     content: {
+        width: '100%',
+        maxWidth: CONTENT_MAX_WIDTH,
+        alignSelf: 'center',
         padding: SPACING.lg,
         paddingBottom: 130,
     },

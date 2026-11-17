@@ -144,6 +144,10 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     container: {
+        // Bottom sheet: full width on phones, a centred card-width sheet on tablets / landscape
+        width: '100%',
+        maxWidth: 640,
+        alignSelf: 'center',
         maxHeight: '75%',
         minHeight: '40%',
         borderTopLeftRadius: 20,

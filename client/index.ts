@@ -1,6 +1,10 @@
 import 'react-native-gesture-handler';
 import { registerRootComponent } from 'expo';
 import * as Sentry from '@sentry/react-native';
+import { initOrientationPolicy } from './src/utils/orientation';
+
+// Phones stay portrait; tablets / unfolded foldables can rotate
+initOrientationPolicy();
 
 // Crash reporting (Sentry). Only active in real builds and only when a DSN is configured
 // (EXPO_PUBLIC_SENTRY_DSN). No personal data is sent: no IP addresses, emails or request bodies.

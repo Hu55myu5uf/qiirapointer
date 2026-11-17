@@ -17,7 +17,7 @@ import {
 import { Image } from '../components/CachedImage';
 import * as ImagePicker from 'expo-image-picker';
 import { vendorAPI } from '../services/api';
-import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, FORM_MAX_WIDTH } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { BUSINESS_CATEGORIES } from '../constants/categories';
 import CategoryPickerModal from '../components/CategoryPickerModal';
@@ -266,6 +266,9 @@ const getStyles = (colors: any) =>
             backgroundColor: colors.background,
         },
         scrollContent: {
+            width: '100%',
+            maxWidth: FORM_MAX_WIDTH,
+            alignSelf: 'center',
             flexGrow: 1,
             padding: SPACING.lg,
             paddingTop: SPACING.xl * 2,
@@ -381,6 +384,10 @@ const getStyles = (colors: any) =>
             justifyContent: 'flex-end',
         },
         modalContent: {
+            // Bottom sheet: full width on phones, a centred card-width sheet on tablets / landscape
+            width: '100%',
+            maxWidth: 640,
+            alignSelf: 'center',
             backgroundColor: colors.surface,
             borderTopLeftRadius: BORDER_RADIUS.lg,
             borderTopRightRadius: BORDER_RADIUS.lg,

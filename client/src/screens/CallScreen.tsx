@@ -5,7 +5,6 @@ import {
     StyleSheet,
     TouchableOpacity,
     Animated,
-    Dimensions,
     StatusBar,
     Platform,
 } from 'react-native';
@@ -23,7 +22,6 @@ import { callAPI, authAPI, vendorAPI, API_URL } from '../services/api';
 import { subscribeToCall } from '../services/realtime';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 
-const { width, height } = Dimensions.get('window');
 
 export default function CallScreen({ route, navigation }: any) {
     const { colors } = useTheme();
@@ -505,14 +503,14 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingHorizontal: 20,
         paddingTop: Platform.OS === 'android' ? 20 : 10,
-        height: 60,
+        minHeight: 60,
         zIndex: 10,
     },
     minimizeBtn: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 12,
-        height: 36,
+        minHeight: 36,
         borderRadius: 18,
         backgroundColor: 'rgba(255,255,255,0.15)',
         gap: 4,

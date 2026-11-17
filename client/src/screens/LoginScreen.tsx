@@ -15,7 +15,7 @@ import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
 import { authAPI } from '../services/api';
-import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, FORM_MAX_WIDTH } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import SocialAuthButtons from '../components/SocialAuthButtons';
 
@@ -185,6 +185,9 @@ const getStyles = (colors: any) => StyleSheet.create({
         backgroundColor: colors.background,
     },
     scrollContent: {
+        width: '100%',
+        maxWidth: FORM_MAX_WIDTH,
+        alignSelf: 'center',
         flexGrow: 1,
         justifyContent: 'center',
         padding: SPACING.lg,

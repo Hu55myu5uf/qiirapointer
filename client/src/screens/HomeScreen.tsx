@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
     View,
     Text,
@@ -8,7 +8,6 @@ import {
     TouchableOpacity,
     ActivityIndicator,
     Alert,
-    Dimensions,
     Modal,
     ScrollView,
     Platform,
@@ -17,13 +16,14 @@ import {
     Linking,
     PanResponder,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Cached, downscaled images (expo-image) with the same props as React Native Image
 import { Image } from '../components/CachedImage';
 import { FlashList } from '@shopify/flash-list';
 import MapView, { Marker, Callout } from '../components/MapView';
 import * as Location from 'expo-location';
 import { vendorAPI, clientAPI } from '../services/api';
-import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '../constants/theme';
 import { auth } from '../config/firebase';
 import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
@@ -304,7 +304,8 @@ const SwipeableVendorCard = ({
 
 export default function HomeScreen({ navigation }: any) {
     const { colors } = useTheme();
-    const styles = getStyles(colors);
+    const insets = useSafeAreaInsets();
+    const styles = useMemo(() => getStyles(colors, insets.top), [colors, insets.top]);
     const { userRole } = useAuthStore();
 
     const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -661,12 +662,14 @@ function matchesCategory(vendorCategory: string | undefined, selected: string): 
                     <Text style={styles.emptyText}>No vendors found</Text>
                 </View>
             ) : (
-                <FlashList
-                    data={vendors}
-                    keyExtractor={(item) => item.id}
-                    renderItem={renderVendorCard}
-                    contentContainerStyle={styles.listContent}
-                />
+                <View style={styles.listColumn}>
+                    <FlashList
+                        data={vendors}
+                        keyExtractor={(item) => item.id}
+                        renderItem={renderVendorCard}
+                        contentContainerStyle={styles.listContent}
+                    />
+                </View>
             )}
 
             {/* Filter Modal */}
@@ -776,9 +779,17 @@ function matchesCategory(vendorCategory: string | undefined, selected: string): 
     );
 }
 
-const getStyles = (colors: any) => {
-    const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 44;
+const getStyles = (colors: any, topInset: number = 0) => {
+    // Real safe-area inset (notch, punch-hole camera, landscape); fall back to the status bar height
+    const statusBarHeight = topInset || (Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
     return StyleSheet.create({
+        // Centred column on tablets / landscape (FlashList sizes rows from its own width)
+        listColumn: {
+            flex: 1,
+            width: '100%',
+            maxWidth: CONTENT_MAX_WIDTH,
+            alignSelf: 'center',
+        },
         container: {
             flex: 1,
             backgroundColor: colors.background,
@@ -853,7 +864,6 @@ const getStyles = (colors: any) => {
         categoriesContainer: {
             paddingHorizontal: SPACING.md,
             marginBottom: SPACING.sm,
-            maxHeight: 44,
             flexGrow: 0,
         },
         categoriesContent: {
@@ -868,7 +878,7 @@ const getStyles = (colors: any) => {
             marginRight: SPACING.xs + 2,
             borderWidth: 1,
             borderColor: colors.border,
-            height: 32,
+            minHeight: 32,
             justifyContent: 'center',
         },
         categoryChipActive: {
@@ -1034,6 +1044,10 @@ const getStyles = (colors: any) => {
             justifyContent: 'flex-end',
         },
         modalContent: {
+            // Bottom sheet: full width on phones, a centred card-width sheet on tablets / landscape
+            width: '100%',
+            maxWidth: 640,
+            alignSelf: 'center',
             backgroundColor: colors.surface,
             borderTopLeftRadius: BORDER_RADIUS.xl,
             borderTopRightRadius: BORDER_RADIUS.xl,

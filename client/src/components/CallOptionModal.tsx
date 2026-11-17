@@ -7,7 +7,6 @@ import {
     TouchableOpacity,
     Linking,
     Alert,
-    Dimensions,
     Platform,
 } from 'react-native';
 // Cached, downscaled images (expo-image) with the same props as React Native Image
@@ -20,7 +19,6 @@ import { PLACEHOLDER_AVATARS } from '../assets';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { VerificationBadgeInline, AvatarVerificationBadge } from './VerificationBadge';
 
-const { width } = Dimensions.get('window');
 
 interface CallOptionModalProps {
     visible: boolean;

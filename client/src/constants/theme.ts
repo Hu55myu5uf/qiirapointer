@@ -73,6 +73,12 @@ export const darkColors = {
 // while refactoring components
 export const COLORS = lightColors;
 
+// On tablets, foldables and landscape, content is centred in a readable column instead of
+// stretching edge to edge. On phones these are wider than the screen, so nothing changes.
+export const CONTENT_MAX_WIDTH = 720;
+export const FORM_MAX_WIDTH = 520;
+export const CHAT_MAX_WIDTH = 840;
+
 export const SPACING = {
     xs: 4,
     sm: 8,

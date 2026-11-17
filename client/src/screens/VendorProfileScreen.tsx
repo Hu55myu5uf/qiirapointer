@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import * as Location from 'expo-location';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -12,17 +12,17 @@ import {
     ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
-    Dimensions,
     Modal,
     FlatList,
     StatusBar,
     Linking,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Cached, downscaled images (expo-image) with the same props as React Native Image
 import { Image } from '../components/CachedImage';
 import { vendorAPI, postAPI, authAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
-import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '../constants/theme';
 import { shareVendorProfile, sharePost } from '../services/shareService';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { auth, storage } from '../config/firebase';
@@ -55,7 +55,6 @@ import AddCatalogItemModal from '../components/AddCatalogItemModal';
 // Enable Debug Logs for Firebase
 setLogLevel('debug');
 
-const { width } = Dimensions.get('window');
 
 // X-Style Theme Constants
 const X_THEME = {
@@ -68,7 +67,8 @@ const VENDOR_CATEGORIES = BUSINESS_CATEGORIES;
 
 export default function VendorProfileScreen({ navigation }: any) {
   const { theme, colors, toggleTheme } = useTheme();
-  const styles = getStyles(colors);
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => getStyles(colors, insets.top), [colors, insets.top]);
 
     const { user, userRole, realRole } = useAuthStore();
     const isAdmin = Boolean(realRole === 'admin' || userRole === 'admin' || user?.email === 'admin@qiira.com' || user?.uid === 'v8MwaOet0ISfZAWXIDAPAGcg1td2');
@@ -2015,8 +2015,9 @@ export default function VendorProfileScreen({ navigation }: any) {
     );
 }
 
-const getStyles = (colors: any) => {
-    const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : (Platform.OS === 'web' ? 0 : 48);
+const getStyles = (colors: any, topInset: number = 0) => {
+    // Real safe-area inset (notch, punch-hole camera, landscape); fall back to the status bar height
+    const statusBarHeight = topInset || (Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
     return StyleSheet.create({
         container: {
             flex: 1,
@@ -2040,6 +2041,9 @@ const getStyles = (colors: any) => {
         },
     // --- View Mode Styles ---
     viewContent: {
+        width: '100%',
+        maxWidth: CONTENT_MAX_WIDTH,
+        alignSelf: 'center',
         paddingBottom: 130,
     },
     bannerContainer: {
@@ -2205,6 +2209,9 @@ const getStyles = (colors: any) => {
         fontSize: FONT_SIZES.md,
     },
     editContent: {
+        width: '100%',
+        maxWidth: CONTENT_MAX_WIDTH,
+        alignSelf: 'center',
         // padding: SPACING.lg, // Removed padding to let banner be full width
     },
     editBannerContainer: {
@@ -2369,6 +2376,10 @@ const getStyles = (colors: any) => {
         justifyContent: 'flex-end',
     },
     modalContent: {
+        // Bottom sheet: full width on phones, a centred card-width sheet on tablets / landscape
+        width: '100%',
+        maxWidth: 640,
+        alignSelf: 'center',
         backgroundColor: colors.surface,
         borderTopLeftRadius: BORDER_RADIUS.lg,
         borderTopRightRadius: BORDER_RADIUS.lg,

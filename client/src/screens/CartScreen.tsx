@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
     View,
     Text,
@@ -10,18 +10,20 @@ import {
     ScrollView,
     StatusBar,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Cached, downscaled images (expo-image) with the same props as React Native Image
 import { Image } from '../components/CachedImage';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
-import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '../constants/theme';
 import { useCartStore, CartItem } from '../store/cartStore';
 import { auth } from '../config/firebase';
 import { VerificationBadgeInline } from '../components/VerificationBadge';
 
 export default function CartScreen({ navigation }: any) {
     const { colors } = useTheme();
-    const styles = getStyles(colors);
+    const insets = useSafeAreaInsets();
+    const styles = useMemo(() => getStyles(colors, insets.top), [colors, insets.top]);
 
     const { items, totalItems, subtotal, currency, updateQuantity, removeItem, clearCart, fetchCart, loadLocalCart } = useCartStore();
     const userId = auth.currentUser?.uid;
@@ -225,8 +227,9 @@ export default function CartScreen({ navigation }: any) {
     );
 }
 
-const getStyles = (colors: any) => {
-    const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : (Platform.OS === 'web' ? 0 : 48);
+const getStyles = (colors: any, topInset: number = 0) => {
+    // Real safe-area inset (notch, punch-hole camera, landscape); fall back to the status bar height
+    const statusBarHeight = topInset || (Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
     return StyleSheet.create({
         container: {
             flex: 1,
@@ -267,6 +270,9 @@ const getStyles = (colors: any) => {
             fontWeight: '600',
         },
         listContent: {
+            width: '100%',
+            maxWidth: CONTENT_MAX_WIDTH,
+            alignSelf: 'center',
             padding: SPACING.md,
         },
         cartCard: {

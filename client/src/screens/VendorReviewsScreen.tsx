@@ -13,7 +13,7 @@ import { Image } from '../components/CachedImage';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { vendorAPI } from '../services/api';
 import { useAuthStore } from '../store/authStore';
-import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
+import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '../constants/theme';
 import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { AvatarVerificationBadge, VerificationBadgeInline } from '../components/VerificationBadge';
@@ -373,6 +373,9 @@ const getStyles = (colors: any) => StyleSheet.create({
         color: colors.textInverse,
     },
     listContent: {
+        width: '100%',
+        maxWidth: CONTENT_MAX_WIDTH,
+        alignSelf: 'center',
         padding: SPACING.md,
         gap: SPACING.sm,
     },

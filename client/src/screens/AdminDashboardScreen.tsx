@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
     View,
     Text,
@@ -16,6 +16,7 @@ import {
     StatusBar,
     Linking,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Cached, downscaled images (expo-image) with the same props as React Native Image
 import { Image } from '../components/CachedImage';
 import * as ImagePicker from 'expo-image-picker';
@@ -39,7 +40,8 @@ const SUPPORT_QUICK_RESPONSES = [
 export default function AdminDashboardScreen({ navigation }: any) {
     const { colors, theme, toggleTheme } = useTheme();
     const { switchViewRole } = useAuthStore();
-    const styles = getStyles(colors);
+    const insets = useSafeAreaInsets();
+    const styles = useMemo(() => getStyles(colors, insets.top), [colors, insets.top]);
 
     const scrollViewRef = useRef<any>(null);
     const pendingSectionRef = useRef<any>(null);
@@ -1771,8 +1773,9 @@ export default function AdminDashboardScreen({ navigation }: any) {
     );
 }
 
-const getStyles = (colors: any) => {
-    const statusBarHeight = Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : (Platform.OS === 'web' ? 0 : 48);
+const getStyles = (colors: any, topInset: number = 0) => {
+    // Real safe-area inset (notch, punch-hole camera, landscape); fall back to the status bar height
+    const statusBarHeight = topInset || (Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
     return StyleSheet.create({
         container: {
             flex: 1,

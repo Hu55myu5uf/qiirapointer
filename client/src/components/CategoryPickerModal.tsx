@@ -232,6 +232,10 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
     },
     modalContent: {
+        // Bottom sheet: full width on phones, a centred card-width sheet on tablets / landscape
+        width: '100%',
+        maxWidth: 640,
+        alignSelf: 'center',
         height: '90%',
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
@@ -268,7 +272,7 @@ const styles = StyleSheet.create({
         marginHorizontal: 16,
         marginVertical: 12,
         paddingHorizontal: 14,
-        height: 46,
+        minHeight: 46,
         borderRadius: 12,
         borderWidth: 1,
     },

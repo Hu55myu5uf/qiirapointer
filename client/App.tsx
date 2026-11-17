@@ -1,10 +1,10 @@
 import { useTheme, ThemeProvider } from './src/context/ThemeContext';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { onAuthStateChanged } from 'firebase/auth';
 import { ActivityIndicator, View, Text, Alert, Platform, TouchableOpacity, AppState } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -955,20 +955,7 @@ function MainApp() {
   }
 
   return (
-    <SafeAreaProvider>
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        {connection === 'offline' ? (
-          <TouchableOpacity
-            onPress={() => setRetryKey(k => k + 1)}
-            accessibilityRole="button"
-            style={{ backgroundColor: '#B45309', paddingVertical: 6, paddingHorizontal: 12 }}
-          >
-            <Text style={{ color: '#FFFFFF', textAlign: 'center', fontSize: 13 }}>
-              You're offline — showing saved data. Tap to retry.
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-        <AdminPreviewBanner />
+    <AppFrame offline={connection === 'offline'} onRetry={() => setRetryKey(k => k + 1)}>
         <NavigationContainer ref={navigationRef}>
           {!isAuthenticated ? (
             isGuest ? <ClientTabs /> : <AuthStack />
@@ -982,8 +969,51 @@ function MainApp() {
           <IncomingCallModal navigation={navigationRef} />
           <ThemedAlertModal />
         </NavigationContainer>
-      </View>
-    </SafeAreaProvider>
+    </AppFrame>
+  );
+}
+
+/**
+ * Lays the app out around the device's safe areas:
+ * - pads left/right for camera cut-outs and rounded corners (landscape, foldables, tablets)
+ * - a top banner (offline / admin preview) takes the status-bar space itself, and the screens
+ *   below it are told the top inset is already covered, so there is no double gap
+ */
+function AppFrame({ offline, onRetry, children }: { offline: boolean; onRetry: () => void; children: React.ReactNode }) {
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const realRole = useAuthStore(s => s.realRole);
+  const userRole = useAuthStore(s => s.userRole);
+  const adminPreview = realRole === 'admin' && !!userRole && userRole !== 'admin';
+  const hasBanner = offline || adminPreview;
+
+  const childInsets = useMemo(
+    () => ({ top: hasBanner ? 0 : insets.top, bottom: insets.bottom, left: 0, right: 0 }),
+    [hasBanner, insets.top, insets.bottom]
+  );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background, paddingLeft: insets.left, paddingRight: insets.right }}>
+      {hasBanner ? (
+        <View style={{ paddingTop: insets.top, backgroundColor: offline ? '#B45309' : '#1A1814' }}>
+          {offline ? (
+            <TouchableOpacity
+              onPress={onRetry}
+              accessibilityRole="button"
+              style={{ backgroundColor: '#B45309', paddingVertical: 6, paddingHorizontal: 12 }}
+            >
+              <Text style={{ color: '#FFFFFF', textAlign: 'center', fontSize: 13 }}>
+                You're offline — showing saved data. Tap to retry.
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          <AdminPreviewBanner />
+        </View>
+      ) : null}
+      <SafeAreaInsetsContext.Provider value={childInsets}>
+        {children}
+      </SafeAreaInsetsContext.Provider>
+    </View>
   );
 }
 
@@ -1047,11 +1077,13 @@ class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, E
 export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <RootErrorBoundary>
-        <ThemeProvider>
-          <MainApp />
-        </ThemeProvider>
-      </RootErrorBoundary>
+      <SafeAreaProvider>
+        <RootErrorBoundary>
+          <ThemeProvider>
+            <MainApp />
+          </ThemeProvider>
+        </RootErrorBoundary>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
