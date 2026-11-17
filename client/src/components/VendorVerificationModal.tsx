@@ -140,7 +140,7 @@ export default function VendorVerificationModal({
 
             Alert.alert(
                 'Verification Submitted! 🛡️',
-                'Your document has been sent to the QIIRA Administration for review. You can continue exploring the app and updating your profile while verification is pending.',
+                'Your document has been sent to the Pointer Administration for review. You can continue exploring the app and updating your profile while verification is pending.',
                 [
                     {
                         text: 'OK',

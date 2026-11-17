@@ -302,7 +302,7 @@ export default function AdminDashboardScreen({ navigation }: any) {
                         conversationId: item.id,
                         senderId: 'qiira_official_support',
                         receiverId: otherId,
-                        text: '✅ [Ticket Resolved]: Thank you for contacting Qiira Customer Support. Your inquiry has been marked as resolved. If you need any further help, simply reply to this chat!',
+                        text: '✅ [Ticket Resolved]: Thank you for contacting Pointer Customer Support. Your inquiry has been marked as resolved. If you need any further help, simply reply to this chat!',
                         receiverName: otherName,
                         receiverImage: item.participantImages?.[otherId] || undefined,
                     });

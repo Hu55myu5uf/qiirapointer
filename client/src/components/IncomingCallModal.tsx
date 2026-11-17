@@ -127,12 +127,12 @@ export default function IncomingCallModal({ navigation, onAcceptCall }: Incoming
                     {/* Caller Name */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: SPACING.md }}>
                         <Text style={[styles.callerName, { color: colors.textPrimary, marginTop: 0 }]}>
-                            {incomingCall.callerName || 'QIIRAPOINTER User'}
+                            {incomingCall.callerName || 'Pointer User'}
                         </Text>
                         <VerificationBadgeInline isVerified={isVerified} isAdmin={isAdmin} size={20} />
                     </View>
                     <Text style={[styles.callingSubtext, { color: colors.textSecondary }]}>
-                        QIIRAPOINTER Online Call...
+                        Pointer Online Call...
                     </Text>
 
                     {/* Action Buttons */}

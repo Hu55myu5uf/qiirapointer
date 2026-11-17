@@ -1,7 +1,7 @@
 /**
  * Real-time listeners (Firestore, read-only). These replace the old 3–5 second polling.
  * Security rules only let a signed-in user read conversations they take part in; every write
- * (sending messages etc.) still goes through the QIIRA API so blocks and limits are enforced.
+ * (sending messages etc.) still goes through the Pointer API so blocks and limits are enforced.
  */
 import { collection, doc, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { firestore } from '../config/firebase';

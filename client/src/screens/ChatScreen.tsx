@@ -95,10 +95,10 @@ interface ChatScreenParams {
 
 export const SUPPORT_ISSUE_TAGS = [
     { id: 'order', icon: 'cube-outline', label: 'Order & Delivery', prompt: 'Hi Support, I have an inquiry regarding my order / delivery: ' },
-    { id: 'verify', icon: 'shield-checkmark-outline', label: 'Vendor Verification', prompt: 'Hello Qiira Team, I have a question about vendor badge verification: ' },
+    { id: 'verify', icon: 'shield-checkmark-outline', label: 'Vendor Verification', prompt: 'Hello Pointer team, I have a question about vendor badge verification: ' },
     { id: 'payment', icon: 'card-outline', label: 'Payment & Escrow', prompt: 'Hello, I need assistance with a payment or billing transaction: ' },
     { id: 'report', icon: 'alert-circle-outline', label: 'Report Issue / Scam', prompt: 'I want to report an issue or suspicious account: ' },
-    { id: 'feature', icon: 'bulb-outline', label: 'Feature Request', prompt: 'Hi Qiira team, I would like to request or suggest: ' },
+    { id: 'feature', icon: 'bulb-outline', label: 'Feature Request', prompt: 'Hi Pointer team, I would like to request or suggest: ' },
     { id: 'agent', icon: 'headset-outline', label: 'Live Agent', prompt: 'Hello, I would like to connect directly with a customer care specialist.' },
 ];
 
@@ -233,7 +233,7 @@ export default function ChatScreen({ route, navigation }: any) {
         otherUserId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2'
     );
     const [otherUserName, setOtherUserName] = useState(
-        isSupportChat ? 'QIIRA Official Support' : (initialOtherUserName || 'Chat')
+        isSupportChat ? 'Pointer Official Support' : (initialOtherUserName || 'Chat')
     );
     const [otherUserImage, setOtherUserImage] = useState(
         isSupportChat ? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500' : (initialOtherUserImage || '')
@@ -323,7 +323,7 @@ export default function ChatScreen({ route, navigation }: any) {
         if (!otherUserId) return;
 
         if (otherUserId === 'qiira_official_support' || isSupportChat) {
-            setOtherUserName('QIIRA Official Support');
+            setOtherUserName('Pointer Official Support');
             setOtherUserImage('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500');
             setOtherUserIsAdmin(true);
             setOtherUserIsVerified(true);
@@ -395,8 +395,8 @@ export default function ChatScreen({ route, navigation }: any) {
                     onPress={() => {
                         if (isSupportChat) {
                             Alert.alert(
-                                'Qiira Official Support',
-                                'This is the verified customer service desk for Qiira. You can submit inquiries about orders, vendor verifications, payments, and account safety anytime 24/7.'
+                                'Pointer Official Support',
+                                'This is the verified customer service desk for Pointer. You can submit inquiries about orders, vendor verifications, payments, and account safety anytime 24/7.'
                             );
                             return;
                         }
@@ -451,7 +451,7 @@ export default function ChatScreen({ route, navigation }: any) {
                                 }}
                                 numberOfLines={1}
                             >
-                                {isSupportChat ? 'QIIRA Official Support' : (otherUserName || 'Chat')}
+                                {isSupportChat ? 'Pointer Official Support' : (otherUserName || 'Chat')}
                             </Text>
                             <VerificationBadgeInline isVerified={isSupportChat || otherUserIsVerified} isAdmin={isSupportChat || otherUserIsAdmin} size={16} />
                         </View>
@@ -974,7 +974,7 @@ export default function ChatScreen({ route, navigation }: any) {
                             <View style={styles.supportWelcomeIconCircle}>
                                 <Ionicons name="headset" size={36} color={colors.primary} />
                             </View>
-                            <Text style={styles.supportWelcomeTitle}>Welcome to Qiira Support</Text>
+                            <Text style={styles.supportWelcomeTitle}>Welcome to Pointer Support</Text>
                             <Text style={styles.supportWelcomeDesc}>
                                 Have a question about an order, payment, or vendor verification? Our verified customer support desk is available 24/7.
                             </Text>

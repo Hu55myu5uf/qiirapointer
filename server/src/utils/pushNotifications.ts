@@ -92,7 +92,7 @@ export function notifyNewMessage(receiverId: string, senderName: string, preview
 
 /** Incoming in-app call: high priority, expires with the ring timeout */
 export function notifyIncomingCall(receiverId: string, callerName: string, callType: 'voice' | 'video', callId: string) {
-    return notifyUser(receiverId, `Incoming ${callType} call`, `${callerName} is calling you on QIIRA`, {
+    return notifyUser(receiverId, `Incoming ${callType} call`, `${callerName} is calling you on Pointer`, {
         type: 'call', callId, callType,
     }, { priority: 'high', channelId: 'calls', ttl: 45 });
 }
@@ -106,7 +106,7 @@ export async function notifyVendorApproval(
 ): Promise<boolean> {
     const title = status === 'approved' ? '🎉 You are verified!' : 'Verification update';
     const body = status === 'approved'
-        ? `"${businessName}" is now verified on QIIRA.`
+        ? `"${businessName}" is now verified on Pointer.`
         : `"${businessName}" could not be verified. ${rejectionReason || 'Please check the app for details.'}`;
     return sendPushNotification(pushToken, title, body, { type: 'vendor_approval', status });
 }

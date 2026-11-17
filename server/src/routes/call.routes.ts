@@ -413,7 +413,7 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>QIIRA Live Call</title>
+    <title>Pointer Live Call</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
         body {

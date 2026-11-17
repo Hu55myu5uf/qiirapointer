@@ -38,7 +38,7 @@ function presentPost(p: any, viewerId: string | undefined, people: Map<string, a
         .map((u: any) => usableImage(u)).filter(Boolean);
     return {
         ...rest,
-        vendorName: author?.name || p.vendorName || 'QIIRA user',
+        vendorName: author?.name || p.vendorName || 'Pointer user',
         vendorImage: author?.avatar ?? '',
         isVerified: Boolean(author?.isVerified),
         isAdmin: Boolean(author?.isAdmin),
@@ -352,7 +352,7 @@ router.get('/:id/comments', optionalAuthenticateUser, async (req: Request, res: 
                 id: c.id,
                 postId: req.params.id,
                 userId: c.userId,
-                userName: p?.name || 'QIIRA user',
+                userName: p?.name || 'Pointer user',
                 userAvatar: p?.avatar || '',
                 text: c.text || '',
                 createdAt: c.createdAt,

@@ -63,7 +63,7 @@ export function showSignInPrompt(onSignIn: () => void) {
         currentAlert: {
             id: `${SIGN_IN_PROMPT_ID}_${Date.now()}`,
             title: 'Sign in to continue',
-            message: 'Create a free QIIRA account or sign in to like, save, review, comment and chat.',
+            message: 'Create a free Pointer account or sign in to like, save, review, comment and chat.',
             type: 'info',
             buttons: [
                 { text: 'Not now', style: 'cancel' },
@@ -169,7 +169,7 @@ export function initGlobalAlertPatch() {
         }
 
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            // Also intercept window.alert so web fallback calls use QIIRA theme
+            // Also intercept window.alert so web fallback calls use Pointer theme
             try {
                 window.alert = (message?: any) => {
                     useAlertStore.getState().showAlert('Notification', String(message || ''));

@@ -64,7 +64,7 @@ export default function VendorAdvertModal({
 
             Alert.alert(
                 'Advert Request Submitted! 🚀',
-                `Your request for ${selectedPlan.name} has been submitted to QIIRA Administration for activation. Once approved, your post will receive a "Sponsored ✨" badge and top ranking in Explore feeds!`,
+                `Your request for ${selectedPlan.name} has been submitted to Pointer Administration for activation. Once approved, your post will receive a "Sponsored ✨" badge and top ranking in Explore feeds!`,
                 [
                     {
                         text: 'Great',

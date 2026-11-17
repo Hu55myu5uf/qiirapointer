@@ -1,5 +1,5 @@
 -- ============================================
--- QIIRAPOINTER — Supabase (PostgreSQL) Schema
+-- Pointer — Supabase (PostgreSQL) Schema
 -- Run this in Supabase SQL Editor
 -- ============================================
 

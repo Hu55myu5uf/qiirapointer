@@ -413,7 +413,7 @@ export default function CreatePostScreen({ navigation }: any) {
 
                     <Text style={{ fontSize: FONT_SIZES.sm, color: colors.textSecondary, textAlign: 'center', lineHeight: 20, marginBottom: SPACING.lg }}>
                         {verificationStatus === 'pending'
-                            ? 'Your identity document has been submitted and is currently being reviewed by the QIIRA administration. You will be able to publish posts as soon as it is approved.'
+                            ? 'Your identity document has been submitted and is currently being reviewed by the Pointer administration. You will be able to publish posts as soon as it is approved.'
                             : 'All registered vendors must upload a compulsory identity document (NIN, Driver’s License, or International Passport) before publishing posts or products.'}
                     </Text>
 

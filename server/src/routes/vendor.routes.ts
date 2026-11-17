@@ -12,7 +12,7 @@ const router = Router();
 /**
  * Identity verification badge (Option C: FREE at launch).
  * A vendor submits an identity document; an administrator reviews it and grants the badge.
- * Paid features ("QIIRA Pro") will come later through Apple / Google in-app purchase.
+ * Paid features ("Pointer Pro") will come later through Apple / Google in-app purchase.
  */
 export const VERIFIED_BADGE = {
     price: 0,
@@ -294,7 +294,7 @@ router.get('/:id/reviews', async (req: Request, res: Response) => {
 
         const reviews = docs.map(r => {
             const p = people.get(r.clientId);
-            const name = p?.name || 'QIIRA user';
+            const name = p?.name || 'Pointer user';
             return {
                 id: r.id,
                 rating: r.rating,
@@ -345,7 +345,7 @@ router.get('/:id/comments', async (req: Request, res: Response) => {
                 postCaption: c.post.caption || 'Product Showcase',
                 postMediaUrl: usableImage(c.post.thumbnailUrl) || usableImage(c.post.mediaUrl),
                 userId: c.userId,
-                userName: p?.name || 'QIIRA user',
+                userName: p?.name || 'Pointer user',
                 userAvatar: p?.avatar || '',
                 text: c.text || '',
                 createdAt: c.createdAt,

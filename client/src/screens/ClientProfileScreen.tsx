@@ -417,7 +417,7 @@ export default function ClientProfileScreen() {
                         </Text>
                         <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
                             {hasPendingConversion
-                                ? 'Your merchant application is under review by QIIRA admin'
+                                ? 'Your merchant application is under review by Pointer admin'
                                 : 'Start listing products, services, catalogs & receiving client orders'}
                         </Text>
                     </View>
@@ -480,10 +480,10 @@ export default function ClientProfileScreen() {
                         onPress={() =>
                             navigation.navigate('Chat', {
                                 otherUserId: 'qiira_official_support',
-                                otherUserName: 'QIIRA Customer Support',
+                                otherUserName: 'Pointer Customer Support',
                                 otherUserImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
                                 receiverId: 'qiira_official_support',
-                                receiverName: 'QIIRA Customer Support',
+                                receiverName: 'Pointer Customer Support',
                                 receiverImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
                                 isSupport: true,
                             })
@@ -492,7 +492,7 @@ export default function ClientProfileScreen() {
                         <View style={styles.settingInfo}>
                             <Text style={styles.settingTitle}>🎧 Help & Customer Support</Text>
                             <Text style={styles.settingDescription}>
-                                Chat with QIIRA Care 24/7 or report an issue
+                                Chat with Pointer Care 24/7 or report an issue
                             </Text>
                         </View>
                         <Text style={styles.chevron}>›</Text>

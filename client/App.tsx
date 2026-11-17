@@ -888,7 +888,7 @@ function MainApp() {
       } else if (result.status === 'suspended') {
         Alert.alert(
           'Account Suspended',
-          result.message || 'Your account has been suspended by an administrator. Please contact QIIRA support for assistance.'
+          result.message || 'Your account has been suspended by an administrator. Please contact Pointer support for assistance.'
         );
         await signOutLocally(firebaseUser.uid);
         setConnection('ok');
@@ -922,7 +922,7 @@ function MainApp() {
         <ActivityIndicator size="large" color={colors.primary} />
         {connection === 'connecting' ? (
           <Text style={{ marginTop: 16, color: colors.textSecondary, textAlign: 'center' }}>
-            Connecting to QIIRA… this can take up to a minute.
+            Connecting to Pointer… this can take up to a minute.
           </Text>
         ) : null}
       </View>
@@ -935,7 +935,7 @@ function MainApp() {
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background, padding: 24 }}>
         <Ionicons name="cloud-offline-outline" size={56} color={colors.textSecondary} />
         <Text style={{ marginTop: 16, fontSize: 18, fontWeight: '700', color: colors.textPrimary, textAlign: 'center' }}>
-          Can't reach QIIRA
+          Can't reach Pointer
         </Text>
         <Text style={{ marginTop: 8, color: colors.textSecondary, textAlign: 'center' }}>
           Check your internet connection and try again.
@@ -1047,7 +1047,7 @@ class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, E
       return (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: '#FAF8F5' }}>
           <Text style={{ fontSize: 28, fontWeight: 'bold', color: '#B28A45', marginBottom: 12 }}>
-            QIIRA
+            Pointer
           </Text>
           <Text style={{ fontSize: 16, fontWeight: '600', color: '#1A1A1A', marginBottom: 8, textAlign: 'center' }}>
             Application Error

@@ -44,8 +44,8 @@ async function getUserProfile(uid: string) {
     if (uid === SUPPORT_UID) {
         return {
             uid: SUPPORT_UID,
-            fullName: 'QIIRA Customer Support',
-            displayName: 'QIIRA Customer Support',
+            fullName: 'Pointer Customer Support',
+            displayName: 'Pointer Customer Support',
             role: 'support',
             isVerified: true,
             isAdmin: false,

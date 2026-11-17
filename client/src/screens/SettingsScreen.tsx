@@ -33,7 +33,7 @@ export default function SettingsScreen() {
     const handleDeleteAccount = () => {
         Alert.alert(
             'Delete Account Permanently ⚠️',
-            'Are you sure you want to permanently delete your QIIRA account?\n\nAll your profile information, listings, reviews, posts, chat history, and uploaded documents will be irreversibly erased from our servers.\n\nThis action cannot be undone.',
+            'Are you sure you want to permanently delete your Pointer account?\n\nAll your profile information, listings, reviews, posts, chat history, and uploaded documents will be irreversibly erased from our servers.\n\nThis action cannot be undone.',
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
@@ -112,7 +112,7 @@ export default function SettingsScreen() {
                     onPress={() => {
                         Alert.alert(
                             'Community Guidelines & Safety 🛡️',
-                            'QIIRA is committed to a safe, trustworthy marketplace. We maintain a zero-tolerance policy for harassment, hate speech, inappropriate content, fake stores, and scam behavior. Any reported content violating these standards is investigated within 24 hours.'
+                            'Pointer is committed to a safe, trustworthy marketplace. We maintain a zero-tolerance policy for harassment, hate speech, inappropriate content, fake stores, and scam behavior. Any reported content violating these standards is investigated within 24 hours.'
                         );
                     }}
                 >

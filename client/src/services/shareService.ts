@@ -23,11 +23,11 @@ export async function shareVendorProfile(params: ShareVendorParams): Promise<boo
     try {
         const { vendorId, businessName, category, address } = params;
         const appUrl = `https://qiirapointer.app/vendor/${vendorId}`;
-        const message = `Check out ${businessName} (${category || 'Business'})${address ? ` located at ${address}` : ''} on QIIRAPOINTER!\n\nView details: ${appUrl}`;
+        const message = `Check out ${businessName} (${category || 'Business'})${address ? ` located at ${address}` : ''} on Pointer!\n\nView details: ${appUrl}`;
 
         if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.share) {
             await navigator.share({
-                title: `${businessName} on QIIRAPOINTER`,
+                title: `${businessName} on Pointer`,
                 text: message,
                 url: appUrl,
             });
@@ -36,7 +36,7 @@ export async function shareVendorProfile(params: ShareVendorParams): Promise<boo
 
         const result = await Share.share(
             {
-                title: `${businessName} - QIIRAPOINTER`,
+                title: `${businessName} - Pointer`,
                 message: message,
                 url: appUrl,
             },
@@ -60,7 +60,7 @@ export async function sharePost(params: SharePostParams): Promise<boolean> {
         const { postId, vendorName, caption, price, currency = 'NGN' } = params;
         const appUrl = `https://qiirapointer.app/post/${postId}`;
         const formattedPrice = price ? ` | Price: ${currency === 'NGN' ? '₦' : '$'}${price.toLocaleString()}` : '';
-        const message = `Check out this product from ${vendorName} on QIIRAPOINTER!${formattedPrice}\n\n"${caption || ''}"\n\nView on QIIRAPOINTER: ${appUrl}`;
+        const message = `Check out this product from ${vendorName} on Pointer!${formattedPrice}\n\n"${caption || ''}"\n\nView on Pointer: ${appUrl}`;
 
         if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.share) {
             await navigator.share({

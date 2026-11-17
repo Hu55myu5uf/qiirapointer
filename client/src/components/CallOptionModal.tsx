@@ -170,7 +170,7 @@ export default function CallOptionModal({
                                     <Text style={styles.freeBadgeText}>FREE</Text>
                                 </View>
                             </View>
-                            <Text style={styles.optionSubtitle}>Free high-quality audio call via QIIRA</Text>
+                            <Text style={styles.optionSubtitle}>Free high-quality audio call via Pointer</Text>
                         </View>
                         <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
                     </TouchableOpacity>
@@ -191,7 +191,7 @@ export default function CallOptionModal({
                                     <Text style={styles.freeBadgeText}>FREE</Text>
                                 </View>
                             </View>
-                            <Text style={styles.optionSubtitle}>Free HD video & audio call via QIIRA</Text>
+                            <Text style={styles.optionSubtitle}>Free HD video & audio call via Pointer</Text>
                         </View>
                         <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
                     </TouchableOpacity>

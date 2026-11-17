@@ -313,7 +313,7 @@ router.get('/reviews', async (_req: Request, res: Response) => {
                 vendorName: vendor?.name || 'Vendor',
                 vendorIsVerified: Boolean(vendor?.isVerified),
                 clientId: r.clientId,
-                clientName: client?.name || 'QIIRA user',
+                clientName: client?.name || 'Pointer user',
                 clientIsVerified: Boolean(client?.isVerified),
                 clientIsAdmin: Boolean(client?.isAdmin),
                 createdAt: r.createdAt,

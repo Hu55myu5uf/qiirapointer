@@ -345,7 +345,7 @@ const MapView: React.FC<MapViewProps> = ({
                                 border: 'none',
                                 display: 'block',
                             }}
-                            title="Interactive Qiira Map"
+                            title="Interactive Pointer Map"
                         />
                     </View>
                 ) : (

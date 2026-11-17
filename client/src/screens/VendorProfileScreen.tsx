@@ -287,7 +287,7 @@ export default function VendorProfileScreen({ navigation }: any) {
             if (status !== 'granted') {
                 Alert.alert(
                     'Location needed',
-                    'To put your shop on the map, allow QIIRA to use your location while you are at your shop. You can change this later in your phone settings.'
+                    'To put your shop on the map, allow Pointer to use your location while you are at your shop. You can change this later in your phone settings.'
                 );
                 return;
             }
@@ -376,9 +376,9 @@ export default function VendorProfileScreen({ navigation }: any) {
             }
         } catch (error) {
             console.log('Vendor profile fetch fallback for admin preview:', error);
-            setBusinessName(user.displayName || 'QIIRA Store (Preview)');
+            setBusinessName(user.displayName || 'Pointer Store (Preview)');
             setCategory('Technology & Electronics');
-            setDescription('Official QIIRA Administrator Storefront Preview');
+            setDescription('Official Pointer Administrator Storefront Preview');
             setAddress('Kano, Nigeria');
             setServices('Platform Operations, Verified Services');
             setIsVerified(userRole === 'admin');
@@ -927,7 +927,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                                     {isVerified
                                         ? 'Your golden verified badge is active'
                                         : verificationStatus === 'pending'
-                                        ? 'Your identity document is being reviewed by QIIRA administration'
+                                        ? 'Your identity document is being reviewed by Pointer administration'
                                         : 'Upload your NIN, Driver’s License, or Passport to unlock post creation'}
                                 </Text>
                             </View>
@@ -1641,10 +1641,10 @@ export default function VendorProfileScreen({ navigation }: any) {
                                     setSettingsModalVisible(false);
                                     navigation.navigate('Chat', {
                                         otherUserId: 'qiira_official_support',
-                                        otherUserName: 'QIIRA Customer Support',
+                                        otherUserName: 'Pointer Customer Support',
                                         otherUserImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
                                         receiverId: 'qiira_official_support',
-                                        receiverName: 'QIIRA Customer Support',
+                                        receiverName: 'Pointer Customer Support',
                                         receiverImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
                                         isSupport: true,
                                     });
@@ -1657,7 +1657,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                                     </View>
                                     <View>
                                         <Text style={styles.settingsItemTitle}>Help & Support</Text>
-                                        <Text style={styles.settingsItemSub}>Chat 24/7 with QIIRA Care</Text>
+                                        <Text style={styles.settingsItemSub}>Chat 24/7 with Pointer Care</Text>
                                     </View>
                                 </View>
                                 <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />

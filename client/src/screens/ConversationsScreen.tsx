@@ -338,10 +338,10 @@ export default function ConversationsScreen({ navigation }: any) {
                     onPress={() =>
                         navigation.navigate('Chat', {
                             otherUserId: 'qiira_official_support',
-                            otherUserName: 'QIIRA Customer Support',
+                            otherUserName: 'Pointer Customer Support',
                             otherUserImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
                             receiverId: 'qiira_official_support',
-                            receiverName: 'QIIRA Customer Support',
+                            receiverName: 'Pointer Customer Support',
                             receiverImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
                             isSupport: true,
                         })
@@ -360,13 +360,13 @@ export default function ConversationsScreen({ navigation }: any) {
 
                     <View style={styles.pinnedSupportTextContainer}>
                         <View style={styles.pinnedSupportHeaderRow}>
-                            <Text style={styles.pinnedSupportTitle}>QIIRA Customer Support</Text>
+                            <Text style={styles.pinnedSupportTitle}>Pointer Customer Support</Text>
                             <View style={styles.officialPill}>
                                 <Text style={styles.officialPillText}>OFFICIAL</Text>
                             </View>
                         </View>
                         <Text style={styles.pinnedSupportSubtitle} numberOfLines={1}>
-                            Need assistance? Chat 24/7 with QIIRA Care
+                            Need assistance? Chat 24/7 with Pointer Care
                         </Text>
                     </View>
 

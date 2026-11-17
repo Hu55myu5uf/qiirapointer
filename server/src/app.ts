@@ -79,7 +79,7 @@ if (process.env.NODE_ENV !== 'test') {
 app.get('/health', (req: Request, res: Response) => {
     res.status(200).json({
         status: 'healthy',
-        message: 'QIIRAPOINTER API is running',
+        message: 'Pointer API is running',
         timestamp: new Date().toISOString()
     });
 });

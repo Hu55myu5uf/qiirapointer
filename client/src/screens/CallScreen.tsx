@@ -341,7 +341,7 @@ export default function CallScreen({ route, navigation }: any) {
                                 ? formatDuration(callDuration)
                                 : callStatus === 'ended'
                                 ? 'Call Ended'
-                                : 'QIIRAPOINTER Ringing...'}
+                                : 'Pointer Ringing...'}
                         </Text>
                     </View>
 

@@ -126,7 +126,7 @@ export default function UpgradeToVendorModal({
 
             Alert.alert(
                 'Application Submitted! 🏪',
-                'Your vendor upgrade request has been sent to the QIIRA Administration for approval. You will receive an alert as soon as it is reviewed.',
+                'Your vendor upgrade request has been sent to the Pointer Administration for approval. You will receive an alert as soon as it is reviewed.',
                 [
                     {
                         text: 'OK',

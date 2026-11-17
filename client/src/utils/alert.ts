@@ -1,8 +1,8 @@
 import { useAlertStore, ThemedAlertButton, AlertType } from '../store/alertStore';
 
 /**
- * QIIRA Themed confirm dialog.
- * Works seamlessly across native and web with the QIIRA design theme,
+ * Pointer Themed confirm dialog.
+ * Works seamlessly across native and web with the Pointer design theme,
  * cancel/back button and confirm/action button.
  */
 export function confirmAction(

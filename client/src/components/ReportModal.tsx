@@ -72,7 +72,7 @@ export default function ReportModal({
 
             Alert.alert(
                 'Report Submitted 🛡️',
-                'Thank you for helping keep the QIIRA community safe. Our moderation team reviews every reported item within 24 hours and takes appropriate enforcement action.',
+                'Thank you for helping keep the Pointer community safe. Our moderation team reviews every reported item within 24 hours and takes appropriate enforcement action.',
                 [
                     {
                         text: 'OK',
@@ -183,7 +183,7 @@ export default function ReportModal({
                         />
 
                         <Text style={[styles.disclaimer, { color: colors.textTertiary }]}>
-                            False or abusive reporting violates QIIRA Terms of Service. Reports are reviewed by our safety team within 24 hours.
+                            False or abusive reporting violates Pointer Terms of Service. Reports are reviewed by our safety team within 24 hours.
                         </Text>
                     </ScrollView>
 

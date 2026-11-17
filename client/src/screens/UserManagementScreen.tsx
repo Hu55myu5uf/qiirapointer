@@ -128,7 +128,7 @@ export default function UserManagementScreen({ route }: any) {
         const action = isCurrentlyVerified ? 'Revoke Verified Badge' : 'Grant Verified Badge';
         confirmAction(
             action,
-            `Are you sure you want to ${isCurrentlyVerified ? 'remove the verified badge from' : 'grant a verified badge (QIIRA Gold) to'} ${userName}?`,
+            `Are you sure you want to ${isCurrentlyVerified ? 'remove the verified badge from' : 'grant a verified badge (Pointer Gold) to'} ${userName}?`,
             async () => {
                 try {
                     await adminAPI.setUserVerified(userId, !isCurrentlyVerified);

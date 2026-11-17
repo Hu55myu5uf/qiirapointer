@@ -5,7 +5,7 @@ import { auth, db } from '../config/firebase';
 // the fallback keeps existing deployments working until it is set.
 export const MASTER_ADMIN_UID = process.env.MASTER_ADMIN_UID || 'v8MwaOet0ISfZAWXIDAPAGcg1td2';
 
-// Shared "QIIRA Customer Support" identity. It has no password and cannot log in;
+// Shared "Pointer Customer Support" identity. It has no password and cannot log in;
 // administrators read and reply to its conversations from the admin dashboard.
 export const SUPPORT_UID = 'qiira_official_support';
 

@@ -9,10 +9,10 @@ const REASONS: Record<string, { icon: any; title: string; text: string }> = {
     Chat: { icon: 'chatbubbles-outline', title: 'Message businesses', text: 'Sign in to chat with vendors and keep your conversations.' },
     WriteReview: { icon: 'star-outline', title: 'Write a review', text: 'Sign in to share your experience with this business.' },
     Cart: { icon: 'cart-outline', title: 'Your saved cart', text: 'Sign in to save items and order from vendors.' },
-    CallScreen: { icon: 'call-outline', title: 'Call in the app', text: 'Sign in to call vendors directly from QIIRA.' },
-    Call: { icon: 'call-outline', title: 'Call in the app', text: 'Sign in to call vendors directly from QIIRA.' },
-    CreatePost: { icon: 'create-outline', title: 'Post to QIIRA', text: 'Sign in to share updates and ask the community.' },
-    Account: { icon: 'person-circle-outline', title: 'Your QIIRA account', text: 'Sign in or create a free account to save favourites, chat with vendors, write reviews and more.' },
+    CallScreen: { icon: 'call-outline', title: 'Call in the app', text: 'Sign in to call vendors directly from Pointer.' },
+    Call: { icon: 'call-outline', title: 'Call in the app', text: 'Sign in to call vendors directly from Pointer.' },
+    CreatePost: { icon: 'create-outline', title: 'Post to Pointer', text: 'Sign in to share updates and ask the community.' },
+    Account: { icon: 'person-circle-outline', title: 'Your Pointer account', text: 'Sign in or create a free account to save favourites, chat with vendors, write reviews and more.' },
 };
 
 /**

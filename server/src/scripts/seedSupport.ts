@@ -2,7 +2,7 @@ import { auth, db } from '../config/firebase';
 import { SUPPORT_UID } from '../utils/authMiddleware';
 
 /**
- * The shared "QIIRA Customer Support" identity.
+ * The shared "Pointer Customer Support" identity.
  *
  * Nobody logs in as this account: it is DISABLED in Firebase Auth and has no password.
  * Administrators read and answer its conversations from the admin dashboard; the server only
@@ -11,14 +11,14 @@ import { SUPPORT_UID } from '../utils/authMiddleware';
 export const SUPPORT_ACCOUNT = {
     uid: SUPPORT_UID,
     email: process.env.SUPPORT_EMAIL || 'support@qiira.com',
-    fullName: 'QIIRA Customer Support',
-    displayName: 'QIIRA Customer Support',
+    fullName: 'Pointer Customer Support',
+    displayName: 'Pointer Customer Support',
     role: 'support',
     isVerified: true,
     isSupport: true,
     profileImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
-    bio: 'Official Customer Care & Assistance Desk for QIIRAPOINTER.',
-    aboutUs: 'Official Customer Care & Assistance Desk for QIIRAPOINTER.',
+    bio: 'Official Customer Care & Assistance Desk for Pointer.',
+    aboutUs: 'Official Customer Care & Assistance Desk for Pointer.',
 };
 
 export async function ensureSupportAccount(): Promise<string> {

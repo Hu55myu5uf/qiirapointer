@@ -354,7 +354,7 @@ export default function ExploreScreen({ navigation, route }: any) {
             setClientTaggedVendor('');
             setClientPostFlair('update');
             setClientPostModalVisible(false);
-            Alert.alert('Published 🎉', 'Your post is now live in the QIIRA community feed!');
+            Alert.alert('Published 🎉', 'Your post is now live in the Pointer community feed!');
         } catch (error: any) {
             console.error('Client post error:', error);
             const msg = error.response?.data?.error || error.message || 'Failed to publish post';
@@ -1288,7 +1288,7 @@ export default function ExploreScreen({ navigation, route }: any) {
                                 style={styles.clientTextInput}
                                 placeholder={
                                     clientPostFlair === 'question'
-                                        ? "Ask the QIIRA community (e.g., 'Where can I find the best bespoke shoes in Abuja?')..."
+                                        ? "Ask the Pointer community (e.g., 'Where can I find the best bespoke shoes in Abuja?')..."
                                         : clientPostFlair === 'shoutout'
                                         ? "Write a review or recommendation for a vendor or product you loved..."
                                         : "What's on your mind? Share your thoughts, styles, or tips..."

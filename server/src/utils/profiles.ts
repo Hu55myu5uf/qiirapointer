@@ -19,7 +19,7 @@ export interface DisplayProfile {
 
 const SUPPORT_PROFILE: DisplayProfile = {
     uid: SUPPORT_UID,
-    name: 'QIIRA Customer Support',
+    name: 'Pointer Customer Support',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
     role: 'support',
     isVerified: true,

@@ -9,7 +9,7 @@ interface VerificationBadgeProps {
     showLabel?: boolean;
 }
 
-const BADGE_COLOR = '#B28A45'; // QIIRA golden accent
+const BADGE_COLOR = '#B28A45'; // Pointer golden accent
 
 const SIZE_MAP = {
     small: { icon: 14, font: 10, padding: 3, gap: 2 },

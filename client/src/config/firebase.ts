@@ -45,7 +45,7 @@ try {
 const storage = getStorage(app);
 
 // Firestore is used READ-ONLY by the app, for real-time chat and calls (security rules only allow
-// participants to read their own conversations). All writes go through the QIIRA API server.
+// participants to read their own conversations). All writes go through the Pointer API server.
 // Long-polling auto-detection keeps listeners working on mobile networks and in React Native.
 let firestore: Firestore;
 try {

@@ -29,7 +29,7 @@ const BADGE_BENEFITS = [
 
 const HOW_IT_WORKS = [
     { step: '1', title: 'Upload an ID document', desc: 'NIN, driver\'s licence, international passport or CAC certificate. It is stored privately.' },
-    { step: '2', title: 'We review it', desc: 'A QIIRA administrator checks your document, usually within 1–2 working days.' },
+    { step: '2', title: 'We review it', desc: 'A Pointer administrator checks your document, usually within 1–2 working days.' },
     { step: '3', title: 'Get your badge', desc: 'The verified badge appears on your profile as soon as you are approved.' },
 ];
 
@@ -93,7 +93,7 @@ export default function GetVerifiedScreen() {
                 </LinearGradient>
                 <Text style={styles.title} accessibilityRole="header">Get Verified</Text>
                 <Text style={styles.subtitle}>
-                    Free identity verification. Show people on QIIRA that you are who you say you are.
+                    Free identity verification. Show people on Pointer that you are who you say you are.
                 </Text>
             </View>
 
@@ -207,7 +207,7 @@ export default function GetVerifiedScreen() {
 
             <View style={styles.footer}>
                 <Text style={styles.footerText}>
-                    Your document is only visible to QIIRA administrators and is used solely to verify your identity.
+                    Your document is only visible to Pointer administrators and is used solely to verify your identity.
                 </Text>
             </View>
 

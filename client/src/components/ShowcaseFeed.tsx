@@ -67,7 +67,7 @@ const CURATED_SHOWCASES = [
         isVerified: true,
         mediaUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
         thumbnailUrl: 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=800',
-        caption: 'Handcrafted luxury gowns and bespoke tailoring. Every stitch tells an authentic story ✨ #AuraCouture #BespokeFashion #QIIRA',
+        caption: 'Handcrafted luxury gowns and bespoke tailoring. Every stitch tells an authentic story ✨ #AuraCouture #BespokeFashion #Pointer',
         likesCount: 142,
         commentsCount: 19,
         isLiked: false,
@@ -216,7 +216,7 @@ function ShowcaseItemCard({
             <View style={styles.topBadgeRow} pointerEvents="none">
                 <View style={styles.showcaseLiveBadge}>
                     <Ionicons name="film-outline" size={13} color="#FFFFFF" />
-                    <Text style={styles.showcaseLiveBadgeText}>QIIRA SHOWCASE</Text>
+                    <Text style={styles.showcaseLiveBadgeText}>POINTER SHOWCASE</Text>
                 </View>
             </View>
 
@@ -339,7 +339,7 @@ function ShowcaseItemCard({
                     activeOpacity={0.8}
                 >
                     <Text style={styles.authorName} numberOfLines={1}>
-                        @{item.vendorName || item.authorName || 'qiiravendor'}
+                        @{item.vendorName || item.authorName || 'pointervendor'}
                     </Text>
                     <VerificationBadgeInline
                         isVerified={Boolean(item.isVerified || item.is_verified || item.isAdmin)}
@@ -371,7 +371,7 @@ function ShowcaseItemCard({
                         style={styles.captionText}
                         numberOfLines={expandedCaption ? undefined : 2}
                     >
-                        {item.caption || 'Authentic showcase on QIIRAPOINTER'}
+                        {item.caption || 'Authentic showcase on Pointer'}
                     </Text>
                 </TouchableOpacity>
 
@@ -379,7 +379,7 @@ function ShowcaseItemCard({
                 <View style={styles.audioRow}>
                     <Ionicons name="musical-notes" size={14} color="#B28A45" />
                     <Text style={styles.audioText} numberOfLines={1}>
-                        Original Sound • {item.vendorName || 'QIIRA Showcase'}
+                        Original Sound • {item.vendorName || 'Pointer Showcase'}
                     </Text>
                 </View>
             </View>

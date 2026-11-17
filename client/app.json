@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "QIIRA",
+    "name": "Pointer",
     "slug": "qiira",
     "version": "1.1.0",
     "orientation": "default",
@@ -12,8 +12,8 @@
       "buildNumber": "8",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "QIIRA uses your camera for video calls with businesses and to take photos for your posts, profile and identity verification.",
-        "NSMicrophoneUsageDescription": "QIIRA uses your microphone for voice and video calls with businesses and when recording videos for your posts."
+        "NSCameraUsageDescription": "Pointer uses your camera for video calls with businesses and to take photos for your posts, profile and identity verification.",
+        "NSMicrophoneUsageDescription": "Pointer uses your microphone for voice and video calls with businesses and when recording videos for your posts."
       }
     },
     "android": {
@@ -59,15 +59,15 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "QIIRA needs access to your photos so you can add pictures to your posts, profile, chats and identity verification.",
-          "cameraPermission": "QIIRA uses your camera so you can take photos for your posts, profile, chats and identity verification.",
-          "microphonePermission": "QIIRA uses your microphone to record sound when you film a video for a post."
+          "photosPermission": "Pointer needs access to your photos so you can add pictures to your posts, profile, chats and identity verification.",
+          "cameraPermission": "Pointer uses your camera so you can take photos for your posts, profile, chats and identity verification.",
+          "microphonePermission": "Pointer uses your microphone to record sound when you film a video for a post."
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "QIIRA uses your location while you use the app to show businesses near you and, for vendors, to place your shop on the map.",
+          "locationWhenInUsePermission": "Pointer uses your location while you use the app to show businesses near you and, for vendors, to place your shop on the map.",
           "isAndroidBackgroundLocationEnabled": false,
           "isIosBackgroundLocationEnabled": false
         }
@@ -75,7 +75,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "QIIRA uses your microphone for voice and video calls with businesses."
+          "microphonePermission": "Pointer uses your microphone for voice and video calls with businesses."
         }
       ],
       "expo-video",

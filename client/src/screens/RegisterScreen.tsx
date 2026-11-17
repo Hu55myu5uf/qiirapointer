@@ -81,7 +81,7 @@ export default function RegisterScreen({ navigation }: any) {
 
             Alert.alert(
                 'Registration Successful 🎉',
-                `Welcome to QIIRA, ${fullName.trim()}!\n\nYour account has been created. Redirecting you to the login screen...`,
+                `Welcome to Pointer, ${fullName.trim()}!\n\nYour account has been created. Redirecting you to the login screen...`,
                 [{ text: 'Log In Now', onPress: goToLogin }]
             );
 
@@ -108,7 +108,7 @@ export default function RegisterScreen({ navigation }: any) {
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.header}>
                     <Text style={styles.title}>Create Account</Text>
-                    <Text style={styles.subtitle}>Join QIIRAPOINTER today</Text>
+                    <Text style={styles.subtitle}>Join Pointer today</Text>
                 </View>
 
                 <View style={styles.form}>

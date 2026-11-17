@@ -20,7 +20,7 @@ async function main() {
     const ref = db.collection('users').doc(user.uid);
     const snap = await ref.get();
     if (!snap.exists) {
-        console.error('This account has no QIIRA profile yet. Sign in to the app once first.');
+        console.error('This account has no Pointer profile yet. Sign in to the app once first.');
         process.exit(1);
     }
     await ref.set({ role: revoke ? 'client' : 'admin', updatedAt: new Date().toISOString() }, { merge: true });
