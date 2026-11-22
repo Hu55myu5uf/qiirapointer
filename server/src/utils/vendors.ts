@@ -36,10 +36,39 @@ export function distanceMeters(a: LatLng, b: LatLng): number {
     return Math.round(2 * R * Math.asin(Math.sqrt(h)));
 }
 
+/**
+ * Two separate things that used to share one field:
+ * - listingStatus: has the business been approved to appear in listings (vendors only)
+ * - badgeStatus:   the free identity check behind the gold verified badge (vendors and clients)
+ * The badge lives on the vendor document for vendors and on the user document for clients.
+ */
+export type ListingStatus = 'approved' | 'pending' | 'rejected';
+export type BadgeStatus = 'verified' | 'pending' | 'rejected' | 'none';
+
+export function verificationState(vendorDoc: any | null, userDoc: any | null, isAdmin = false) {
+    const src = vendorDoc || userDoc || {};
+    const isVerified = Boolean(isAdmin || src.isVerified === true);
+    const request = src.verificationRequest || null;
+    const badgeStatus: BadgeStatus = isVerified ? 'verified'
+        : request === 'pending' ? 'pending'
+        : request === 'rejected' ? 'rejected'
+        : 'none';
+    const listingStatus: ListingStatus | null = vendorDoc
+        ? (['approved', 'pending', 'rejected'].includes(vendorDoc.verificationStatus) ? vendorDoc.verificationStatus : 'pending')
+        : null;
+    return {
+        isVerified,
+        badgeStatus,
+        listingStatus,
+        // Only meaningful to the account owner; never put this in public responses
+        badgeRejectionReason: badgeStatus === 'rejected' ? (src.rejectionReason || null) : null,
+    };
+}
+
 /** Public vendor shape. `user` is the matching users/{uid} document data (may be empty). */
 export function toVendorResponse(uid: string, v: any, user: any = {}) {
     const isAdmin = user.role === 'admin' || uid === MASTER_ADMIN_UID;
-    const isVerified = Boolean(isAdmin || v.isVerified === true);
+    const { isVerified, badgeStatus, listingStatus } = verificationState(v, user, isAdmin);
     const totalReviews = Number(v.totalReviews) || 0;
     const averageRating = totalReviews > 0 ? Math.round((Number(v.averageRating) || 0) * 10) / 10 : 0;
     const businessImage = usableImage(v.businessImage) || usableImage(user.profileImage);
@@ -58,8 +87,11 @@ export function toVendorResponse(uid: string, v: any, user: any = {}) {
         businessImage,
         bannerImage: usableImage(v.bannerImage),
         businessHours: v.businessHours || null,
+        // Old field names kept for app versions already installed
         verificationStatus: v.verificationStatus || 'pending',
         verificationRequest: v.verificationRequest || null,
+        listingStatus,
+        badgeStatus,
         isVerified,
         is_verified: isVerified,
         isAdmin,

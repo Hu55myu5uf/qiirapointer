@@ -140,25 +140,31 @@ router.put('/vendors/:id/verify', async (req: Request, res: Response) => {
         const user = uDoc.data()!;
         const isVendor = vDoc.exists && user.role === 'vendor';
 
-        if (isVendor) {
-            const v = vDoc.data()!;
-            const update: Record<string, any> = { verificationRequest: null, updatedAt: now };
-            if (approved) {
-                Object.assign(update, { verificationStatus: 'approved', isVerified: true, verifiedAt: now, rejectionReason: null });
-            } else {
-                // Rejecting the badge never unlists an already-approved store
-                if (v.verificationStatus !== 'approved') update.verificationStatus = 'rejected';
-                Object.assign(update, { isVerified: false, rejectionReason });
-            }
-            await db.collection('vendors').doc(id).set(update, { merge: true });
-        } else {
-            await db.collection('users').doc(id).set({
-                verificationRequest: null,
-                isVerified: approved,
-                verifiedAt: approved ? now : null,
-                rejectionReason: approved ? null : rejectionReason,
+        // What is being decided: the identity badge, or (for a not-yet-listed store) the listing.
+        // An explicit `target` wins; otherwise a pending identity request is the badge decision.
+        const v = isVendor ? vDoc.data()! : null;
+        const target: 'badge' | 'listing' = req.body.target === 'listing' || req.body.target === 'badge'
+            ? req.body.target
+            : (!v || v.verificationRequest === 'pending' ? 'badge' : 'listing');
+        if (target === 'listing' && !isVendor) {
+            return res.status(400).json({ error: 'Only vendor stores have a listing to approve' });
+        }
+
+        if (target === 'listing') {
+            await db.collection('vendors').doc(id).set({
+                verificationStatus: approved ? 'approved' : 'rejected',
+                listingDecidedAt: now,
+                listingRejectionReason: approved ? null : rejectionReason,
                 updatedAt: now,
             }, { merge: true });
+        } else {
+            // Badge decision. It never changes whether the store is listed, except that a
+            // confirmed identity also lists a store that was still waiting.
+            const update: Record<string, any> = approved
+                ? { isVerified: true, verifiedAt: now, verificationRequest: null, rejectionReason: null, updatedAt: now }
+                : { isVerified: false, verifiedAt: null, verificationRequest: 'rejected', rejectionReason, updatedAt: now };
+            if (approved && v && v.verificationStatus !== 'approved') update.verificationStatus = 'approved';
+            await db.collection(isVendor ? 'vendors' : 'users').doc(id).set(update, { merge: true });
         }
         invalidateVendorList();
         clearProfileCache(id);
@@ -168,7 +174,12 @@ router.put('/vendors/:id/verify', async (req: Request, res: Response) => {
             notifyVendorApproval(user.pushToken, status, name, approved ? undefined : rejectionReason).catch(() => {});
         }
 
-        res.status(200).json({ message: `Account ${status} successfully`, isVerified: approved, status });
+        res.status(200).json({
+            message: `Account ${status} successfully`,
+            isVerified: target === 'badge' ? approved : Boolean(v?.isVerified),
+            status,
+            target,
+        });
     } catch (error: any) {
         console.error('Verify vendor error:', error);
         res.status(500).json({ error: 'Failed to update verification status' });

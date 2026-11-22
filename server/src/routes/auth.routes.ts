@@ -4,6 +4,7 @@ import { authenticateUser, optionalAuthenticateUser, requireSelfOrAdmin, MASTER_
 import { authLimiter } from '../utils/rateLimiter';
 import { deleteAccountData } from '../utils/accountDeletion';
 import { clearProfileCache } from '../utils/profiles';
+import { verificationState } from '../utils/vendors';
 
 const router = Router();
 
@@ -95,8 +96,17 @@ async function getUserProfile(uid: string) {
     const role = rawData.role || 'client';
     // STRICT Admin check: Only explicit DB role === 'admin' OR the master admin UID
     const isAdmin = Boolean(role === 'admin' || uid === MASTER_ADMIN_UID);
-    const isVerified = rawData.isVerified ?? rawData.is_verified ?? isAdmin;
     const isSuspended = rawData.isSuspended ?? rawData.is_suspended ?? false;
+
+    // Listing approval and the identity badge, worked out separately. A vendor's badge lives on
+    // the vendor document, a client's on the user document.
+    let vendorDoc: any = null;
+    if (role === 'vendor') {
+        const vSnap = await db.collection('vendors').doc(uid).get();
+        if (vSnap.exists) vendorDoc = vSnap.data();
+    }
+    const state = verificationState(vendorDoc, rawData, isAdmin);
+    const isVerified = state.isVerified;
 
     // Stored fields first; computed, authoritative fields last so stored data can't override them
     return {
@@ -114,6 +124,11 @@ async function getUserProfile(uid: string) {
         isAdmin,
         isVerified: Boolean(isVerified || isAdmin),
         is_verified: Boolean(isVerified || isAdmin),
+        badgeStatus: state.badgeStatus,
+        badgeRejectionReason: state.badgeRejectionReason,
+        listingStatus: state.listingStatus,
+        // Old field kept for installed app versions: the vendor's listing status
+        verificationStatus: state.listingStatus ?? rawData.verificationStatus ?? null,
         isSuspended: Boolean(isSuspended),
         is_suspended: Boolean(isSuspended),
         createdAt: rawData.createdAt || rawData.created_at,

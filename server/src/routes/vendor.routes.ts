@@ -4,7 +4,7 @@ import { db } from '../config/firebase';
 import { authenticateUser, optionalAuthenticateUser, requireSelfOrAdmin } from '../utils/authMiddleware';
 import { decodeUpload, saveUpload, isOwnPrivateRef, UploadError, FileKind } from '../utils/fileStorage';
 import { getDisplayProfiles, clearProfileCache, usableImage } from '../utils/profiles';
-import { toVendorResponse, getApprovedVendors, invalidateVendorList, validLatLng, distanceMeters } from '../utils/vendors';
+import { toVendorResponse, getApprovedVendors, invalidateVendorList, validLatLng, distanceMeters, verificationState } from '../utils/vendors';
 import { uploadLimiter, writeLimiter } from '../utils/rateLimiter';
 
 const router = Router();
@@ -371,16 +371,15 @@ router.get('/:id/comments', async (req: Request, res: Response) => {
 router.get('/:id/badge', async (req: Request, res: Response) => {
     try {
         const { v, u } = await loadVendor(req.params.id);
-        const src: any = v || u;
-        if (!src) return res.status(404).json({ error: 'User not found' });
+        if (!v && !u) return res.status(404).json({ error: 'User not found' });
 
-        const isVerified = Boolean(src.isVerified || u?.role === 'admin');
-        const request = src.verificationRequest || null;
-        const isPending = request === 'pending';
+        const state = verificationState(u?.role === 'vendor' ? v : null, u || v, u?.role === 'admin');
         res.status(200).json({
-            isVerified,
-            isPending,
-            verificationStatus: isVerified ? 'approved' : isPending ? 'pending' : (request === 'rejected' ? 'rejected' : 'none'),
+            isVerified: state.isVerified,
+            isPending: state.badgeStatus === 'pending',
+            badgeStatus: state.badgeStatus,
+            // Old shape kept for installed app versions
+            verificationStatus: state.badgeStatus === 'verified' ? 'approved' : state.badgeStatus,
             subscribedAt: null,
             expiresAt: null,
             badgeInfo: VERIFIED_BADGE,

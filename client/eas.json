@@ -16,7 +16,8 @@
         "EXPO_PUBLIC_SENTRY_DSN": "https://6c03e7b67881bd2838eeb4428c80b8c6@o4512442565853184.ingest.de.sentry.io/4512442587611216",
         "EXPO_PUBLIC_MAPTILER_KEY": "Uh7KeOVWnSHPSxfA5jxe",
         "EXPO_PUBLIC_PUSH_ENABLED": "true"
-      }
+      },
+      "channel": "development"
     },
     "preview": {
       "distribution": "internal",
@@ -28,7 +29,8 @@
         "EXPO_PUBLIC_SENTRY_DSN": "https://6c03e7b67881bd2838eeb4428c80b8c6@o4512442565853184.ingest.de.sentry.io/4512442587611216",
         "EXPO_PUBLIC_MAPTILER_KEY": "Uh7KeOVWnSHPSxfA5jxe",
         "EXPO_PUBLIC_PUSH_ENABLED": "true"
-      }
+      },
+      "channel": "preview"
     },
     "production": {
       "autoIncrement": true,
@@ -40,7 +42,8 @@
         "EXPO_PUBLIC_SENTRY_DSN": "https://6c03e7b67881bd2838eeb4428c80b8c6@o4512442565853184.ingest.de.sentry.io/4512442587611216",
         "EXPO_PUBLIC_MAPTILER_KEY": "Uh7KeOVWnSHPSxfA5jxe",
         "EXPO_PUBLIC_PUSH_ENABLED": "true"
-      }
+      },
+      "channel": "production"
     }
   },
   "submit": {
