@@ -15,7 +15,8 @@
         "SENTRY_DISABLE_AUTO_UPLOAD": "true",
         "EXPO_PUBLIC_SENTRY_DSN": "https://6c03e7b67881bd2838eeb4428c80b8c6@o4512442565853184.ingest.de.sentry.io/4512442587611216",
         "EXPO_PUBLIC_MAPTILER_KEY": "Uh7KeOVWnSHPSxfA5jxe",
-        "EXPO_PUBLIC_PUSH_ENABLED": "true"
+        "EXPO_PUBLIC_PUSH_ENABLED": "true",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "970982686292-g7d2d4kr9cbha4vd0asrahibq2q5qk00.apps.googleusercontent.com"
       },
       "channel": "development"
     },
@@ -28,7 +29,8 @@
         "SENTRY_DISABLE_AUTO_UPLOAD": "true",
         "EXPO_PUBLIC_SENTRY_DSN": "https://6c03e7b67881bd2838eeb4428c80b8c6@o4512442565853184.ingest.de.sentry.io/4512442587611216",
         "EXPO_PUBLIC_MAPTILER_KEY": "Uh7KeOVWnSHPSxfA5jxe",
-        "EXPO_PUBLIC_PUSH_ENABLED": "true"
+        "EXPO_PUBLIC_PUSH_ENABLED": "true",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "970982686292-g7d2d4kr9cbha4vd0asrahibq2q5qk00.apps.googleusercontent.com"
       },
       "channel": "preview"
     },
@@ -41,7 +43,8 @@
         "SENTRY_DISABLE_AUTO_UPLOAD": "true",
         "EXPO_PUBLIC_SENTRY_DSN": "https://6c03e7b67881bd2838eeb4428c80b8c6@o4512442565853184.ingest.de.sentry.io/4512442587611216",
         "EXPO_PUBLIC_MAPTILER_KEY": "Uh7KeOVWnSHPSxfA5jxe",
-        "EXPO_PUBLIC_PUSH_ENABLED": "true"
+        "EXPO_PUBLIC_PUSH_ENABLED": "true",
+        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "970982686292-g7d2d4kr9cbha4vd0asrahibq2q5qk00.apps.googleusercontent.com"
       },
       "channel": "production"
     }

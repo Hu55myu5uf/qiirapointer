@@ -12,7 +12,20 @@
           "package_name": "com.qiira.pointer"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "970982686292-4nif1nvb9t5lajtprkcblnve4saelmi4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.qiira.pointer",
+            "certificate_hash": "8c59c1858b3520c4b71fff8bd8fb17c3bb3e3afd"
+          }
+        },
+        {
+          "client_id": "970982686292-g7d2d4kr9cbha4vd0asrahibq2q5qk00.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCXhSZwSakckjWy9UyG3K4cH5-bTmJzKNQ"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "970982686292-g7d2d4kr9cbha4vd0asrahibq2q5qk00.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
