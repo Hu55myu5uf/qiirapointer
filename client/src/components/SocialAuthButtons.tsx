@@ -11,7 +11,7 @@ import {
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
-import { signInWithGoogle, signInWithApple } from '../services/oauth';
+import { signInWithGoogle, signInWithApple, googleSignInAvailable, appleSignInAvailable } from '../services/oauth';
 import { useAuthStore } from '../store/authStore';
 import { auth } from '../config/firebase';
 
@@ -78,6 +78,9 @@ export default function SocialAuthButtons({
 
     const styles = getStyles(colors);
 
+    // Only offer what works on this device (see services/oauth)
+    if (!googleSignInAvailable && !appleSignInAvailable) return null;
+
     return (
         <View style={styles.container}>
             <View style={styles.dividerContainer}>
@@ -88,6 +91,7 @@ export default function SocialAuthButtons({
 
             <View style={styles.buttonsRow}>
                 {/* Google Button */}
+                {googleSignInAvailable ? (
                 <TouchableOpacity
                     style={[styles.socialButton, styles.googleButton]}
                     onPress={handleGoogleAuth}
@@ -103,8 +107,10 @@ export default function SocialAuthButtons({
                         </View>
                     )}
                 </TouchableOpacity>
+                ) : null}
 
                 {/* Apple Button */}
+                {appleSignInAvailable ? (
                 <TouchableOpacity
                     style={[styles.socialButton, styles.appleButton]}
                     onPress={handleAppleAuth}
@@ -120,6 +126,7 @@ export default function SocialAuthButtons({
                         </View>
                     )}
                 </TouchableOpacity>
+                ) : null}
             </View>
         </View>
     );

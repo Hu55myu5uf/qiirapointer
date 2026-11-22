@@ -220,6 +220,8 @@ export const chatAPI = {
 };
 
 export const postAPI = {
+    // One-time link to upload a video file straight to storage (see utils/videoUpload)
+    getVideoUploadUrl: (data: { contentType: string; size: number }) => api.post('/posts/video-upload-url', data),
     getFeed: (params?: { type?: string; category?: string; limit?: number; userId?: string }) =>
         api.get('/posts/feed', { params }),
     getReels: (userId?: string) =>
@@ -297,6 +299,8 @@ export const callAPI = {
         api.post(`/calls/${callId}/reject`),
     endCall: (callId: string, durationSeconds?: number) =>
         api.post(`/calls/${callId}/end`, { durationSeconds }),
+    // The signed-in user's own recent calls (newest first)
+    getHistory: () => api.get('/calls/history'),
     // Short-lived token that lets the in-call WebView exchange signals for this call only
     getRoomToken: (callId: string) =>
         api.get(`/calls/${callId}/room-token`),

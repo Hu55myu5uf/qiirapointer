@@ -2,9 +2,9 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { db, FieldValue } from '../config/firebase';
 import { authenticateUser, optionalAuthenticateUser } from '../utils/authMiddleware';
-import { decodeUpload, saveUpload, storagePathOf, UploadError } from '../utils/fileStorage';
+import { decodeUpload, saveUpload, storagePathOf, UploadError, createVideoUploadUrl, isUploadRef, claimUploadedVideo } from '../utils/fileStorage';
 import { getDisplayProfile, getDisplayProfiles, usableImage } from '../utils/profiles';
-import { writeLimiter } from '../utils/rateLimiter';
+import { writeLimiter, uploadLimiter } from '../utils/rateLimiter';
 import { storage } from '../config/firebase';
 
 const router = Router();
@@ -15,6 +15,11 @@ const MAX_MEDIA_PER_POST = 10;
 const MAX_TAGS = 20;
 const DEFAULT_PAGE = 30;
 const MAX_PAGE = 50;
+// Brand-new accounts (first 7 days) can publish a limited number of posts per day, so a fake
+// shop can't flood the feed before anyone has a chance to report it.
+const NEW_ACCOUNT_DAYS = 7;
+const NEW_ACCOUNT_DAILY_POSTS = 10;
+const MAX_VIDEO_SECONDS = 600;
 
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
@@ -201,7 +206,10 @@ router.get('/:id', optionalAuthenticateUser, async (req: Request, res: Response)
 async function resolveMedia(items: string[], creatorId: string): Promise<string[]> {
     const out: string[] = [];
     for (const [idx, u] of items.entries()) {
-        if (u.startsWith('data:')) {
+        if (isUploadRef(u)) {
+            // A video uploaded directly to storage: checked and moved by the server
+            out.push(await claimUploadedVideo(u, creatorId, ['posts', creatorId], `media_${idx}`));
+        } else if (u.startsWith('data:')) {
             const file = decodeUpload(u, ['image', 'video']);
             const saved = await saveUpload({ folder: ['posts', creatorId], namePrefix: `media_${idx}`, file, visibility: 'public' });
             out.push(saved.url);
@@ -213,6 +221,22 @@ async function resolveMedia(items: string[], creatorId: string): Promise<string[
     }
     return out;
 }
+
+/**
+ * @route   POST /api/posts/video-upload-url
+ * @desc    One-time link to upload a video straight to storage (see utils/fileStorage).
+ *          Body: { contentType: "video/mp4" | "video/quicktime", size: <bytes> }
+ */
+router.post('/video-upload-url', authenticateUser, uploadLimiter, async (req: Request, res: Response) => {
+    try {
+        const link = await createVideoUploadUrl(req.user!.uid, req.body?.contentType, req.body?.size);
+        res.status(200).json(link);
+    } catch (error: any) {
+        if (error instanceof UploadError) return res.status(error.status).json({ error: error.message });
+        console.error('Video upload link error:', error);
+        res.status(500).json({ error: 'Could not prepare the video upload' });
+    }
+});
 
 /**
  * @route   POST /api/posts
@@ -250,8 +274,38 @@ router.post('/', authenticateUser, writeLimiter, async (req: Request, res: Respo
             return res.status(400).json({ error: 'Please provide either a message or a photo/video for your post' });
         }
 
+        // New accounts: daily post limit
+        const userSnap = await db.collection('users').doc(creatorId).get();
+        const createdAt = Date.parse(userSnap.data()?.createdAt || '');
+        if (!isAdmin && Number.isFinite(createdAt) && Date.now() - createdAt < NEW_ACCOUNT_DAYS * 86400000) {
+            const since = new Date(Date.now() - 86400000).toISOString();
+            const mine = await db.collection('posts').where('authorId', '==', creatorId).get();
+            const recent = mine.docs.filter(d => String(d.data().createdAt || '') >= since).length;
+            if (recent >= NEW_ACCOUNT_DAILY_POSTS) {
+                return res.status(429).json({ error: `New accounts can publish up to ${NEW_ACCOUNT_DAILY_POSTS} posts a day. Please try again tomorrow.` });
+            }
+        }
+
+        // Basic video edits, applied when the video plays (the file itself is not re-encoded)
+        let videoOptions: { muted: boolean; start: number; end: number | null } | null = null;
+        if (b.videoOptions && typeof b.videoOptions === 'object') {
+            const start = Math.max(0, Math.min(Number(b.videoOptions.start) || 0, MAX_VIDEO_SECONDS));
+            const endRaw = Number(b.videoOptions.end);
+            const end = Number.isFinite(endRaw) && endRaw > start ? Math.min(endRaw, MAX_VIDEO_SECONDS) : null;
+            videoOptions = { muted: b.videoOptions.muted === true, start, end };
+        }
+
         media = await resolveMedia(media, creatorId);
-        const thumb = typeof b.thumbnailUrl === 'string' && /^https:\/\//i.test(b.thumbnailUrl) ? b.thumbnailUrl : media[0] || null;
+
+        // Cover image: an uploaded still (base64 image) or an https link; otherwise the first media item
+        let thumb: string | null = null;
+        if (typeof b.thumbnailData === 'string' && b.thumbnailData.startsWith('data:')) {
+            const file = decodeUpload(b.thumbnailData, ['image']);
+            thumb = (await saveUpload({ folder: ['posts', creatorId], namePrefix: 'cover', file, visibility: 'public' })).url;
+        } else if (typeof b.thumbnailUrl === 'string' && /^https:\/\//i.test(b.thumbnailUrl)) {
+            thumb = b.thumbnailUrl;
+        }
+        thumb = thumb || media[0] || null;
 
         const author = await getDisplayProfile(creatorId);
         const now = new Date().toISOString();
@@ -284,6 +338,7 @@ router.post('/', authenticateUser, writeLimiter, async (req: Request, res: Respo
             currency: str(b.currency, 5) || 'NGN',
             category: isCommunity ? 'Community' : (str(b.category, 80) || vendorCategory),
             tags,
+            videoOptions,
             likesCount: 0,
             commentsCount: 0,
             likedBy: [],

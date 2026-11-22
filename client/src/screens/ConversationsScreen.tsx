@@ -18,7 +18,8 @@ import { Image } from '../components/CachedImage';
 import { FlashList } from '@shopify/flash-list';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
-import { chatAPI } from '../services/api';
+import { chatAPI, callAPI } from '../services/api';
+import CallHistoryList, { CallRecord } from '../components/CallHistoryList';
 import { auth } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
 import { useChatStore } from '../store/chatStore';
@@ -41,7 +42,7 @@ interface Conversation {
     lastMessageAt: any;
 }
 
-type ChatCategory = 'all' | 'unread' | 'read' | 'archived';
+type ChatCategory = 'all' | 'unread' | 'read' | 'archived' | 'calls';
 
 export default function ConversationsScreen({ navigation }: any) {
     const { colors } = useTheme();
@@ -75,6 +76,51 @@ export default function ConversationsScreen({ navigation }: any) {
     const loading = !liveLoaded && !serverLoaded;
     const [activeCategory, setActiveCategory] = useState<ChatCategory>('all');
     const [archivedIds, setArchivedIds] = useState<string[]>([]);
+
+    // Call history (the "Calls" tab). Missed calls newer than the last time the tab was opened
+    // are counted on the tab, like a missed-call badge.
+    const [calls, setCalls] = useState<CallRecord[]>([]);
+    const [callsLoading, setCallsLoading] = useState(false);
+    const [callsRefreshing, setCallsRefreshing] = useState(false);
+    const [callsSeenAt, setCallsSeenAt] = useState<string>('');
+    const callsSeenKey = user?.uid ? `@pointer_calls_seen_${user.uid}` : '';
+
+    useEffect(() => {
+        if (!callsSeenKey) return;
+        AsyncStorage.getItem(callsSeenKey).then(v => setCallsSeenAt(v || '')).catch(() => {});
+    }, [callsSeenKey]);
+
+    const fetchCalls = useCallback(async () => {
+        if (!user || auth.currentUser?.uid !== user.uid) return;
+        setCallsLoading(true);
+        try {
+            const res = await callAPI.getHistory();
+            setCalls(res.data?.calls || []);
+        } catch (e: any) {
+            const status = e?.response?.status;
+            if (status !== 401 && status !== 403) console.warn('Could not load calls:', e?.message);
+        } finally {
+            setCallsLoading(false);
+            setCallsRefreshing(false);
+        }
+    }, [user]);
+
+    useFocusEffect(useCallback(() => { fetchCalls(); }, [fetchCalls]));
+
+    const newMissedCalls = useMemo(
+        () => calls.filter(c => c.missed && (!callsSeenAt || c.createdAt > callsSeenAt)).length,
+        [calls, callsSeenAt]
+    );
+
+    // Opening the Calls tab marks the missed calls as seen
+    useEffect(() => {
+        if (activeCategory !== 'calls' || !callsSeenKey) return;
+        const latest = calls[0]?.createdAt || new Date().toISOString();
+        if (latest > callsSeenAt) {
+            setCallsSeenAt(latest);
+            AsyncStorage.setItem(callsSeenKey, latest).catch(() => {});
+        }
+    }, [activeCategory, calls, callsSeenKey]);
 
     useEffect(() => {
         if (!user?.uid) return;
@@ -316,6 +362,7 @@ export default function ConversationsScreen({ navigation }: any) {
                         { key: 'unread', label: 'Unread', count: unreadChats.length },
                         { key: 'read', label: 'Read', count: readChats.length },
                         { key: 'archived', label: 'Archived', count: archivedChats.length },
+                        { key: 'calls', label: 'Calls', count: newMissedCalls },
                     ].map((tab) => {
                         const isActive = activeCategory === tab.key;
                         return (
@@ -386,7 +433,24 @@ export default function ConversationsScreen({ navigation }: any) {
                 </TouchableOpacity>
             )}
 
-            {displayConversations.length === 0 ? (
+            {activeCategory === 'calls' ? (
+                <View style={styles.listColumn}>
+                    <CallHistoryList
+                        calls={calls}
+                        loading={callsLoading}
+                        refreshing={callsRefreshing}
+                        onRefresh={() => { setCallsRefreshing(true); fetchCalls(); }}
+                        onOpen={(c) => openChat(navigation, {
+                            otherUserId: c.otherUser.id,
+                            otherUserName: c.otherUser.name,
+                            otherUserImage: c.otherUser.avatar,
+                            receiverId: c.otherUser.id,
+                            receiverName: c.otherUser.name,
+                            receiverImage: c.otherUser.avatar,
+                        })}
+                    />
+                </View>
+            ) : displayConversations.length === 0 ? (
                 <View style={styles.emptyContainer}>
                     <Text style={styles.emptyIcon}>
                         {activeCategory === 'archived' ? '📦' : activeCategory === 'unread' ? '✉️' : '💬'}

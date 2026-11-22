@@ -204,7 +204,7 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
                     uid: userRecord.uid,
                     businessName: name,
                     phoneNumber: phoneNumber ? phoneNumber.trim() : null,
-                    verificationStatus: 'pending', // listed after an administrator approves it
+                    verificationStatus: 'approved', // listed straight away; Discover shows it once a category is set. Admins can still suspend.
                     isVerified: false,
                     location: null,
                     averageRating: 0,
@@ -346,7 +346,7 @@ router.post('/oauth', authLimiter, async (req: Request, res: Response) => {
                 batch.set(db.collection('vendors').doc(uid), {
                     uid,
                     businessName: String(userName).slice(0, 100),
-                    verificationStatus: 'pending',
+                    verificationStatus: 'approved', // listed straight away (see /register)
                     isVerified: false,
                     location: null,
                     averageRating: 0, totalReviews: 0, ratingSum: 0,

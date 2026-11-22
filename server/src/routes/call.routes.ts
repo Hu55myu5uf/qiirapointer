@@ -59,7 +59,65 @@ async function getCall(callId: string, fresh = false): Promise<CallSession | nul
 async function updateCall(callId: string, update: Partial<CallSession>) {
     await calls().doc(callId).set(update, { merge: true });
     sessionCache.delete(callId);
-    if (update.status && ['rejected', 'ended', 'missed'].includes(update.status)) callSignals.delete(callId);
+    if (update.status && ['rejected', 'ended', 'missed'].includes(update.status)) {
+        callSignals.delete(callId);
+        // Every finished call leaves an entry in the two people's chat (call history)
+        const session = await getCall(callId, true);
+        if (session) await recordCallInChat(session).catch(e => console.warn('Call log note:', e.message));
+    }
+}
+
+const formatDuration = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+/** What a finished call looks like in the chat list and in the chat itself. */
+export function callSummary(s: Pick<CallSession, 'callType' | 'status' | 'durationSeconds'>) {
+    const icon = s.callType === 'video' ? '🎥' : '📞';
+    const kind = s.callType === 'video' ? 'video call' : 'voice call';
+    if (s.status === 'missed') return `${icon} Missed ${kind}`;
+    if (s.status === 'rejected') return `${icon} Declined ${kind}`;
+    const d = Number(s.durationSeconds) || 0;
+    return `${icon} ${kind.charAt(0).toUpperCase()}${kind.slice(1)}${d > 0 ? ` · ${formatDuration(d)}` : ''}`;
+}
+
+/**
+ * Write a "call" message into the caller/receiver conversation. The message id is derived from
+ * the call id, so a call can never be logged twice.
+ */
+async function recordCallInChat(s: CallSession) {
+    if (!['ended', 'missed', 'rejected'].includes(s.status)) return;
+    const [a, b] = [s.callerId, s.receiverId].sort();
+    const convId = `${a}_${b}`;
+    const at = s.endedAt || new Date().toISOString();
+    const text = callSummary(s);
+    const convRef = db.collection('conversations').doc(convId);
+    const msgRef = convRef.collection('messages').doc(`call_${s.id}`);
+
+    const [caller, receiver] = await Promise.all([getDisplayProfile(s.callerId), getDisplayProfile(s.receiverId)]);
+    const batch = db.batch();
+    batch.set(convRef, {
+        id: convId,
+        participants: [s.callerId, s.receiverId].sort(),
+        participantNames: { [s.callerId]: caller.name, [s.receiverId]: receiver.name },
+        participantImages: { [s.callerId]: caller.avatar, [s.receiverId]: receiver.avatar },
+        lastMessage: text,
+        lastMessageAt: at,
+        lastSenderId: s.callerId,
+        updatedAt: at,
+    }, { merge: true });
+    batch.set(msgRef, {
+        senderId: s.callerId,
+        receiverId: s.receiverId,
+        text,
+        createdAt: at,
+        messageType: 'call',
+        callData: {
+            callId: s.id,
+            callType: s.callType,
+            status: s.status,
+            durationSeconds: Number(s.durationSeconds) || 0,
+        },
+    });
+    await batch.commit();
 }
 
 const isActive = (s: CallSession) => s.status === 'ringing' || s.status === 'connected';
@@ -240,6 +298,48 @@ router.get('/incoming/:userId', authenticateUser, async (req: Request, res: Resp
     } catch (error: any) {
         console.error('Incoming call check error:', error);
         res.status(500).json({ error: 'Failed to check incoming calls' });
+    }
+});
+
+/**
+ * GET /api/calls/history — the signed-in user's own recent calls (newest first)
+ */
+router.get('/history', authenticateUser, async (req: Request, res: Response): Promise<any> => {
+    try {
+        const uid = req.user!.uid;
+        // Two equality queries (no composite index needed), merged and sorted here
+        const [out, inc] = await Promise.all([
+            calls().where('callerId', '==', uid).limit(200).get(),
+            calls().where('receiverId', '==', uid).limit(200).get(),
+        ]);
+        const sessions = [...out.docs, ...inc.docs]
+            .map(d => ({ id: d.id, ...(d.data() as any) }) as CallSession)
+            .filter(s => !isActive(s))
+            .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+            .slice(0, 100);
+
+        const calls_ = await Promise.all(sessions.map(async s => {
+            const outgoing = s.callerId === uid;
+            const otherId = outgoing ? s.receiverId : s.callerId;
+            const other = await getDisplayProfile(otherId);
+            return {
+                id: s.id,
+                callType: s.callType,
+                status: s.status,
+                direction: outgoing ? 'outgoing' : 'incoming',
+                // Missed from this user's point of view: someone called them and they didn't answer
+                missed: !outgoing && s.status === 'missed',
+                durationSeconds: Number(s.durationSeconds) || 0,
+                createdAt: s.createdAt,
+                endedAt: s.endedAt || null,
+                summary: callSummary(s),
+                otherUser: { id: otherId, name: other.name, avatar: other.avatar, isVerified: other.isVerified },
+            };
+        }));
+        res.json({ calls: calls_ });
+    } catch (error: any) {
+        console.error('Call history error:', error);
+        res.status(500).json({ error: 'Failed to load call history' });
     }
 });
 
@@ -548,7 +648,14 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
                     video: IS_VIDEO ? { facingMode: facingMode, width: { ideal: 720 }, height: { ideal: 1280 } } : false
                 };
 
-                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                } catch (mediaErr) {
+                    if (!IS_VIDEO) throw mediaErr;
+                    // Camera unavailable or refused: carry on with sound only
+                    postToNative('MEDIA_ERROR', { error: 'camera: ' + (mediaErr && mediaErr.message) });
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: constraints.audio, video: false });
+                }
                 if (IS_VIDEO && localVideo) {
                     localVideo.srcObject = localStream;
                 }
@@ -594,6 +701,7 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
                     audioElement.play().catch(() => {});
                 }
                 if (IS_VIDEO && remoteVideo) {
+                    remoteVideo.muted = true;
                     remoteVideo.srcObject = stream;
                     remoteVideo.play().catch(() => {});
                 }
@@ -615,6 +723,7 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
                     postToNative('PEER_CONNECTED');
                 } else if (state === 'disconnected' || state === 'failed') {
                     statusPill.textContent = 'Reconnecting...';
+                    if (state === 'failed' && isInitiator) restartConnection();
                 }
             };
         }
@@ -631,19 +740,43 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
             }
         }
 
+        // Signals must be applied in the order they were sent (offer/answer before their ICE
+        // candidates), so batches are fetched one at a time and handled sequentially.
+        let polling = true;
         function startSignalPolling() {
-            pollTimer = setInterval(async () => {
+            const tick = async () => {
+                if (!polling) return;
                 try {
                     const res = await fetch(API_BASE + '/calls/' + encodeURIComponent(CALL_ID) + '/signal/' + encodeURIComponent(USER_ID), { headers: AUTH_HEADERS });
-                    if (res.status === 401 || res.status === 404) { clearInterval(pollTimer); return; }
+                    if (res.status === 401 || res.status === 404) { polling = false; return; }
                     const json = await res.json();
-                    if (json.signals && json.signals.length > 0) {
-                        for (const sig of json.signals) {
-                            handleSignal(sig);
-                        }
+                    for (const sig of (json.signals || [])) {
+                        await handleSignal(sig);
                     }
+                    if (json.status && ['ended', 'rejected', 'missed'].includes(json.status)) { polling = false; return; }
                 } catch (e) {}
-            }, 800);
+                pollTimer = setTimeout(tick, 700);
+            };
+            tick();
+        }
+
+        async function restartConnection() {
+            try {
+                const offer = await peerConnection.createOffer({ iceRestart: true });
+                await peerConnection.setLocalDescription(offer);
+                sendSignal({ type: 'offer', sdp: offer });
+            } catch (e) {
+                console.warn('Restart note:', e);
+            }
+        }
+
+        let pendingCandidates = [];
+        async function flushCandidates() {
+            const list = pendingCandidates;
+            pendingCandidates = [];
+            for (const c of list) {
+                try { await peerConnection.addIceCandidate(new RTCIceCandidate(c)); } catch (e) { console.warn('Candidate note:', e); }
+            }
         }
 
         async function handleSignal(sig) {
@@ -651,13 +784,19 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
             try {
                 if (sig.type === 'offer') {
                     await peerConnection.setRemoteDescription(new RTCSessionDescription(sig.sdp));
+                    await flushCandidates();
                     const answer = await peerConnection.createAnswer();
                     await peerConnection.setLocalDescription(answer);
                     sendSignal({ type: 'answer', sdp: answer });
                 } else if (sig.type === 'answer') {
                     await peerConnection.setRemoteDescription(new RTCSessionDescription(sig.sdp));
+                    await flushCandidates();
                 } else if (sig.type === 'candidate' && sig.candidate) {
-                    await peerConnection.addIceCandidate(new RTCIceCandidate(sig.candidate));
+                    if (!peerConnection.remoteDescription) {
+                        pendingCandidates.push(sig.candidate);
+                    } else {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(sig.candidate));
+                    }
                 }
             } catch (err) {
                 console.warn('Handle signal note:', err);
@@ -742,7 +881,8 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
             } else if (data.action === 'END_CALL') {
                 if (localStream) localStream.getTracks().forEach(t => t.stop());
                 if (peerConnection) peerConnection.close();
-                if (pollTimer) clearInterval(pollTimer);
+                polling = false;
+                if (pollTimer) clearTimeout(pollTimer);
             }
         });
 

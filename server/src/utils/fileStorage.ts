@@ -152,7 +152,7 @@ export async function deleteUserFiles(uid: string): Promise<void> {
     const id = safeSegment(uid);
     const prefixes = [
         `public/users/${id}/`, `public/vendors/${id}/`, `public/posts/${id}/`, `public/chats/${id}/`,
-        `private/kyc/${id}/`, `private/upgrade/${id}/`,
+        `private/kyc/${id}/`, `private/upgrade/${id}/`, `incoming/${id}/`,
     ];
     for (const prefix of prefixes) {
         try {
@@ -161,4 +161,87 @@ export async function deleteUserFiles(uid: string): Promise<void> {
             console.warn(`Storage cleanup note (${prefix}):`, e.message);
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Direct video uploads
+//
+// Videos are too big to send as base64 through the API, so the app uploads the file straight to
+// Cloud Storage with a one-time signed link:
+//   1. createVideoUploadUrl(): a write link valid for 15 minutes, for one new path inside the
+//      user's own "incoming/<uid>/" folder, with the size capped by Cloud Storage itself.
+//   2. claimUploadedVideo(): when the post is published, the server checks that the file is the
+//      caller's, within the size limit and really a video (from its first bytes), then moves it to
+//      the public posts folder. Anything else is deleted and rejected.
+// Storage security rules stay closed; signed links are the only way in.
+// ---------------------------------------------------------------------------------------------
+
+export const MAX_DIRECT_VIDEO_BYTES = 100 * 1024 * 1024; // 100 MB
+const INCOMING_PREFIX = 'upload:';
+const VIDEO_TYPES: Record<string, string> = { 'video/mp4': '.mp4', 'video/quicktime': '.mov' };
+
+export async function createVideoUploadUrl(uid: string, contentType: unknown, size: unknown) {
+    const type = typeof contentType === 'string' ? contentType.toLowerCase() : '';
+    const ext = VIDEO_TYPES[type];
+    if (!ext) throw new UploadError('Only MP4 or MOV videos can be uploaded.', 415);
+    const bytes = Number(size);
+    if (!Number.isFinite(bytes) || bytes <= 0) throw new UploadError('Video size is missing.');
+    if (bytes > MAX_DIRECT_VIDEO_BYTES) {
+        throw new UploadError(`Video is too large (max ${MAX_DIRECT_VIDEO_BYTES / 1024 / 1024} MB). Try a shorter clip.`, 413);
+    }
+
+    const path = `incoming/${safeSegment(uid)}/video_${Date.now()}_${crypto.randomBytes(6).toString('hex')}${ext}`;
+    const expires = Date.now() + 15 * 60 * 1000;
+    const headers = {
+        'Content-Type': type,
+        'x-goog-content-length-range': `1,${MAX_DIRECT_VIDEO_BYTES}`,
+    };
+    const [uploadUrl] = await bucket().file(path).getSignedUrl({
+        version: 'v4',
+        action: 'write',
+        expires,
+        contentType: type,
+        extensionHeaders: { 'x-goog-content-length-range': headers['x-goog-content-length-range'] },
+    } as any);
+    return { uploadUrl, uploadRef: `${INCOMING_PREFIX}${path}`, method: 'PUT', headers, expiresAt: new Date(expires).toISOString() };
+}
+
+export const isUploadRef = (v: unknown): boolean => typeof v === 'string' && v.startsWith(`${INCOMING_PREFIX}incoming/`);
+
+/** Verify a direct upload belongs to `uid` and is a real video, then publish it. Returns the public URL. */
+export async function claimUploadedVideo(ref: string, uid: string, folder: string[], namePrefix: string): Promise<string> {
+    const path = ref.slice(INCOMING_PREFIX.length);
+    // Exactly incoming/<uid>/<file> — no other user's folder, no "..", no sub-folders
+    const m = path.match(/^incoming\/([a-zA-Z0-9_-]+)\/(video_[a-zA-Z0-9_]+\.(mp4|mov))$/);
+    if (!m || m[1] !== safeSegment(uid)) throw new UploadError('Invalid media', 403);
+
+    const src = bucket().file(path);
+    const [exists] = await src.exists();
+    if (!exists) throw new UploadError('The video upload was not found or has expired. Please upload it again.');
+
+    const reject = async (msg: string, status = 400): Promise<never> => {
+        await src.delete().catch(() => {});
+        throw new UploadError(msg, status);
+    };
+    const [meta] = await src.getMetadata();
+    const size = Number(meta?.size || 0);
+    if (!size) return reject('The uploaded video is empty.');
+    if (size > MAX_DIRECT_VIDEO_BYTES) return reject('Video is too large.', 413);
+
+    const [head] = await src.download({ start: 0, end: 63 });
+    const detected = detectFileType(Buffer.from(head));
+    if (!detected || detected.kind !== 'video') return reject('That file is not a supported video.', 415);
+
+    const fileName = `${safeSegment(namePrefix)}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${detected.ext}`;
+    const destPath = ['public', ...folder.map(safeSegment), fileName].join('/');
+    const dest = bucket().file(destPath);
+    const token = crypto.randomUUID();
+    await src.copy(dest);
+    await dest.setMetadata({
+        contentType: detected.mime,
+        cacheControl: 'public, max-age=31536000',
+        metadata: { firebaseStorageDownloadTokens: token },
+    });
+    await src.delete().catch(() => {});
+    return `https://firebasestorage.googleapis.com/v0/b/${bucket().name}/o/${encodeURIComponent(destPath)}?alt=media&token=${token}`;
 }

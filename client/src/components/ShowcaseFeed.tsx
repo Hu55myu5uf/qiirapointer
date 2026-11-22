@@ -17,17 +17,43 @@ type ViewToken = { item: any; key: string; index?: number | null; isViewable: bo
 import { useVideoPlayer, VideoView } from 'expo-video';
 
 // Looping, chrome-less video player driven by play/mute props (expo-video)
-function ShowcaseVideo({ uri, shouldPlay, isMuted }: { uri: string; shouldPlay: boolean; isMuted: boolean }) {
+// Edits chosen when the video was posted: play only start..end, and optionally without its sound.
+// (The file itself is not re-encoded; the player applies them.)
+export type VideoOptions = { muted?: boolean; start?: number; end?: number | null } | null | undefined;
+
+function ShowcaseVideo({ uri, shouldPlay, isMuted, options }: { uri: string; shouldPlay: boolean; isMuted: boolean; options?: VideoOptions }) {
+    const start = Math.max(0, Number(options?.start) || 0);
+    const end = options?.end && options.end > start ? options.end : null;
+    const forceMuted = options?.muted === true;
+
     const player = useVideoPlayer(uri, (p) => {
-        p.loop = true;
-        p.muted = isMuted;
+        p.loop = !end; // with a trim, looping is done below (back to the trim start)
+        p.muted = isMuted || forceMuted;
+        if (start > 0) p.currentTime = start;
+        if (end) p.timeUpdateEventInterval = 0.25;
     });
 
     useEffect(() => {
         try {
-            player.muted = isMuted;
+            player.muted = isMuted || forceMuted;
         } catch (_) {}
-    }, [player, isMuted]);
+    }, [player, isMuted, forceMuted]);
+
+    // Trimmed clip: jump back to the start when the end is reached (or the file ends)
+    useEffect(() => {
+        if (!end && !start) return;
+        const onTime = player.addListener('timeUpdate', ({ currentTime }) => {
+            if (end && currentTime >= end) player.currentTime = start;
+        });
+        const onEnd = player.addListener('playToEnd', () => {
+            player.currentTime = start;
+            player.play();
+        });
+        return () => {
+            onTime.remove();
+            onEnd.remove();
+        };
+    }, [player, start, end]);
 
     useEffect(() => {
         try {
@@ -50,6 +76,7 @@ import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
 import { AvatarVerificationBadge, VerificationBadgeInline } from './VerificationBadge';
 import { PLACEHOLDER_AVATARS } from '../assets';
+import { subCategoryOf, mainCategoryOf } from '../constants/categories';
 
 // Initial guess only; the real size comes from onLayout (and updates on rotation / split screen)
 const INITIAL = Dimensions.get('window');
@@ -177,6 +204,7 @@ function ShowcaseItemCard({
                         uri={mediaUri}
                         shouldPlay={isActive && !isPaused}
                         isMuted={isMuted}
+                        options={item.videoOptions}
                     />
                 ) : (
                     <Image
@@ -348,7 +376,7 @@ function ShowcaseItemCard({
                     />
                     {item.vendorCategory ? (
                         <View style={styles.categoryPill}>
-                            <Text style={styles.categoryPillText}>{item.vendorCategory}</Text>
+                            <Text style={styles.categoryPillText} numberOfLines={1}>{subCategoryOf(item.vendorCategory) || mainCategoryOf(item.vendorCategory)}</Text>
                         </View>
                     ) : null}
                 </TouchableOpacity>

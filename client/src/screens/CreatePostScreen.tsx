@@ -21,12 +21,13 @@ import * as DocumentPicker from 'expo-document-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '../constants/theme';
-import { postAPI, authAPI } from '../services/api';
+import { postAPI } from '../services/api';
 import { auth } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
-import VendorVerificationModal from '../components/VendorVerificationModal';
 import { POPULAR_CATEGORIES } from '../constants/categories';
 import CategoryPickerModal from '../components/CategoryPickerModal';
+import VideoEditSheet, { VideoEdits } from '../components/VideoEditSheet';
+import { uploadVideo, videoFrame, imageFileAsDataUri, MAX_VIDEO_SECONDS } from '../utils/videoUpload';
 
 const CATEGORIES = POPULAR_CATEGORIES.filter(c => c !== 'All');
 
@@ -40,10 +41,17 @@ const PRESET_PHOTOS = [
 ];
 
 interface MediaItem {
-    uri: string;
+    uri: string;                 // images: data URI or https link; videos: the local file
     type: 'image' | 'video';
     id: string;
+    mime?: string | null;        // videos
+    size?: number | null;        // videos, bytes
+    duration?: number;           // videos, seconds
+    edits?: VideoEdits;          // videos: trim / cover / mute
 }
+
+const newId = () => `media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+const NO_EDITS: VideoEdits = { start: 0, end: null, muted: false, coverTime: 0, coverUri: null };
 
 export default function CreatePostScreen({ navigation }: any) {
     const { colors } = useTheme();
@@ -53,11 +61,6 @@ export default function CreatePostScreen({ navigation }: any) {
     const { user, userRole, realRole } = useAuthStore();
     const isAdmin = Boolean(realRole === 'admin' || userRole === 'admin' || user?.email === 'admin@qiira.com' || user?.uid === 'v8MwaOet0ISfZAWXIDAPAGcg1td2');
     const isVendor = userRole === 'vendor' || realRole === 'vendor';
-
-    const [isVerified, setIsVerified] = useState(false);
-    const [verificationStatus, setVerificationStatus] = useState<string>('pending');
-    const [checkingVerification, setCheckingVerification] = useState(isVendor && !isAdmin);
-    const [showVerificationModal, setShowVerificationModal] = useState(false);
 
     const [postType, setPostType] = useState<'photos' | 'reels' | 'mixed'>('photos');
     const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
@@ -69,28 +72,51 @@ export default function CreatePostScreen({ navigation }: any) {
     const [showCategoryModal, setShowCategoryModal] = useState<boolean>(false);
     const [tags, setTags] = useState<string>('');
     const [loading, setLoading] = useState<boolean>(false);
+    const [uploadStatus, setUploadStatus] = useState<string>('');
+    const [editingId, setEditingId] = useState<string | null>(null);
 
-    React.useEffect(() => {
-        const checkStatus = async () => {
-            if (!user || !isVendor || isAdmin) {
-                setCheckingVerification(false);
-                return;
+    /**
+     * Turn a picked asset into a media item. Photos are sent as data URIs (small); videos stay as
+     * local files and are uploaded directly to storage when the post is published.
+     */
+    const assetToMediaItem = async (asset: { uri: string; type?: string | null; base64?: string | null; mimeType?: string | null; fileSize?: number | null; duration?: number | null }): Promise<MediaItem | null> => {
+        const isVideo = asset.type === 'video' || Boolean(asset.mimeType?.startsWith('video/'));
+        if (isVideo) {
+            if (Platform.OS === 'web') {
+                Alert.alert('Use the app', 'Videos can be posted from the Pointer app on your phone.');
+                return null;
             }
-            try {
-                const res = await authAPI.getUser(user.uid);
-                const u = res.data?.user;
-                const verified = Boolean(u?.isVerified || u?.is_verified);
-                const status = u?.verificationStatus || u?.verification_status || 'pending';
-                setIsVerified(verified);
-                setVerificationStatus(status);
-            } catch (e) {
-                console.warn('Error checking verification in CreatePost:', e);
-            } finally {
-                setCheckingVerification(false);
-            }
-        };
-        checkStatus();
-    }, [user, isVendor, isAdmin]);
+            const item: MediaItem = {
+                uri: asset.uri,
+                type: 'video',
+                id: newId(),
+                mime: asset.mimeType,
+                size: asset.fileSize,
+                duration: asset.duration ? asset.duration / 1000 : undefined,
+                edits: { ...NO_EDITS },
+            };
+            // Default cover: the first frame (made in the background)
+            videoFrame(asset.uri, 0).then(frame => {
+                if (frame) setMediaItems(prev => prev.map(m => m.id === item.id ? { ...m, edits: { ...(m.edits || NO_EDITS), coverUri: m.edits?.coverUri || frame } } : m));
+            });
+            return item;
+        }
+        let finalUri = '';
+        if (asset.base64) {
+            finalUri = asset.base64.startsWith('data:') ? asset.base64 : `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`;
+        } else if (asset.uri) {
+            finalUri = await convertBlobToBase64(asset.uri);
+        }
+        return finalUri ? { uri: finalUri, type: 'image', id: newId() } : null;
+    };
+
+    const addAssets = async (assets: any[]) => {
+        const items = (await Promise.all(assets.map(assetToMediaItem))).filter(Boolean) as MediaItem[];
+        if (items.length) setMediaItems(prev => [...prev, ...items].slice(0, 10));
+        // Open the editor straight away for a single new video
+        const videos = items.filter(i => i.type === 'video');
+        if (videos.length === 1) setEditingId(videos[0].id);
+    };
 
     // Convert local/blob URIs to permanent base64 data URIs
     const convertBlobToBase64 = async (uri: string): Promise<string> => {
@@ -135,25 +161,7 @@ export default function CreatePostScreen({ navigation }: any) {
             });
 
             if (!result.canceled && result.assets && result.assets.length > 0) {
-                const newItems: MediaItem[] = [];
-                for (const asset of result.assets) {
-                    let finalUri = '';
-                    if (asset.base64) {
-                        finalUri = asset.base64.startsWith('data:')
-                            ? asset.base64
-                            : `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`;
-                    } else if (asset.uri) {
-                        finalUri = await convertBlobToBase64(asset.uri);
-                    }
-                    if (finalUri) {
-                        newItems.push({
-                            uri: finalUri,
-                            type: asset.type === 'video' ? 'video' : 'image',
-                            id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-                        });
-                    }
-                }
-                setMediaItems(prev => [...prev, ...newItems]);
+                await addAssets(result.assets);
             }
         } catch (error) {
             console.error('Pick media error:', error);
@@ -178,25 +186,7 @@ export default function CreatePostScreen({ navigation }: any) {
             });
 
             if (!result.canceled && result.assets && result.assets.length > 0) {
-                const newItems: MediaItem[] = [];
-                for (const asset of result.assets) {
-                    let finalUri = '';
-                    if (asset.base64) {
-                        finalUri = asset.base64.startsWith('data:')
-                            ? asset.base64
-                            : `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}`;
-                    } else if (asset.uri) {
-                        finalUri = await convertBlobToBase64(asset.uri);
-                    }
-                    if (finalUri) {
-                        newItems.push({
-                            uri: finalUri,
-                            type: asset.type === 'video' ? 'video' : 'image',
-                            id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-                        });
-                    }
-                }
-                setMediaItems(prev => [...prev, ...newItems]);
+                await addAssets(result.assets);
             }
         } catch (error) {
             console.error('Pick media error:', error);
@@ -214,31 +204,13 @@ export default function CreatePostScreen({ navigation }: any) {
             const isShowcase = postType === 'reels';
             const result = await ImagePicker.launchCameraAsync({
                 mediaTypes: isShowcase ? ['videos'] : ['images', 'videos'],
-                videoMaxDuration: 60,
+                videoMaxDuration: MAX_VIDEO_SECONDS,
                 quality: 0.8,
                 base64: true,
             });
 
             if (!result.canceled && result.assets && result.assets.length > 0) {
-                const asset = result.assets[0];
-                let finalUri = '';
-                if (asset.base64) {
-                    finalUri = asset.base64.startsWith('data:')
-                        ? asset.base64
-                        : `data:${asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg')};base64,${asset.base64}`;
-                } else if (asset.uri) {
-                    finalUri = await convertBlobToBase64(asset.uri);
-                }
-                if (finalUri) {
-                    setMediaItems(prev => [
-                        ...prev,
-                        {
-                            uri: finalUri,
-                            type: asset.type === 'video' ? 'video' : 'image',
-                            id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-                        }
-                    ]);
-                }
+                await addAssets([result.assets[0]]);
             }
         } catch (error) {
             console.error('Camera capture error:', error);
@@ -254,16 +226,8 @@ export default function CreatePostScreen({ navigation }: any) {
             });
             if (!result.canceled && result.assets && result.assets.length > 0) {
                 const asset = result.assets[0];
-                const uri = await convertBlobToBase64(asset.uri);
-                const isVideo = asset.mimeType?.startsWith('video/') || asset.name.endsWith('.mp4');
-                setMediaItems(prev => [
-                    ...prev,
-                    {
-                        uri,
-                        type: isVideo ? 'video' : 'image',
-                        id: `media_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-                    }
-                ]);
+                const isVideo = Boolean(asset.mimeType?.startsWith('video/')) || /\.(mp4|mov)$/i.test(asset.name);
+                await addAssets([{ uri: asset.uri, type: isVideo ? 'video' : 'image', mimeType: asset.mimeType, fileSize: asset.size }]);
             }
         } catch (e) {
             console.error('Document pick error:', e);
@@ -334,7 +298,38 @@ export default function CreatePostScreen({ navigation }: any) {
             const hasImage = mediaItems.some(m => m.type === 'image');
             const resolvedType = (hasVideo && !hasImage) ? 'reel' : 'post';
 
-            const allUrls = mediaItems.map(m => m.uri);
+            // Clips must fit the length limit (the editor shows how to trim)
+            const longVideo = mediaItems.find(m => m.type === 'video' && m.duration && (((m.edits?.end ?? m.duration) - (m.edits?.start ?? 0)) > MAX_VIDEO_SECONDS + 0.5));
+            if (longVideo) {
+                setLoading(false);
+                Alert.alert('Video too long', `Showcase videos can be up to ${MAX_VIDEO_SECONDS} seconds. Trim it in the editor.`, [
+                    { text: 'Trim now', onPress: () => setEditingId(longVideo.id) },
+                ]);
+                return;
+            }
+
+            // Upload each video file straight to storage (with progress), keep photos as they are
+            const videos = mediaItems.filter(m => m.type === 'video');
+            const allUrls: string[] = [];
+            let videoNo = 0;
+            for (const m of mediaItems) {
+                if (m.type !== 'video') { allUrls.push(m.uri); continue; }
+                videoNo += 1;
+                const label = videos.length > 1 ? `Uploading video ${videoNo} of ${videos.length}` : 'Uploading video';
+                setUploadStatus(`${label}…`);
+                const ref = await uploadVideo(m.uri, {
+                    mime: m.mime,
+                    size: m.size,
+                    onProgress: (p) => setUploadStatus(`${label} · ${Math.round(p * 100)}%`),
+                });
+                allUrls.push(ref);
+            }
+            setUploadStatus('Publishing…');
+
+            // Edits and cover of the first video
+            const firstVideo = videos[0];
+            const edits = firstVideo?.edits;
+            const thumbnailData = edits?.coverUri ? await imageFileAsDataUri(edits.coverUri).catch(() => undefined) : undefined;
 
             await postAPI.createPost({
                 vendorId,
@@ -342,11 +337,14 @@ export default function CreatePostScreen({ navigation }: any) {
                 caption: caption.trim() || 'New product arrival',
                 mediaUrl: allUrls[0],
                 mediaUrls: allUrls,
-                thumbnailUrl: allUrls[0],
                 price: parsedPriceNumber,
                 currency: 'NGN',
                 category,
                 tags: formattedTags,
+                ...(firstVideo ? {
+                    videoOptions: { muted: Boolean(edits?.muted), start: edits?.start || 0, end: edits?.end ?? null },
+                    ...(thumbnailData ? { thumbnailData } : {}),
+                } : { thumbnailUrl: allUrls[0] }),
             });
 
             Alert.alert(
@@ -356,25 +354,38 @@ export default function CreatePostScreen({ navigation }: any) {
             );
         } catch (error: any) {
             console.error('Create post error:', error);
-            const msg = error.response?.data?.message || error.message || 'Failed to publish post';
-            Alert.alert('Error', msg);
+            const msg = error.response?.data?.error || error.response?.data?.message || error.message || 'Failed to publish post';
+            Alert.alert('Could not publish', msg);
         } finally {
             setLoading(false);
+            setUploadStatus('');
         }
     };
 
     const renderMediaItem = ({ item, index }: { item: MediaItem; index: number }) => (
         <View style={styles.mediaItemContainer}>
-            <Image source={{ uri: item.uri }} style={styles.mediaItemImage} resizeMode="cover" />
+            {item.type === 'video' ? (
+                item.edits?.coverUri
+                    ? <Image source={{ uri: item.edits.coverUri }} style={styles.mediaItemImage} resizeMode="cover" />
+                    : <View style={[styles.mediaItemImage, { backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }]}><ActivityIndicator color="#fff" /></View>
+            ) : (
+                <Image source={{ uri: item.uri }} style={styles.mediaItemImage} resizeMode="cover" />
+            )}
             {/* Index badge */}
             <View style={styles.mediaItemIndex}>
                 <Text style={styles.mediaItemIndexText}>{index + 1}</Text>
             </View>
             {/* Type badge */}
             {item.type === 'video' && (
-                <View style={styles.mediaItemTypeBadge}>
-                    <Ionicons name="videocam" size={12} color="#fff" />
-                </View>
+                <TouchableOpacity
+                    style={[styles.mediaItemTypeBadge, { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, width: undefined }]}
+                    onPress={() => setEditingId(item.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit video"
+                >
+                    <Ionicons name="cut-outline" size={12} color="#fff" />
+                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>Edit</Text>
+                </TouchableOpacity>
             )}
             {/* Remove button */}
             <TouchableOpacity style={styles.mediaItemRemove} onPress={() => handleRemoveMedia(item.id)}>
@@ -383,100 +394,36 @@ export default function CreatePostScreen({ navigation }: any) {
         </View>
     );
 
-    if (checkingVerification) {
-        return (
-            <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-                <ActivityIndicator size="large" color={colors.primary} />
-            </View>
-        );
-    }
-
-    if (isVendor && !isVerified && verificationStatus !== 'approved' && !isAdmin) {
-        return (
-            <View style={[styles.container, { padding: SPACING.lg, justifyContent: 'center', alignItems: 'center' }]}>
-                <View style={[styles.header, { width: '100%', marginBottom: SPACING.xl }]}>
-                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                        <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Account Verification</Text>
-                    <View style={{ width: 40 }} />
-                </View>
-
-                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', maxWidth: 420, width: '100%', paddingHorizontal: SPACING.md }}>
-                    <View style={{ width: 84, height: 84, borderRadius: 42, backgroundColor: 'rgba(178, 138, 69, 0.15)', alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.lg }}>
-                        <Ionicons name="shield-checkmark" size={46} color="#B28A45" />
-                    </View>
-
-                    <Text style={{ fontSize: FONT_SIZES.xl, fontWeight: 'bold', color: colors.textPrimary, textAlign: 'center', marginBottom: SPACING.xs }}>
-                        Verification Required to Post 🛡️
-                    </Text>
-
-                    <Text style={{ fontSize: FONT_SIZES.sm, color: colors.textSecondary, textAlign: 'center', lineHeight: 20, marginBottom: SPACING.lg }}>
-                        {verificationStatus === 'pending'
-                            ? 'Your identity document has been submitted and is currently being reviewed by the Pointer administration. You will be able to publish posts as soon as it is approved.'
-                            : 'All registered vendors must upload a compulsory identity document (NIN, Driver’s License, or International Passport) before publishing posts or products.'}
-                    </Text>
-
-                    <View style={{ width: '100%', backgroundColor: colors.surface, borderRadius: BORDER_RADIUS.md, padding: SPACING.md, borderWidth: 1, borderColor: colors.border, marginBottom: SPACING.xl }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                            <Ionicons name="information-circle" size={18} color="#B28A45" />
-                            <Text style={{ fontSize: FONT_SIZES.sm, fontWeight: 'bold', color: colors.textPrimary }}>
-                                Status: {verificationStatus === 'pending' ? '⏳ Under Review' : '⚠️ Action Required'}
-                            </Text>
-                        </View>
-                        <Text style={{ fontSize: 12, color: colors.textSecondary }}>
-                            {verificationStatus === 'pending'
-                                ? 'Admin verification is in progress. You can still freely navigate the app, change your profile photo, and update your background banner.'
-                                : 'Upload an image or PDF of your NIN, Driver’s License, or Passport to unlock post creation.'}
-                        </Text>
-                    </View>
-
-                    <TouchableOpacity
-                        style={{
-                            width: '100%',
-                            backgroundColor: '#B28A45',
-                            paddingVertical: 14,
-                            borderRadius: BORDER_RADIUS.md,
-                            alignItems: 'center',
-                            flexDirection: 'row',
-                            justifyContent: 'center',
-                            gap: 8,
-                            marginBottom: SPACING.md,
-                        }}
-                        onPress={() => setShowVerificationModal(true)}
-                        activeOpacity={0.8}
-                    >
-                        <Ionicons name="cloud-upload" size={18} color="#FFFFFF" />
-                        <Text style={{ color: '#FFFFFF', fontWeight: 'bold', fontSize: FONT_SIZES.md }}>
-                            {verificationStatus === 'pending' ? 'Re-upload / Update Document' : 'Upload Verification Document'}
-                        </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                        style={{ width: '100%', paddingVertical: 12, alignItems: 'center' }}
-                        onPress={() => navigation.goBack()}
-                    >
-                        <Text style={{ color: colors.textSecondary, fontWeight: '600' }}>Back to Explore</Text>
-                    </TouchableOpacity>
-                </View>
-
-                <VendorVerificationModal
-                    visible={showVerificationModal}
-                    onClose={() => setShowVerificationModal(false)}
-                    vendorId={user?.uid || ''}
-                    onSuccess={() => {
-                        setVerificationStatus('pending');
-                    }}
-                />
-            </View>
-        );
-    }
+    const editingItem = mediaItems.find(m => m.id === editingId && m.type === 'video');
 
     return (
         <KeyboardAvoidingView
             style={styles.container}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
+            {editingItem ? (
+                <VideoEditSheet
+                    key={editingItem.id}
+                    visible
+                    uri={editingItem.uri}
+                    durationSeconds={editingItem.duration || 0}
+                    initial={editingItem.edits || NO_EDITS}
+                    onCancel={() => setEditingId(null)}
+                    onDone={(edits) => {
+                        setMediaItems(prev => prev.map(m => m.id === editingItem.id ? { ...m, edits } : m));
+                        setEditingId(null);
+                    }}
+                />
+            ) : null}
+            {uploadStatus ? (
+                <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, zIndex: 50, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: SPACING.lg }}>
+                    <View style={{ backgroundColor: colors.surface, borderRadius: BORDER_RADIUS.md, padding: SPACING.lg, alignItems: 'center', gap: SPACING.sm, minWidth: 220 }}>
+                        <ActivityIndicator color={colors.primary} />
+                        <Text style={{ color: colors.textPrimary, fontWeight: '600' }}>{uploadStatus}</Text>
+                        <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Keep the app open until it finishes.</Text>
+                    </View>
+                </View>
+            ) : null}
             {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>

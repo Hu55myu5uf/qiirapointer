@@ -90,7 +90,8 @@
           "icon": "./assets/notification-icon.png",
           "color": "#B28A45"
         }
-      ]
+      ],
+      "@react-native-google-signin/google-signin"
     ],
     "runtimeVersion": {
       "policy": "fingerprint"

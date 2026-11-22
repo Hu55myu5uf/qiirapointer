@@ -112,7 +112,9 @@ export default function VendorProfileScreen({ navigation }: any) {
     const [address, setAddress] = useState('');
     const [services, setServices] = useState('');
 
-    const [verificationStatus, setVerificationStatus] = useState('');
+    // Identity badge: 'verified' | 'pending' | 'rejected' | 'none' (separate from the store listing)
+    const [badgeStatus, setBadgeStatus] = useState<'verified' | 'pending' | 'rejected' | 'none'>('none');
+    const [badgeReason, setBadgeReason] = useState<string | null>(null);
     const [isVerified, setIsVerified] = useState(false);
     const [businessImage, setBusinessImage] = useState('');
     const [bannerImage, setBannerImage] = useState('');
@@ -370,7 +372,13 @@ export default function VendorProfileScreen({ navigation }: any) {
                 setServices(vendor.services || '');
                 setBusinessImage(vendor.businessImage || '');
                 setBannerImage(vendor.bannerImage || '');
-                setVerificationStatus(vendor.verificationStatus || 'pending');
+                setBadgeStatus(vendor.badgeStatus || (vendor.isVerified ? 'verified' : vendor.verificationRequest === 'pending' ? 'pending' : 'none'));
+                // The rejection reason is private, so it comes from the vendor's own profile
+                authAPI.getUser(user.uid).then(r => {
+                    const me = r.data?.user;
+                    if (me?.badgeStatus) setBadgeStatus(me.badgeStatus);
+                    setBadgeReason(me?.badgeRejectionReason || null);
+                }).catch(() => {});
                 // The badge means "identity verified" — an approved store alone doesn't earn it
                 setIsVerified(Boolean(vendor.isVerified || userRole === 'admin'));
                 setUseLiveLocation(Boolean(vendor.useLiveLocation));
@@ -639,9 +647,6 @@ export default function VendorProfileScreen({ navigation }: any) {
         }
     };
 
-    const handlePayment = () => {
-        Alert.alert('Payment Integration', 'This would integrate with Paystack/Stripe to process the verification fee.');
-    };
 
     const handleSave = async () => {
         if (!user) return;
@@ -824,13 +829,16 @@ export default function VendorProfileScreen({ navigation }: any) {
                     <View style={styles.bannerContainer}>
                         {renderBanner()}
                         {/* Verification Badge Overlay */}
-                        <View style={[
-                            styles.verificationBadge,
-                            (isVerified || verificationStatus === 'approved') ? styles.statusApproved :
-                                verificationStatus === 'rejected' ? styles.statusRejected : styles.statusPending
-                        ]}>
-                            <Text style={styles.statusText}>{(isVerified || verificationStatus === 'approved') ? 'VERIFIED' : verificationStatus.toUpperCase()}</Text>
-                        </View>
+                        {(isVerified || badgeStatus !== 'none') ? (
+                            <View style={[
+                                styles.verificationBadge,
+                                isVerified ? styles.statusApproved : badgeStatus === 'rejected' ? styles.statusRejected : styles.statusPending
+                            ]}>
+                                <Text style={styles.statusText}>
+                                    {isVerified ? 'VERIFIED' : badgeStatus === 'rejected' ? 'ID NOT APPROVED' : 'ID UNDER REVIEW'}
+                                </Text>
+                            </View>
+                        ) : null}
                     </View>
 
                     {/* Profile Header */}
@@ -891,7 +899,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                                 alignItems: 'center',
                                 borderColor: '#B28A45',
                                 borderWidth: 1.5,
-                                backgroundColor: isVerified ? '#B28A4515' : verificationStatus === 'pending' ? 'rgba(245, 158, 11, 0.12)' : '#B28A4510',
+                                backgroundColor: isVerified ? '#B28A4515' : badgeStatus === 'pending' ? 'rgba(245, 158, 11, 0.12)' : badgeStatus === 'rejected' ? 'rgba(239, 68, 68, 0.08)' : '#B28A4510',
                                 borderRadius: BORDER_RADIUS.md,
                                 padding: SPACING.md,
                                 marginHorizontal: SPACING.md,
@@ -917,21 +925,26 @@ export default function VendorProfileScreen({ navigation }: any) {
                                 marginRight: 12,
                             }}>
                                 <Ionicons
-                                    name={isVerified ? "checkmark-circle" : verificationStatus === 'pending' ? "time-outline" : "shield-outline"}
+                                    name={isVerified ? "checkmark-circle" : badgeStatus === 'pending' ? "time-outline" : badgeStatus === 'rejected' ? "alert-circle-outline" : "shield-outline"}
                                     size={24}
                                     color="#B28A45"
                                 />
                             </View>
                             <View style={{ flex: 1 }}>
                                 <Text style={{ fontSize: FONT_SIZES.md, fontWeight: 'bold', color: colors.textPrimary }}>
-                                    {isVerified ? 'Verified Merchant ✓' : verificationStatus === 'pending' ? 'Verification Under Review ⏳' : 'Compulsory ID Verification 🛡️'}
+                                    {isVerified ? 'Verified vendor ✓'
+                                        : badgeStatus === 'pending' ? 'ID under review'
+                                        : badgeStatus === 'rejected' ? 'ID not approved'
+                                        : 'Verify as a new vendor'}
                                 </Text>
                                 <Text style={{ fontSize: FONT_SIZES.xs, color: colors.textSecondary, marginTop: 2 }}>
                                     {isVerified
-                                        ? 'Your golden verified badge is active'
-                                        : verificationStatus === 'pending'
-                                        ? 'Your identity document is being reviewed by Pointer administration'
-                                        : 'Upload your NIN, Driver’s License, or Passport to unlock post creation'}
+                                        ? 'Your gold verified badge is active'
+                                        : badgeStatus === 'pending'
+                                        ? "We're checking your document, usually within 1–2 working days. We'll notify you."
+                                        : badgeStatus === 'rejected'
+                                        ? `${badgeReason ? `Reason: ${badgeReason}. ` : ''}Tap to upload a new document.`
+                                        : 'Free. Upload your NIN, driver’s licence or passport to get the gold badge customers trust.'}
                                 </Text>
                             </View>
                             <Text style={{ fontSize: 20, color: '#B28A45', fontWeight: 'bold' }}>›</Text>
@@ -1080,11 +1093,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                                             marginBottom: SPACING.md,
                                         }}
                                         onPress={() => {
-                                            if (!isVerified && verificationStatus !== 'approved' && !isAdmin) {
-                                                setVerificationModalVisible(true);
-                                            } else {
-                                                navigation.navigate('CreatePost');
-                                            }
+                                            navigation.navigate('CreatePost');
                                         }}
                                     >
                                         <Ionicons name="add-circle-outline" size={18} color={colors.textInverse} />
@@ -1767,7 +1776,8 @@ export default function VendorProfileScreen({ navigation }: any) {
                     onClose={() => setVerificationModalVisible(false)}
                     vendorId={user?.uid || ''}
                     onSuccess={() => {
-                        setVerificationStatus('pending');
+                        setBadgeStatus('pending');
+                        setBadgeReason(null);
                         setIsVerified(false);
                     }}
                 />
@@ -1978,18 +1988,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                     </TouchableOpacity>
                 </View>
 
-                {/* Verification Payment */}
-                {verificationStatus !== 'approved' && (
-                    <View style={[styles.inputGroup, { marginBottom: SPACING.xl * 2 }]}>
-                        <Text style={styles.label}>💳 Verification Fee</Text>
-                        <View style={styles.paymentContainer}>
-                            <Text style={styles.paymentText}>A one-time verification fee is required to verify your business and boost your visibility.</Text>
-                            <TouchableOpacity style={styles.paymentButton} onPress={handlePayment}>
-                                <Text style={styles.paymentButtonText}>Pay Verification Fee</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                )}
+
             </ScrollView>
 
             {/* Category Picker Modal */}

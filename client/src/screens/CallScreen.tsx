@@ -7,7 +7,10 @@ import {
     Animated,
     StatusBar,
     Platform,
+    Alert,
+    Linking,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 // Cached, downscaled images (expo-image) with the same props as React Native Image
 import { Image } from '../components/CachedImage';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -135,11 +138,41 @@ export default function CallScreen({ route, navigation }: any) {
         }
     }, [callStatus, isMuted]);
 
-    // Audio routing and permissions
+    // Permissions first: the call page (WebView) can only use the microphone / camera once the
+    // app itself has been allowed to. The page is not loaded until this has been answered.
+    const [mediaReady, setMediaReady] = useState(false);
     useEffect(() => {
         (async () => {
             try {
-                await requestRecordingPermissionsAsync();
+                const mic = await requestRecordingPermissionsAsync();
+                if (!mic.granted) {
+                    Alert.alert(
+                        'Microphone needed',
+                        'Allow Pointer to use the microphone so the other person can hear you.',
+                        [
+                            { text: 'Not now', style: 'cancel' },
+                            { text: 'Open settings', onPress: () => Linking.openSettings().catch(() => {}) },
+                        ]
+                    );
+                }
+                if (initialCallType === 'video') {
+                    const cam = await ImagePicker.requestCameraPermissionsAsync();
+                    if (!cam.granted) {
+                        Alert.alert('Camera not allowed', 'The call will continue with sound only. You can allow the camera in Settings.');
+                    }
+                }
+            } catch (e) {
+                console.warn('Call permission note:', e);
+            } finally {
+                setMediaReady(true);
+            }
+        })();
+    }, []);
+
+    // Audio routing
+    useEffect(() => {
+        (async () => {
+            try {
                 await setAudioModeAsync({
                     allowsRecording: true,
                     playsInSilentMode: true,
@@ -270,7 +303,7 @@ export default function CallScreen({ route, navigation }: any) {
             <StatusBar barStyle="light-content" />
 
             {/* Live WebRTC Stream (Hidden for voice, full screen for video) */}
-            {callId && roomUrl ? (
+            {callId && roomUrl && mediaReady ? (
                 <WebView
                     ref={webViewRef}
                     source={{ uri: roomUrl }}
@@ -481,11 +514,15 @@ const styles = StyleSheet.create({
         zIndex: 1,
         backgroundColor: '#0D0E12',
     },
+    // Voice calls: the call page sits full-size behind the call UI. A 1x1 or invisible view
+    // can be paused by Android, which silences the call.
     hiddenWebView: {
         position: 'absolute',
-        width: 1,
-        height: 1,
-        opacity: 0.01,
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        opacity: 0.02,
         zIndex: -1,
     },
     videoOverlayHeader: {

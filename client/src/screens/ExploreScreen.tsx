@@ -26,7 +26,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS } from '../constants/theme';
 import { PLACEHOLDER_AVATARS } from '../assets';
-import { POPULAR_CATEGORIES } from '../constants/categories';
+import { POPULAR_CATEGORIES, subCategoryOf, mainCategoryOf } from '../constants/categories';
 import CategoryPickerModal from '../components/CategoryPickerModal';
 import { postAPI, moderationAPI } from '../services/api';
 import { canDeleteComment, confirmDeleteComment } from '../utils/comments';
@@ -684,8 +684,10 @@ export default function ExploreScreen({ navigation, route }: any) {
                                         size={16}
                                     />
                                 </View>
-                                <Text style={styles.vendorCategory}>
-                                    {item.vendorCategory || item.category}
+                                {/* Short label: the subcategory ("Spoken Word Artist"); the full
+                                    category is on the vendor's page */}
+                                <Text style={styles.vendorCategory} numberOfLines={1}>
+                                    {subCategoryOf(item.vendorCategory || item.category) || mainCategoryOf(item.vendorCategory || item.category)}
                                 </Text>
                             </View>
                         </TouchableOpacity>

@@ -33,11 +33,32 @@ import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/
 import MediaAttachmentModal, { SelectedAttachment } from '../components/MediaAttachmentModal';
 import ReportModal from '../components/ReportModal';
 
+/** Message timestamps arrive as ISO strings (API) or Firestore Timestamps (live listener). */
+function messageDate(v: any): Date | null {
+    if (!v) return null;
+    if (typeof v?.toDate === 'function') return v.toDate();
+    if (typeof v?.seconds === 'number') return new Date(v.seconds * 1000);
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+}
+const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+function dayLabel(d: Date): string {
+    const now = new Date();
+    const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+    if (sameDay(d, now)) return 'Today';
+    if (sameDay(d, yesterday)) return 'Yesterday';
+    if (now.getTime() - d.getTime() < 6 * 86400000) return d.toLocaleDateString([], { weekday: 'long' });
+    return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
+}
+const timeLabel = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
 interface Message {
     id: string;
     senderId: string;
     text: string;
     createdAt: any;
+    messageType?: string;
+    callData?: { callId: string; callType: 'voice' | 'video'; status: 'ended' | 'missed' | 'rejected'; durationSeconds: number };
     mediaUrl?: string;
     mediaType?: 'image' | 'video' | 'file' | 'document';
     fileName?: string;
@@ -56,7 +77,6 @@ interface Message {
         currency?: string;
         mediaUrl?: string;
     };
-    messageType?: string;
     orderData?: {
         orderId?: string;
         productTitle?: string;
@@ -741,10 +761,45 @@ export default function ChatScreen({ route, navigation }: any) {
         }
     };
 
-    const renderMessage = ({ item }: { item: Message }) => {
+    const renderMessage = ({ item, index }: { item: Message; index: number }) => {
         const isOwnMessage = item.senderId === user?.uid;
+        const at = messageDate(item.createdAt);
+        const prevAt = index > 0 ? messageDate(messages[index - 1]?.createdAt) : null;
+        const divider = at && (!prevAt || !sameDay(at, prevAt)) ? (
+            <View style={styles.dateDivider} accessibilityRole="header">
+                <Text style={styles.dateDividerText}>{dayLabel(at)}</Text>
+            </View>
+        ) : null;
+
+        // Calls appear as a small centred entry in the conversation (call history)
+        if (item.messageType === 'call' && item.callData) {
+            const c = item.callData;
+            const missedByMe = c.status === 'missed' && !isOwnMessage;
+            const icon = c.callType === 'video'
+                ? (c.status === 'ended' ? 'videocam' : 'videocam-off')
+                : (c.status === 'ended' ? (isOwnMessage ? 'call-outline' : 'call') : 'call-outline');
+            const label = c.status === 'missed'
+                ? (isOwnMessage ? `No answer · ${c.callType === 'video' ? 'video' : 'voice'} call` : `Missed ${c.callType === 'video' ? 'video' : 'voice'} call`)
+                : c.status === 'rejected'
+                ? (isOwnMessage ? `Declined ${c.callType === 'video' ? 'video' : 'voice'} call` : `You declined a ${c.callType === 'video' ? 'video' : 'voice'} call`)
+                : item.text.replace(/^\S+\s/, '');
+            return (
+                <View>
+                    {divider}
+                    <View style={styles.callEntryRow}>
+                        <View style={[styles.callEntry, missedByMe && styles.callEntryMissed]}>
+                            <Ionicons name={icon as any} size={14} color={missedByMe ? colors.error : colors.textSecondary} />
+                            <Text style={[styles.callEntryText, missedByMe && { color: colors.error }]}>{label}</Text>
+                            {at ? <Text style={styles.callEntryTime}>{timeLabel(at)}</Text> : null}
+                        </View>
+                    </View>
+                </View>
+            );
+        }
 
         return (
+            <View>
+            {divider}
             <SwipeableMessageRow onReply={() => setReplyingTo(item)} colors={colors}>
                 <View
                     style={[
@@ -947,9 +1002,15 @@ export default function ChatScreen({ route, navigation }: any) {
                                 {item.text}
                             </Text>
                         ) : null}
+                        {at ? (
+                            <Text style={[styles.messageTime, isOwnMessage ? styles.ownMessageTime : styles.otherMessageTime]}>
+                                {timeLabel(at)}
+                            </Text>
+                        ) : null}
                     </View>
                 </View>
             </SwipeableMessageRow>
+            </View>
         );
     };
 
@@ -1175,6 +1236,64 @@ const getStyles = (colors: any) =>
         container: {
             flex: 1,
             backgroundColor: colors.background,
+        },
+        dateDivider: {
+            alignSelf: 'center',
+            backgroundColor: colors.surface,
+            borderRadius: 12,
+            paddingHorizontal: 12,
+            paddingVertical: 4,
+            marginVertical: SPACING.sm,
+            borderWidth: 1,
+            borderColor: colors.border,
+        },
+        dateDividerText: {
+            fontSize: 12,
+            fontWeight: '600',
+            color: colors.textSecondary,
+        },
+        callEntryRow: {
+            alignItems: 'center',
+            marginVertical: 6,
+        },
+        callEntry: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            backgroundColor: colors.surface,
+            borderRadius: 14,
+            paddingHorizontal: 12,
+            paddingVertical: 6,
+            borderWidth: 1,
+            borderColor: colors.border,
+            maxWidth: '85%',
+        },
+        callEntryMissed: {
+            borderColor: colors.error,
+        },
+        callEntryText: {
+            fontSize: 13,
+            fontWeight: '600',
+            color: colors.textPrimary,
+            flexShrink: 1,
+        },
+        callEntryTime: {
+            fontSize: 11,
+            color: colors.textSecondary,
+            fontVariant: ['tabular-nums'],
+        },
+        messageTime: {
+            fontSize: 10,
+            marginTop: 3,
+            alignSelf: 'flex-end',
+            fontVariant: ['tabular-nums'],
+        },
+        ownMessageTime: {
+            color: colors.textInverse,
+            opacity: 0.75,
+        },
+        otherMessageTime: {
+            color: colors.textSecondary,
         },
         keyboardView: {
             flex: 1,
