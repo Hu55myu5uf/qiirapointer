@@ -485,6 +485,19 @@ export const CATEGORY_DEFINITIONS: CategoryDefinition[] = [
         ]
     },
     {
+        "id": "geospatial-services",
+        "name": "Geospatial Services",
+        "icon": "map-outline",
+        "subcategories": [
+            "Mapping and Spatial Data Analysis",
+            "GIS Consultant",
+            "Land & Geodetic Surveying",
+            "Drone Mapping & Aerial Survey",
+            "Remote Sensing & Satellite Imagery",
+            "Cartographer"
+        ]
+    },
+    {
         "id": "electronics-retail",
         "name": "Electronics & Retail",
         "icon": "hardware-chip-outline",
