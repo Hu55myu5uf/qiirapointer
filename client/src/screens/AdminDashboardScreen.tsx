@@ -652,6 +652,13 @@ export default function AdminDashboardScreen({ navigation }: any) {
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={styles.headerButton}
+                        onPress={() => navigation?.navigate('Communities')}
+                    >
+                        <Ionicons name="people-outline" size={14} color="#FFFFFF" />
+                        <Text style={styles.headerButtonText}>Communities</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.headerButton}
                         onPress={() => setPasswordModalVisible(true)}
                     >
                         <Text style={styles.headerButtonText}>🔒 Password</Text>

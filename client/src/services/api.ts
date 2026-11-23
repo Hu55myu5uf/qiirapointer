@@ -287,6 +287,27 @@ export const usersAPI = {
     byUsername: (username: string) => api.get(`/users/by-username/${encodeURIComponent(username)}`),
 };
 
+/** Vendor communities (customers follow; vendors of the same category join) */
+export const communityAPI = {
+    list: (params?: { category?: string; q?: string }) => api.get('/communities', { params }),
+    mine: () => api.get('/communities/mine'),
+    get: (id: string) => api.get(`/communities/${encodeURIComponent(id)}`),
+    posts: (id: string) => api.get(`/communities/${encodeURIComponent(id)}/posts`),
+    create: (data: { name: string; description?: string; image?: string }) => api.post('/communities', data),
+    update: (id: string, data: { name?: string; description?: string; image?: string }) => api.put(`/communities/${encodeURIComponent(id)}`, data),
+    remove: (id: string) => api.delete(`/communities/${encodeURIComponent(id)}`),
+    join: (id: string) => api.post(`/communities/${encodeURIComponent(id)}/join`),
+    decide: (id: string, uid: string, approve: boolean) => api.post(`/communities/${encodeURIComponent(id)}/requests/${encodeURIComponent(uid)}`, { approve }),
+    invite: (id: string, username: string) => api.post(`/communities/${encodeURIComponent(id)}/invites`, { username }),
+    declineInvite: (id: string) => api.delete(`/communities/${encodeURIComponent(id)}/invites/me`),
+    leave: (id: string) => api.delete(`/communities/${encodeURIComponent(id)}/members/me`),
+    removeMember: (id: string, uid: string) => api.delete(`/communities/${encodeURIComponent(id)}/members/${encodeURIComponent(uid)}`),
+    follow: (id: string) => api.post(`/communities/${encodeURIComponent(id)}/follow`),
+    unfollow: (id: string) => api.delete(`/communities/${encodeURIComponent(id)}/follow`),
+    pending: () => api.get('/communities/admin/pending'),
+    verify: (id: string, status: 'verified' | 'rejected', reason?: string) => api.put(`/communities/${encodeURIComponent(id)}/verify`, { status, reason }),
+};
+
 /** The signed-in user's Notifications page (server keeps them; see server notification.routes) */
 export const notificationAPI = {
     list: (before?: string) => api.get('/notifications', { params: before ? { before } : {} }),

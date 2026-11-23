@@ -875,6 +875,7 @@ export default function ExploreScreen({ navigation, route }: any) {
                 navigation={navigation}
                 actions={
                     <>
+                        <HeaderIconButton icon="people-outline" label="Communities" onPress={() => navigation.navigate('Communities')} />
                         <View style={styles.headerCart}><CartButton size={22} /></View>
                         <HeaderIconButton
                             icon="add"

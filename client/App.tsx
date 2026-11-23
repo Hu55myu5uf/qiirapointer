@@ -43,6 +43,8 @@ import CartScreen from './src/screens/CartScreen';
 import CallScreen from './src/screens/CallScreen';
 import SignInRequiredScreen from './src/screens/SignInRequiredScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
+import CommunitiesScreen from './src/screens/CommunitiesScreen';
+import CommunityDetailScreen from './src/screens/CommunityDetailScreen';
 import { useNotificationStore } from './src/store/notificationStore';
 import { useFonts } from 'expo-font';
 import { Montserrat_900Black } from '@expo-google-fonts/montserrat/900Black';
@@ -174,6 +176,16 @@ function ExploreStack() {
         name="Notifications"
         component={isGuest ? SignInRequiredScreen : NotificationsScreen}
         options={{ title: 'Notifications' }}
+      />
+      <Stack.Screen
+        name="Communities"
+        component={isGuest ? SignInRequiredScreen : CommunitiesScreen}
+        options={{ title: 'Communities' }}
+      />
+      <Stack.Screen
+        name="CommunityDetail"
+        component={isGuest ? SignInRequiredScreen : CommunityDetailScreen}
+        options={{ title: 'Community' }}
       />
       <Stack.Screen
         name="CreatePost"
@@ -733,6 +745,16 @@ function AdminDashboardStack() {
         name="AdminDashboardMain"
         component={AdminDashboardScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Communities"
+        component={isGuest ? SignInRequiredScreen : CommunitiesScreen}
+        options={{ title: 'Communities' }}
+      />
+      <Stack.Screen
+        name="CommunityDetail"
+        component={isGuest ? SignInRequiredScreen : CommunityDetailScreen}
+        options={{ title: 'Community' }}
       />
       <Stack.Screen
         name="Chat"

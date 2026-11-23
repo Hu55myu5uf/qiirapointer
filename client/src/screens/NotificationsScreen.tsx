@@ -21,7 +21,7 @@ import { PLACEHOLDER_AVATARS } from '../assets';
 
 type AppNotification = {
     id: string;
-    type: 'missed_call' | 'review' | 'verification_approved' | 'verification_rejected' | 'listing_rejected' | 'mention' | 'system';
+    type: 'missed_call' | 'review' | 'verification_approved' | 'verification_rejected' | 'listing_rejected' | 'mention' | 'community' | 'system';
     title: string;
     body: string;
     actorId?: string | null;
@@ -41,6 +41,7 @@ const ICONS: Record<AppNotification['type'], { name: string; tint: 'error' | 'pr
     verification_rejected: { name: 'shield-outline', tint: 'error' },
     listing_rejected: { name: 'storefront-outline', tint: 'error' },
     mention: { name: 'at', tint: 'primary' },
+    community: { name: 'people', tint: 'primary' },
     system: { name: 'information-circle', tint: 'primary' },
 };
 
@@ -124,6 +125,13 @@ export default function NotificationsScreen({ navigation }: any) {
             case 'listing_rejected':
             case 'system':
                 navigation.navigate('Profile');
+                return;
+            case 'community':
+                if (n.data?.communityId) {
+                    const params = { communityId: n.data.communityId };
+                    if (userRole === 'admin') navigation.navigate('Dashboard', { screen: 'CommunityDetail', params, initial: false });
+                    else navigation.navigate('Explore', { screen: 'CommunityDetail', params, initial: false });
+                }
                 return;
             case 'mention':
                 if (n.data?.postId) navigation.navigate('Explore', { screen: 'ExploreMain', params: { openPostId: n.data.postId } });
