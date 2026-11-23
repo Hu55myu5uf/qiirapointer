@@ -4,7 +4,7 @@ import { notifyVendorApproval } from '../utils/pushNotifications';
 import { authenticateUser, requireAdmin, MASTER_ADMIN_UID, SUPPORT_UID } from '../utils/authMiddleware';
 import { signedUrlFor } from '../utils/fileStorage';
 import { clearProfileCache, getDisplayProfiles, usableImage } from '../utils/profiles';
-import { invalidateVendorList } from '../utils/vendors';
+import { invalidateVendorList, getApprovedVendors, hasCategory } from '../utils/vendors';
 import { deleteAccountData } from '../utils/accountDeletion';
 import { authLimiter } from '../utils/rateLimiter';
 
@@ -65,14 +65,14 @@ function mapUser(id: string, u: any, v: any = null) {
  */
 router.get('/vendors/pending', async (_req: Request, res: Response) => {
     try {
-        const [newStores, vendorRequests, clientRequests] = await Promise.all([
-            db.collection('vendors').where('verificationStatus', '==', 'pending').get(),
+        // Stores are listed automatically, so only identity-verification requests need review
+        const [vendorRequests, clientRequests] = await Promise.all([
             db.collection('vendors').where('verificationRequest', '==', 'pending').get(),
             db.collection('users').where('verificationRequest', '==', 'pending').get(),
         ]);
 
         const items = new Map<string, { id: string; v: any | null; u: any | null }>();
-        for (const d of [...newStores.docs, ...vendorRequests.docs]) items.set(d.id, { id: d.id, v: d.data(), u: null });
+        for (const d of vendorRequests.docs) items.set(d.id, { id: d.id, v: d.data(), u: null });
         for (const d of clientRequests.docs) if (!items.has(d.id)) items.set(d.id, { id: d.id, v: null, u: d.data() });
 
         // Load the missing user profiles
@@ -192,14 +192,17 @@ router.put('/vendors/:id/verify', async (req: Request, res: Response) => {
 router.get('/analytics', async (_req: Request, res: Response) => {
     try {
         const count = async (q: FirebaseFirestore.Query) => (await q.count().get()).data().count;
-        const [totalUsers, totalVendors, activeVendors, pendingVendors, totalReviews] = await Promise.all([
+        const [totalUsers, totalVendors, pendingVendors, totalReviews, listed] = await Promise.all([
             count(db.collection('users')),
             count(db.collection('vendors')),
-            count(db.collection('vendors').where('verificationStatus', '==', 'approved')),
-            count(db.collection('vendors').where('verificationStatus', '==', 'pending')),
+            count(db.collection('vendors').where('verificationRequest', '==', 'pending')),
             count(db.collection('reviews')),
+            getApprovedVendors(),
         ]);
-        res.status(200).json({ totalUsers, totalVendors, activeVendors, pendingVendors, totalReviews });
+        // "Active" = exactly what Discover shows; listed stores without a category are hidden there
+        const activeVendors = listed.filter(v => hasCategory(v)).length;
+        const incompleteVendors = listed.length - activeVendors;
+        res.status(200).json({ totalUsers, totalVendors, activeVendors, incompleteVendors, pendingVendors, totalReviews });
     } catch (error: any) {
         console.error('Get analytics error:', error);
         res.status(500).json({ error: 'Failed to retrieve analytics' });

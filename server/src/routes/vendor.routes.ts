@@ -4,7 +4,7 @@ import { db } from '../config/firebase';
 import { authenticateUser, optionalAuthenticateUser, requireSelfOrAdmin } from '../utils/authMiddleware';
 import { decodeUpload, saveUpload, isOwnPrivateRef, UploadError, FileKind } from '../utils/fileStorage';
 import { getDisplayProfiles, clearProfileCache, usableImage } from '../utils/profiles';
-import { toVendorResponse, getApprovedVendors, invalidateVendorList, validLatLng, distanceMeters, verificationState } from '../utils/vendors';
+import { toVendorResponse, getApprovedVendors, invalidateVendorList, validLatLng, distanceMeters, verificationState, isListed } from '../utils/vendors';
 import { uploadLimiter, writeLimiter } from '../utils/rateLimiter';
 
 const router = Router();
@@ -139,7 +139,7 @@ router.get('/:id', optionalAuthenticateUser, async (req: Request, res: Response)
         if (!v || !u || (u.role !== 'vendor' && u.role !== 'admin')) {
             return res.status(404).json({ error: 'Vendor not found' });
         }
-        if ((v.verificationStatus !== 'approved' || u.isSuspended) && !isOwnerOrAdmin) {
+        if ((!isListed(v) || u.isSuspended) && !isOwnerOrAdmin) {
             return res.status(404).json({ error: 'Vendor not found' });
         }
 

@@ -18,6 +18,7 @@ import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '
 import { useTheme } from '../context/ThemeContext';
 import { VerificationBadgeInline } from '../components/VerificationBadge';
 import { confirmAction } from '../utils/alert';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { auth } from '../config/firebase';
 
 export default function UserManagementScreen({ route }: any) {
@@ -275,10 +276,13 @@ export default function UserManagementScreen({ route }: any) {
                     <Text style={styles.headerSubtitle}>{filteredUsers.length} users</Text>
                 </View>
                 <TouchableOpacity
-                    style={styles.headerButton}
-                    onPress={() => confirmAction('Logout', 'Are you sure you want to logout?', () => auth.signOut(), 'Logout')}
+                    style={[styles.headerButton, styles.logoutHeaderButton]}
+                    onPress={() => confirmAction('Log Out', 'Are you sure you want to log out?', () => auth.signOut(), 'Log Out')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Log out"
                 >
-                    <Text style={styles.headerButtonText}>🚪 Logout</Text>
+                    <Ionicons name="log-out-outline" size={14} color="#FFFFFF" />
+                    <Text style={styles.headerButtonText}>Log Out</Text>
                 </TouchableOpacity>
             </View>
 
@@ -341,16 +345,25 @@ const getStyles = (colors: any, topInset: number = 0) => {
             justifyContent: 'space-between',
             alignItems: 'center',
         },
+    // The header is gold in both themes: dark, see-through buttons with white text stay readable
     headerButton: {
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        paddingHorizontal: SPACING.md,
-        paddingVertical: 6,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: 'rgba(0, 0, 0, 0.28)',
+        paddingHorizontal: SPACING.sm + 2,
+        minHeight: 32,
         borderRadius: BORDER_RADIUS.sm,
     },
     headerButtonText: {
-        color: colors.textInverse,
+        color: '#FFFFFF',
         fontWeight: 'bold',
         fontSize: FONT_SIZES.xs,
+    },
+    logoutHeaderButton: {
+        backgroundColor: '#C62828',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.35)',
     },
     headerTitle: {
         fontSize: FONT_SIZES.xxl,

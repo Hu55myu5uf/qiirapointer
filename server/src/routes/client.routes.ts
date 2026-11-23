@@ -4,7 +4,7 @@ import { notifyNewReview } from '../utils/pushNotifications';
 import { authenticateUser, requireSelfOrAdmin } from '../utils/authMiddleware';
 import { isOwnPrivateRef } from '../utils/fileStorage';
 import { getDisplayProfile } from '../utils/profiles';
-import { toVendorResponse, invalidateVendorList } from '../utils/vendors';
+import { toVendorResponse, invalidateVendorList, isListed } from '../utils/vendors';
 import { writeLimiter } from '../utils/rateLimiter';
 
 const router = Router();
@@ -59,7 +59,7 @@ router.post('/:id/reviews', authenticateUser, requireSelfOrAdmin('id'), writeLim
 
         const outcome = await db.runTransaction(async tx => {
             const [vendorSnap, reviewSnap] = await Promise.all([tx.get(vendorRef), tx.get(reviewRef)]);
-            if (!vendorSnap.exists || vendorSnap.data()!.verificationStatus !== 'approved') return 'no-vendor' as const;
+            if (!vendorSnap.exists || !isListed(vendorSnap.data())) return 'no-vendor' as const;
 
             const previous = reviewSnap.exists ? Number(reviewSnap.data()!.rating) || 0 : null;
             const totals = previous === null
@@ -158,7 +158,7 @@ router.get('/:id/favorites', authenticateUser, requireSelfOrAdmin('id'), async (
 
         const favorites = ids
             .map((id, i) => ({ id, v: vendorDocs[i].exists ? vendorDocs[i].data() : null, u: userDocs[i].exists ? userDocs[i].data() : null }))
-            .filter(x => x.v && x.u && x.v.verificationStatus === 'approved' && !x.u.isSuspended)
+            .filter(x => x.v && x.u && isListed(x.v) && !x.u.isSuspended)
             .map(x => toVendorResponse(x.id, x.v, x.u));
 
         res.status(200).json({ favorites });
@@ -175,7 +175,7 @@ router.post('/:id/favorites', authenticateUser, requireSelfOrAdmin('id'), writeL
             return res.status(400).json({ error: 'Vendor ID is required' });
         }
         const vendor = await db.collection('vendors').doc(vendorId).get();
-        if (!vendor.exists || vendor.data()!.verificationStatus !== 'approved') {
+        if (!vendor.exists || !isListed(vendor.data())) {
             return res.status(404).json({ error: 'Vendor not found' });
         }
 

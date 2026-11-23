@@ -637,7 +637,7 @@ export default function AdminDashboardScreen({ navigation }: any) {
                 <View>
                     <Text style={styles.headerTitle}>Admin Dashboard</Text>
                 </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: SPACING.sm }}>
                     <TouchableOpacity
                         style={[styles.headerButton, styles.previewHeaderBtnClient]}
                         onPress={() => switchViewRole('client')}
@@ -663,10 +663,13 @@ export default function AdminDashboardScreen({ navigation }: any) {
                         <Text style={styles.headerButtonText}>{theme === 'dark' ? '☀️ Light' : '🌙 Dark'}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                        style={styles.headerButton}
-                        onPress={() => confirmAction('Logout', 'Are you sure you want to logout?', () => auth.signOut(), 'Logout')}
+                        style={[styles.headerButton, styles.logoutHeaderButton]}
+                        onPress={() => confirmAction('Log Out', 'Are you sure you want to log out?', () => auth.signOut(), 'Log Out')}
+                        accessibilityRole="button"
+                        accessibilityLabel="Log out"
                     >
-                        <Text style={styles.headerButtonText}>🚪 Logout</Text>
+                        <Ionicons name="log-out-outline" size={14} color="#FFFFFF" />
+                        <Text style={styles.headerButtonText}>Log Out</Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -925,6 +928,15 @@ export default function AdminDashboardScreen({ navigation }: any) {
                     {renderAnalyticsCard('Pending', analytics?.pendingVendors || 0, colors.warning, 'pending', 'Approvals')}
                     {renderAnalyticsCard('Reviews', analytics?.totalReviews || 0, colors.info, 'reviews', 'All Reviews')}
                 </View>
+                {/* "Active" = what Discover shows; stores without a business category are hidden there */}
+                {(analytics?.incompleteVendors || 0) > 0 ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: SPACING.md, marginBottom: SPACING.md }}>
+                        <Ionicons name="information-circle-outline" size={16} color={colors.textSecondary} />
+                        <Text style={{ flex: 1, fontSize: FONT_SIZES.xs, color: colors.textSecondary }}>
+                            {analytics.incompleteVendors} more vendor{analytics.incompleteVendors > 1 ? 's are' : ' is'} hidden from Discover until they choose a business category in their profile.
+                        </Text>
+                    </View>
+                ) : null}
 
                 {/* Pending Vendors Section */}
                 <View ref={pendingSectionRef} style={styles.sectionHeaderRow}>
@@ -1787,29 +1799,38 @@ const getStyles = (colors: any, topInset: number = 0) => {
             justifyContent: 'center',
             alignItems: 'center',
         },
+        // Title on top, buttons wrap underneath (they no longer squeeze the title off-screen)
         header: {
             padding: SPACING.lg,
             paddingTop: statusBarHeight + SPACING.sm,
             backgroundColor: colors.primary,
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
+            flexDirection: 'column',
+            alignItems: 'stretch',
         },
     headerTitle: {
         fontSize: FONT_SIZES.xl,
         fontWeight: 'bold',
         color: colors.textInverse,
     },
+    // The header is gold in both themes: dark, see-through buttons with white text stay readable
     headerButton: {
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        paddingHorizontal: SPACING.sm,
-        paddingVertical: 6,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: 'rgba(0, 0, 0, 0.28)',
+        paddingHorizontal: SPACING.sm + 2,
+        minHeight: 32,
         borderRadius: BORDER_RADIUS.sm,
     },
     headerButtonText: {
-        color: colors.textInverse,
+        color: '#FFFFFF',
         fontWeight: 'bold',
         fontSize: FONT_SIZES.xs,
+    },
+    logoutHeaderButton: {
+        backgroundColor: '#C62828',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.35)',
     },
     previewHeaderBtnClient: {
         backgroundColor: 'rgba(74, 144, 226, 0.25)',

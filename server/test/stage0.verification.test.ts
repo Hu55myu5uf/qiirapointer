@@ -26,7 +26,7 @@ describe('listing status vs identity badge', () => {
     it('a new vendor with no ID submitted has badge "none", not "pending"', async () => {
         await seedUser('fresh', 'vendor', { verificationStatus: 'pending' });
         const res = await api().get('/api/auth/user/fresh').set('Authorization', bearer('fresh'));
-        expect(res.body.user.listingStatus).toBe('pending');
+        expect(res.body.user.listingStatus).toBe('approved'); // stores are listed automatically
         expect(res.body.user.badgeStatus).toBe('none');
         expect(res.body.user.isVerified).toBe(false);
     });

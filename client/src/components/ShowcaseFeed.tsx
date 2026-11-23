@@ -74,7 +74,7 @@ function ShowcaseVideo({ uri, shouldPlay, isMuted, options }: { uri: string; sho
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
-import { AvatarVerificationBadge, VerificationBadgeInline } from './VerificationBadge';
+import { VerificationBadgeInline } from './VerificationBadge';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { subCategoryOf, mainCategoryOf } from '../constants/categories';
 
@@ -265,11 +265,6 @@ function ShowcaseItemCard({
                                 : PLACEHOLDER_AVATARS.vendor
                         }
                         style={styles.actionAvatar}
-                    />
-                    <AvatarVerificationBadge
-                        isVerified={Boolean(item.isVerified || item.is_verified || item.isAdmin)}
-                        isAdmin={Boolean(item.isAdmin)}
-                        size={14}
                     />
                 </TouchableOpacity>
 

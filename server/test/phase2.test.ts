@@ -48,23 +48,25 @@ describe('uploads (Firebase Storage)', () => {
 });
 
 describe('vendor listing has no invented data', () => {
-    it('lists only approved vendors, with real ratings and no fake locations', async () => {
+    it('lists every store except rejected ones, with real ratings and no fake locations', async () => {
         await approvedVendor('v1');
+        // Stores from before automatic listing ("pending" or no status) are listed too
         await seedUser('v2', 'vendor'); await fakeDb.collection('vendors').doc('v2').set({ verificationStatus: 'pending' }, { merge: true });
         await seedUser('v3', 'vendor'); await fakeDb.collection('vendors').doc('v3').set({ verificationStatus: undefined as any }, { merge: true });
+        await seedUser('v4', 'vendor'); await fakeDb.collection('vendors').doc('v4').set({ verificationStatus: 'rejected' }, { merge: true });
 
         const res = await api().get('/api/vendors');
         expect(res.status).toBe(200);
-        expect(res.body.vendors.map((v: any) => v.id)).toEqual(['v1']);
-        const v = res.body.vendors[0];
+        expect(res.body.vendors.map((v: any) => v.id).sort()).toEqual(['v1', 'v2', 'v3']);
+        const v = res.body.vendors.find((x: any) => x.id === 'v1');
         expect(v.averageRating).toBe(0);
         expect(v.totalReviews).toBe(0);
         expect(v.location).toBeNull();
         expect(v.userInfo.email).toBeUndefined();
     });
 
-    it('unapproved stores are hidden from the public but visible to their owner', async () => {
-        await seedUser('v2', 'vendor', { verificationStatus: 'pending' });
+    it('rejected stores are hidden from the public but visible to their owner', async () => {
+        await seedUser('v2', 'vendor', { verificationStatus: 'rejected' });
         expect((await api().get('/api/vendors/v2')).status).toBe(404);
         expect((await api().get('/api/vendors/v2').set('Authorization', bearer('v2'))).status).toBe(200);
     });
@@ -300,5 +302,22 @@ describe('set shop location', () => {
         // garbage coordinates are rejected
         expect((await api().put('/api/vendors/ven/location').set('Authorization', bearer('ven'))
             .send({ useLiveLocation: false, businessLatitude: 999, businessLongitude: 8 })).status).toBe(400);
+    });
+});
+
+describe('admin analytics', () => {
+    it('"active vendors" matches Discover; listed stores without a category are counted separately', async () => {
+        await approvedVendor('shown');
+        await approvedVendor('legacy', { verificationStatus: 'pending' });
+        await approvedVendor('nocat');
+        await fakeDb.collection('vendors').doc('nocat').set({ category: '' }, { merge: true });
+        await approvedVendor('gone', { verificationStatus: 'rejected' });
+        await seedUser('boss', 'admin');
+
+        const discover = await api().get('/api/vendors');
+        const stats = (await api().get('/api/admin/analytics').set('Authorization', bearer('boss'))).body;
+        expect(stats.activeVendors).toBe(discover.body.total);
+        expect(stats.activeVendors).toBe(2);
+        expect(stats.incompleteVendors).toBe(1);
     });
 });

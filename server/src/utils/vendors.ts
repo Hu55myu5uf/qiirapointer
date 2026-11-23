@@ -54,7 +54,7 @@ export function verificationState(vendorDoc: any | null, userDoc: any | null, is
         : request === 'rejected' ? 'rejected'
         : 'none';
     const listingStatus: ListingStatus | null = vendorDoc
-        ? (['approved', 'pending', 'rejected'].includes(vendorDoc.verificationStatus) ? vendorDoc.verificationStatus : 'pending')
+        ? (vendorDoc.verificationStatus === 'rejected' ? 'rejected' : 'approved')
         : null;
     return {
         isVerified,
@@ -88,7 +88,7 @@ export function toVendorResponse(uid: string, v: any, user: any = {}) {
         bannerImage: usableImage(v.bannerImage),
         businessHours: v.businessHours || null,
         // Old field names kept for app versions already installed
-        verificationStatus: v.verificationStatus || 'pending',
+        verificationStatus: isListed(v) ? 'approved' : 'rejected',
         verificationRequest: v.verificationRequest || null,
         listingStatus,
         badgeStatus,
@@ -96,7 +96,7 @@ export function toVendorResponse(uid: string, v: any, user: any = {}) {
         is_verified: isVerified,
         isAdmin,
         role: isAdmin ? 'admin' : 'vendor',
-        isActive: v.verificationStatus === 'approved',
+        isActive: isListed(v),
         averageRating,
         totalReviews,
         createdAt: v.createdAt || null,
@@ -121,10 +121,25 @@ let listCache: { at: number; vendors: ReturnType<typeof toVendorResponse>[] } | 
 
 export function invalidateVendorList() { listCache = null; }
 
+/**
+ * Whether a store is listed. Since Stage 0 stores are listed straight away; only an admin's
+ * "reject listing" takes one down. Stores from before that ("pending" or no status) count as
+ * listed. Suspension (on the user) is checked separately.
+ */
+export function isListed(vendorDoc: any): boolean {
+    return Boolean(vendorDoc) && vendorDoc.verificationStatus !== 'rejected';
+}
+
+/** Discover only shows stores that have chosen a business category. */
+export function hasCategory(vendorDoc: any): boolean {
+    return Boolean(String(vendorDoc?.category || '').split(' - ')[0].trim());
+}
+
 export async function getApprovedVendors(): Promise<ReturnType<typeof toVendorResponse>[]> {
     if (listCache && Date.now() - listCache.at < LIST_TTL_MS) return listCache.vendors;
 
-    const snap = await db.collection('vendors').where('verificationStatus', '==', 'approved').limit(1000).get();
+    const all = await db.collection('vendors').limit(1000).get();
+    const snap = { docs: all.docs.filter(d => isListed(d.data())) };
     const userRefs = snap.docs.map(d => db.collection('users').doc(d.id));
     const userDocs = await Promise.all(userRefs.map(r => r.get()));
     const users = new Map(userDocs.map(d => [d.id, d.exists ? d.data() : null]));

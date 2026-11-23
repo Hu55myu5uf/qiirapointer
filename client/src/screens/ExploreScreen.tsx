@@ -31,7 +31,7 @@ import CategoryPickerModal from '../components/CategoryPickerModal';
 import { postAPI, moderationAPI } from '../services/api';
 import { canDeleteComment, confirmDeleteComment } from '../utils/comments';
 import { sharePost, shareVendorProfile } from '../services/shareService';
-import VerificationBadge, { AvatarVerificationBadge, VerificationBadgeInline } from '../components/VerificationBadge';
+import VerificationBadge, { VerificationBadgeInline } from '../components/VerificationBadge';
 import CartButton from '../components/CartButton';
 import SharePostModal from '../components/SharePostModal';
 import ReportModal from '../components/ReportModal';
@@ -620,11 +620,6 @@ export default function ExploreScreen({ navigation, route }: any) {
                                     source={item.vendorImage ? { uri: item.vendorImage } : PLACEHOLDER_AVATARS.client}
                                     style={styles.vendorAvatar}
                                 />
-                                <AvatarVerificationBadge
-                                    isVerified={Boolean(item.isVerified || item.is_verified || item.isAdmin)}
-                                    isAdmin={Boolean(item.isAdmin)}
-                                    size={14}
-                                />
                             </View>
                             <View style={styles.vendorTextContainer}>
                                 <View style={styles.vendorNameRow}>
@@ -666,11 +661,6 @@ export default function ExploreScreen({ navigation, route }: any) {
                                         uri: item.vendorImage || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
                                     }}
                                     style={styles.vendorAvatar}
-                                />
-                                <AvatarVerificationBadge
-                                    isVerified={Boolean(item.isVerified || item.is_verified || item.isAdmin || item.role === 'admin' || item.vendorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2')}
-                                    isAdmin={Boolean(item.isAdmin || item.role === 'admin' || item.vendorId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2')}
-                                    size={14}
                                 />
                             </View>
                             <View style={styles.vendorTextContainer}>
@@ -1122,11 +1112,6 @@ export default function ExploreScreen({ navigation, route }: any) {
                                             <Image
                                                 source={item.userAvatar ? { uri: item.userAvatar } : PLACEHOLDER_AVATARS.client}
                                                 style={styles.commentAvatar}
-                                            />
-                                            <AvatarVerificationBadge
-                                                isVerified={Boolean(item.isVerified ?? item.is_verified)}
-                                                isAdmin={item.role === 'admin' || item.isAdmin}
-                                                size={12}
                                             />
                                         </View>
                                         <View style={styles.commentTextContainer}>
