@@ -4,6 +4,7 @@ import { authenticateUser, optionalAuthenticateUser, requireSelfOrAdmin, MASTER_
 import { authLimiter } from '../utils/rateLimiter';
 import { deleteAccountData } from '../utils/accountDeletion';
 import { ensureUsername } from '../utils/usernames';
+import { checkFieldLock } from '../utils/fieldLocks';
 import { clearProfileCache } from '../utils/profiles';
 import { verificationState } from '../utils/vendors';
 
@@ -470,7 +471,37 @@ router.put('/user/:uid', authenticateUser, requireSelfOrAdmin('uid'), async (req
             update.pushTokenUpdatedAt = update.updatedAt;
         }
 
+        // Vendors: phone number and profile photo can only change once every 30 days
+        const userSnap = await db.collection('users').doc(uid).get();
+        const existing = userSnap.data() || {};
+        let vendorUpdate: Record<string, any> | null = null;
+        if (existing.role === 'vendor') {
+            const vSnap = await db.collection('vendors').doc(uid).get();
+            const v = vSnap.data() || {};
+            const bypass = Boolean(req.user!.isAdmin && req.user!.uid !== uid);
+            const changedAt: Record<string, string> = { ...(v.fieldChangedAt || {}) };
+            let touched = false;
+            if (update.phoneNumber !== undefined) {
+                const currentPhone = v.phoneNumber ?? existing.phoneNumber;
+                const r = checkFieldLock('phoneNumber', currentPhone, update.phoneNumber, v.fieldChangedAt, bypass);
+                if (!r.ok) return res.status(429).json({ error: r.message, field: r.field, nextAllowedAt: r.nextAllowedAt });
+                if (r.changed) {
+                    vendorUpdate = { ...(vendorUpdate || {}), phoneNumber: update.phoneNumber };
+                    if (!bypass && String(currentPhone ?? '').trim()) { changedAt.phoneNumber = update.updatedAt; touched = true; }
+                }
+            }
+            // The photo is the store photo: keeping it in step with an accepted store change is fine
+            if (update.profileImage !== undefined && update.profileImage !== (v.businessImage || '')) {
+                const r = checkFieldLock('businessImage', v.businessImage || existing.profileImage, update.profileImage, v.fieldChangedAt, bypass);
+                if (!r.ok) return res.status(429).json({ error: r.message, field: r.field, nextAllowedAt: r.nextAllowedAt });
+                if (r.changed && !bypass && String(v.businessImage || existing.profileImage || '').trim()) { changedAt.businessImage = update.updatedAt; touched = true; }
+                if (r.changed) vendorUpdate = { ...(vendorUpdate || {}), businessImage: update.profileImage };
+            }
+            if (touched) vendorUpdate = { ...(vendorUpdate || {}), fieldChangedAt: changedAt };
+        }
+
         await db.collection('users').doc(uid).set(update, { merge: true });
+        if (vendorUpdate) await db.collection('vendors').doc(uid).set({ ...vendorUpdate, updatedAt: update.updatedAt }, { merge: true });
         clearProfileCache(uid);
 
         // Keep the Firebase Auth display name / photo in step

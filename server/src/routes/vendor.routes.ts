@@ -5,6 +5,7 @@ import { authenticateUser, optionalAuthenticateUser, requireSelfOrAdmin } from '
 import { decodeUpload, saveUpload, isOwnPrivateRef, UploadError, FileKind } from '../utils/fileStorage';
 import { getDisplayProfiles, clearProfileCache, usableImage } from '../utils/profiles';
 import { toVendorResponse, getApprovedVendors, invalidateVendorList, validLatLng, distanceMeters, verificationState, isListed } from '../utils/vendors';
+import { checkFieldLock, lockedUntil } from '../utils/fieldLocks';
 import { uploadLimiter, writeLimiter } from '../utils/rateLimiter';
 
 const router = Router();
@@ -198,6 +199,20 @@ router.put('/:id/profile', authenticateUser, requireSelfOrAdmin('id'), writeLimi
             }
         }
 
+        // Business name, category and profile photo: once every 30 days (admins excepted)
+        const current = (await db.collection('vendors').doc(id).get()).data() || {};
+        const bypass = Boolean(req.user!.isAdmin && req.user!.uid !== id);
+        const changedAt: Record<string, string> = { ...(current.fieldChangedAt || {}) };
+        let lockTouched = false;
+        for (const field of ['businessName', 'category', 'businessImage'] as const) {
+            if (update[field] === undefined) continue;
+            const r = checkFieldLock(field, current[field], update[field], current.fieldChangedAt, bypass);
+            if (!r.ok) return res.status(429).json({ error: r.message, field: r.field, nextAllowedAt: r.nextAllowedAt });
+            if (!r.changed) { delete update[field]; continue; }
+            if (!bypass && String(current[field] ?? '').trim()) { changedAt[field] = update.updatedAt; lockTouched = true; }
+        }
+        if (lockTouched) update.fieldChangedAt = changedAt;
+
         const batch = db.batch();
         batch.set(db.collection('vendors').doc(id), update, { merge: true });
         if (update.businessImage) {
@@ -206,7 +221,7 @@ router.put('/:id/profile', authenticateUser, requireSelfOrAdmin('id'), writeLimi
         await batch.commit();
         vendorChanged(id);
 
-        res.status(200).json({ message: 'Profile updated successfully' });
+        res.status(200).json({ message: 'Profile updated successfully', fieldLocks: lockedUntil(update.fieldChangedAt || current.fieldChangedAt) });
     } catch (error: any) {
         console.error('Update vendor error:', error);
         res.status(500).json({ error: 'Failed to update profile' });

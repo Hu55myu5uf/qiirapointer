@@ -110,6 +110,12 @@ export default function VendorProfileScreen({ navigation }: any) {
     // Form State
     const [businessName, setBusinessName] = useState('');
     const [username, setUsername] = useState('');
+    // Business name, category, phone and photo can change once every 30 days: field -> next date
+    const [fieldLocks, setFieldLocks] = useState<Record<string, string>>({});
+    const lockedUntilText = (field: string) => {
+        const at = fieldLocks[field];
+        return at ? new Date(at).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    };
     const [category, setCategory] = useState('');
     const [description, setDescription] = useState('');
     const [address, setAddress] = useState('');
@@ -370,6 +376,7 @@ export default function VendorProfileScreen({ navigation }: any) {
             if (vendor) {
                 setBusinessName(vendor.businessName || '');
                 setUsername(vendor.username || '');
+                setFieldLocks(vendor.fieldLocks || {});
                 setCategory(vendor.category || '');
                 setDescription(vendor.description || '');
                 setAddress(vendor.address || '');
@@ -736,7 +743,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                 }
             }
 
-            await vendorAPI.updateProfile(user.uid, {
+            const saved = await vendorAPI.updateProfile(user.uid, {
                 businessName,
                 category,
                 description,
@@ -746,6 +753,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                 bannerImage: bannerUrl,
                 businessHours,
             });
+            if (saved.data?.fieldLocks) setFieldLocks(saved.data.fieldLocks);
 
             // Also synchronize with auth user profile so photo and name reflect everywhere in chat/comments/feed
             try {
@@ -783,7 +791,8 @@ export default function VendorProfileScreen({ navigation }: any) {
                 console.error('Firebase Error Code:', (error as any).code);
                 console.error('Firebase Error Message:', (error as any).message);
             }
-            Alert.alert('Error', 'Failed to update profile');
+            // e.g. "You can change your business name once every 30 days. Next change: ..."
+            Alert.alert('Could not save', (error as any)?.response?.data?.error || 'Failed to update profile');
         } finally {
             setSaving(false);
         }
@@ -1852,7 +1861,12 @@ export default function VendorProfileScreen({ navigation }: any) {
 
                 {/* Avatar Editor (Overlapping) */}
                 <View style={styles.editAvatarContainerWrapper}>
-                    <TouchableOpacity style={styles.editAvatarContainer} onPress={handlePickImage}>
+                    <TouchableOpacity
+                        style={styles.editAvatarContainer}
+                        onPress={fieldLocks.businessImage
+                            ? () => Alert.alert('Profile photo', `You can change your profile photo once every 30 days. Next change: ${lockedUntilText('businessImage')}.`)
+                            : handlePickImage}
+                    >
                         {businessImage ? (
                             <Image source={{ uri: businessImage }} style={styles.editImage} />
                         ) : (
@@ -1874,24 +1888,32 @@ export default function VendorProfileScreen({ navigation }: any) {
                 <View style={styles.inputGroup}>
                     <Text style={styles.label}>Name</Text>
                     <TextInput
-                        style={styles.input}
+                        style={[styles.input, fieldLocks.businessName && { opacity: 0.6 }]}
                         value={businessName}
                         onChangeText={setBusinessName}
                         placeholder="Business Name"
+                        editable={!fieldLocks.businessName}
                     />
+                    <Text style={styles.lockHint}>
+                        {fieldLocks.businessName ? `🔒 You can change this again on ${lockedUntilText('businessName')}.` : 'You can change this once every 30 days.'}
+                    </Text>
                 </View>
 
                 <View style={styles.inputGroup}>
                     <Text style={styles.label}>Category</Text>
                     <TouchableOpacity
-                        style={styles.selectButton}
+                        style={[styles.selectButton, fieldLocks.category && { opacity: 0.6 }]}
                         onPress={() => setShowCategoryPicker(true)}
+                        disabled={Boolean(fieldLocks.category)}
                     >
                         <Text style={category ? styles.selectText : styles.selectPlaceholder}>
                             {category || 'Select a category'}
                         </Text>
                         <Text style={styles.selectArrow}>▼</Text>
                     </TouchableOpacity>
+                    <Text style={styles.lockHint}>
+                        {fieldLocks.category ? `🔒 You can change this again on ${lockedUntilText('category')}.` : 'You can change this once every 30 days.'}
+                    </Text>
                 </View>
 
                 <View style={styles.inputGroup}>
@@ -2021,6 +2043,11 @@ const getStyles = (colors: any, topInset: number = 0) => {
     // Real safe-area inset (notch, punch-hole camera, landscape); fall back to the status bar height
     const statusBarHeight = topInset || (Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
     return StyleSheet.create({
+    lockHint: {
+        fontSize: 12,
+        color: colors.textSecondary,
+        marginTop: 4,
+    },
         container: {
             flex: 1,
             backgroundColor: colors.background,

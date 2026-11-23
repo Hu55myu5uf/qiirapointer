@@ -3,6 +3,7 @@
  * No invented data: no default ratings, no made-up locations, no "approved" unless an admin approved.
  */
 import { db } from '../config/firebase';
+import { lockedUntil } from './fieldLocks';
 import { MASTER_ADMIN_UID } from './authMiddleware';
 import { usableImage } from './profiles';
 
@@ -79,6 +80,8 @@ export function toVendorResponse(uid: string, v: any, user: any = {}) {
         uid,
         businessName: v.businessName || user.fullName || 'Vendor',
         username: user.username || v.username || null,
+        // When the locked identity fields can next be changed (see utils/fieldLocks)
+        fieldLocks: lockedUntil(v.fieldChangedAt),
         category: v.category || '',
         description: v.description || '',
         address: v.address || '',
