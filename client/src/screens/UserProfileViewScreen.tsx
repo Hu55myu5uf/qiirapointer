@@ -63,6 +63,7 @@ export default function UserProfileViewScreen({ route, navigation }: any) {
                     const v = vRes.data.vendor;
                     setProfile({
                         fullName: v.businessName || 'Vendor',
+                        username: v.username || '',
                         profileImage: v.businessImage || '',
                         bannerImage: v.bannerImage || '',
                         role: 'vendor',
@@ -86,6 +87,7 @@ export default function UserProfileViewScreen({ route, navigation }: any) {
                 const u = uRes.data.user;
                 setProfile({
                     fullName: u.fullName || u.full_name || u.displayName || initialName || 'User',
+                    username: u.username || '',
                     profileImage: u.profileImage || u.profile_image || u.photoURL || initialImage || '',
                     role: u.role || initialRole || 'client',
                     email: u.email || '',
@@ -241,6 +243,9 @@ export default function UserProfileViewScreen({ route, navigation }: any) {
                             <Text style={styles.fullName}>{profile.fullName}</Text>
                             <VerificationBadgeInline isVerified={Boolean(profile.isVerified || profile.role === 'admin' || userId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2')} isAdmin={profile.role === 'admin' || userId === 'v8MwaOet0ISfZAWXIDAPAGcg1td2'} size={20} />
                         </View>
+                        {profile.username ? (
+                            <Text style={{ color: colors.textSecondary, fontSize: 14, fontWeight: '600', textAlign: 'center', marginTop: 2 }}>@{profile.username}</Text>
+                        ) : null}
                         <View style={styles.badgeRow}>
                             <View style={[styles.roleBadge, isVendor ? styles.vendorBadge : styles.clientBadge]}>
                                 <Text style={[styles.roleBadgeText, isVendor ? styles.vendorBadgeText : styles.clientBadgeText]}>

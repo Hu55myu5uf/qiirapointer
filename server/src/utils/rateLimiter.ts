@@ -67,3 +67,4 @@ export const writeLimiter = rateLimiter(60 * 1000, 60, 'You are doing that too o
 export const messageLimiter = rateLimiter(60 * 1000, 40, 'You are sending messages too quickly. Please slow down.', { perUser: true });
 export const uploadLimiter = rateLimiter(60 * 60 * 1000, 60, 'Upload limit reached. Please try again later.', { perUser: true });
 export const reportLimiter = rateLimiter(60 * 60 * 1000, 20, 'Too many reports submitted. Please try again later.', { perUser: true });
+export const searchLimiter = rateLimiter(60 * 1000, 120, 'Too many searches. Please slow down.', { perUser: true });

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { auth, db } from '../config/firebase';
 import { notifyVendorApproval } from '../utils/pushNotifications';
 import { createNotification } from '../utils/notifications';
+import { claimUsername, UsernameError } from '../utils/usernames';
 import { authenticateUser, requireAdmin, MASTER_ADMIN_UID, SUPPORT_UID } from '../utils/authMiddleware';
 import { signedUrlFor } from '../utils/fileStorage';
 import { clearProfileCache, getDisplayProfiles, usableImage } from '../utils/profiles';
@@ -377,6 +378,21 @@ router.delete('/reviews/:vendorId/:clientId', async (req: Request, res: Response
     } catch (error: any) {
         console.error('Admin delete review error:', error);
         res.status(500).json({ error: 'Failed to remove review' });
+    }
+});
+
+/**
+ * @route   PUT /api/admin/users/:id/username   { username }
+ * @desc    Admin override: set someone's username without the 30-day limit (e.g. impersonation)
+ */
+router.put('/users/:id/username', async (req: Request, res: Response) => {
+    try {
+        const username = await claimUsername(req.params.id, req.body?.username, { force: true });
+        res.json({ username });
+    } catch (error: any) {
+        if (error instanceof UsernameError) return res.status(error.status).json({ error: error.message });
+        console.error('Admin username error:', error);
+        res.status(500).json({ error: 'Failed to set username' });
     }
 });
 

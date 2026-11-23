@@ -34,6 +34,12 @@ async function withSubcollection(parent: Ref, sub: string): Promise<Ref[]> {
 export async function deleteAccountData(uid: string): Promise<{ deletedDocuments: number }> {
     const toDelete: Ref[] = [];
     const userRef = db.collection('users').doc(uid);
+    // Free their @username
+    const username = (await userRef.get()).data()?.username;
+    if (typeof username === 'string' && username) {
+        const nameRef = db.collection('usernames').doc(username);
+        if ((await nameRef.get()).data()?.uid === uid) toDelete.push(nameRef);
+    }
 
     // Profile + private sub-collection, store, cart, their favourites
     toDelete.push(...await refsOf(userRef.collection('blocked_users')));

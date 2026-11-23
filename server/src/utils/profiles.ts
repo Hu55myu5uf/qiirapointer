@@ -9,6 +9,7 @@ import { MASTER_ADMIN_UID, SUPPORT_UID, invalidateAuthUser } from './authMiddlew
 export interface DisplayProfile {
     uid: string;
     name: string;
+    username: string | null;
     avatar: string;          // '' when the user has no photo (the app shows its own placeholder)
     role: 'client' | 'vendor' | 'admin' | 'support';
     isVerified: boolean;
@@ -20,6 +21,7 @@ export interface DisplayProfile {
 const SUPPORT_PROFILE: DisplayProfile = {
     uid: SUPPORT_UID,
     name: 'Pointer Customer Support',
+    username: null,
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500',
     role: 'support',
     isVerified: true,
@@ -65,6 +67,7 @@ export async function getDisplayProfile(uid: string): Promise<DisplayProfile> {
     const value: DisplayProfile = {
         uid,
         name: (isVendor && (v.businessName || v.business_name)) || u.fullName || u.full_name || u.displayName || 'User',
+        username: u.username || null,
         avatar: usableImage(isVendor ? (v.businessImage || v.business_image || u.profileImage) : (u.profileImage || u.profile_image || u.photoURL)),
         role,
         isVerified: Boolean(isAdmin || (isVendor ? v.isVerified : u.isVerified)),

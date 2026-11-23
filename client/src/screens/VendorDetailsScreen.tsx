@@ -445,6 +445,9 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
 
                     {/* Business Info */}
                     <View style={styles.infoContainer}>
+                        {vendor.username ? (
+                            <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '600', marginBottom: 2 }}>@{vendor.username}</Text>
+                        ) : null}
                         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
                             <Text style={styles.businessName}>{vendor.businessName}</Text>
                             <VerificationBadgeInline

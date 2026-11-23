@@ -3,6 +3,7 @@ import { auth, db } from '../config/firebase';
 import { authenticateUser, optionalAuthenticateUser, requireSelfOrAdmin, MASTER_ADMIN_UID, SUPPORT_UID } from '../utils/authMiddleware';
 import { authLimiter } from '../utils/rateLimiter';
 import { deleteAccountData } from '../utils/accountDeletion';
+import { ensureUsername } from '../utils/usernames';
 import { clearProfileCache } from '../utils/profiles';
 import { verificationState } from '../utils/vendors';
 
@@ -33,6 +34,7 @@ function toPublicProfile(user: any) {
         isVerified: Boolean(user.isVerified),
         is_verified: Boolean(user.isVerified),
         businessName: user.businessName || null,
+        username: user.username || null,
         phoneNumber: phone,
         phone_number: phone,
         createdAt: user.createdAt || user.created_at || null,
@@ -219,6 +221,8 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
             await auth.deleteUser(userRecord.uid).catch(() => {});
             throw fsErr;
         }
+        // Everyone gets an @username straight away (they can change it in their profile)
+        const username = await ensureUsername(userRecord.uid, name);
 
         res.status(201).json({
             message: 'User registered successfully',
@@ -227,6 +231,7 @@ router.post('/register', authLimiter, async (req: Request, res: Response) => {
                 email,
                 fullName,
                 role,
+                username,
             },
         });
     } catch (error: any) {
@@ -355,6 +360,7 @@ router.post('/oauth', authLimiter, async (req: Request, res: Response) => {
                 });
             }
             await batch.commit();
+            await ensureUsername(uid, String(userName));
             userData = await getUserProfile(uid);
         }
 
@@ -400,6 +406,11 @@ router.get('/user/:uid', optionalAuthenticateUser, async (req: Request, res: Res
         }
 
         const canSeePrivate = Boolean(req.user && (req.user.uid === uid || req.user.isAdmin));
+        // Accounts from before usernames get one the first time they open the app
+        if (!userData.username && req.user?.uid === uid) {
+            const username = await ensureUsername(uid, userData.businessName || userData.fullName || '');
+            if (username) userData.username = username;
+        }
         res.status(200).json({ user: canSeePrivate ? userData : toPublicProfile(userData) });
     } catch (error: any) {
         console.error('Get user error:', error);

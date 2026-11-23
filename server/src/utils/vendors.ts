@@ -78,6 +78,7 @@ export function toVendorResponse(uid: string, v: any, user: any = {}) {
         id: uid,
         uid,
         businessName: v.businessName || user.fullName || 'Vendor',
+        username: user.username || v.username || null,
         category: v.category || '',
         description: v.description || '',
         address: v.address || '',

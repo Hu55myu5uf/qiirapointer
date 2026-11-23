@@ -279,6 +279,14 @@ export const cartAPI = {
         api.delete(`/cart/${userId}/clear`),
 };
 
+/** @usernames: check, change, suggestions for @mentions, look-up */
+export const usersAPI = {
+    checkUsername: (u: string) => api.get('/users/username/check', { params: { u } }),
+    setUsername: (username: string) => api.put('/users/me/username', { username }),
+    search: (q: string) => api.get('/users/search', { params: { q } }),
+    byUsername: (username: string) => api.get(`/users/by-username/${encodeURIComponent(username)}`),
+};
+
 /** The signed-in user's Notifications page (server keeps them; see server notification.routes) */
 export const notificationAPI = {
     list: (before?: string) => api.get('/notifications', { params: before ? { before } : {} }),

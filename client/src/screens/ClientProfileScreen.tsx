@@ -32,6 +32,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as FileSystem from 'expo-file-system/legacy';
 import TabSwipeHandler from '../components/TabSwipeHandler';
 import BrandHeader from '../components/BrandHeader';
+import UsernameEditor from '../components/UsernameEditor';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UpgradeToVendorModal from '../components/UpgradeToVendorModal';
 import { openChat } from '../navigation/openChat';
@@ -53,6 +54,7 @@ export default function ClientProfileScreen() {
 
     // Profile fields
     const [fullName, setFullName] = useState('');
+    const [username, setUsername] = useState<string>('');
     const [email, setEmail] = useState('');
     const [phoneNumber, setPhoneNumber] = useState('');
     const [profileImage, setProfileImage] = useState('');
@@ -94,6 +96,7 @@ export default function ClientProfileScreen() {
             const userData = response.data?.user;
             if (userData) {
                 setFullName(userData.fullName || userData.full_name || userData.displayName || '');
+                setUsername(userData.username || '');
                 setEmail(userData.email || user.email || '');
                 setPhoneNumber(userData.phoneNumber || userData.phone_number || '');
                 setProfileImage(userData.profileImage || userData.profile_image || userData.photoURL || '');
@@ -248,7 +251,9 @@ export default function ClientProfileScreen() {
                             </Text>
                             <VerificationBadgeInline isVerified={Boolean(isVerified || isAdmin)} isAdmin={isAdmin} size={18} />
                         </View>
-                        <Text style={styles.profileBarSub}>{isAdmin ? 'System Administrator' : 'Client Profile'}</Text>
+                        <Text style={styles.profileBarSub} numberOfLines={1}>
+                            {username ? `@${username}` : ''}{username ? ' · ' : ''}{isAdmin ? 'System Administrator' : 'Client'}
+                        </Text>
                     </View>
                     <TouchableOpacity
                         onPress={() => setIsEditing(!isEditing)}
@@ -298,6 +303,11 @@ export default function ClientProfileScreen() {
                                 <VerificationBadgeInline isVerified={Boolean(isVerified || isAdmin)} isAdmin={isAdmin} size={18} />
                             </View>
                         )}
+                    </View>
+
+                    {/* @username (saved on its own, once every 30 days) */}
+                    <View style={styles.fieldContainer}>
+                        <UsernameEditor username={username} onChanged={setUsername} />
                     </View>
 
                     {/* Email (read-only) */}

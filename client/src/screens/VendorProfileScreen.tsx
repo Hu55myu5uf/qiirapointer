@@ -44,6 +44,7 @@ import ChangePasswordModal from '../components/ChangePasswordModal';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 import TabSwipeHandler from '../components/TabSwipeHandler';
 import BrandHeader, { HeaderIconButton } from '../components/BrandHeader';
+import UsernameEditor from '../components/UsernameEditor';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import VendorVerificationModal from '../components/VendorVerificationModal';
 import VendorAdvertModal from '../components/VendorAdvertModal';
@@ -108,6 +109,7 @@ export default function VendorProfileScreen({ navigation }: any) {
 
     // Form State
     const [businessName, setBusinessName] = useState('');
+    const [username, setUsername] = useState('');
     const [category, setCategory] = useState('');
     const [description, setDescription] = useState('');
     const [address, setAddress] = useState('');
@@ -367,6 +369,7 @@ export default function VendorProfileScreen({ navigation }: any) {
 
             if (vendor) {
                 setBusinessName(vendor.businessName || '');
+                setUsername(vendor.username || '');
                 setCategory(vendor.category || '');
                 setDescription(vendor.description || '');
                 setAddress(vendor.address || '');
@@ -886,6 +889,7 @@ export default function VendorProfileScreen({ navigation }: any) {
                                 <Text style={styles.businessName}>{businessName || (isAdmin ? 'System Administrator' : 'Business Name')}</Text>
                                 <VerificationBadgeInline isVerified={Boolean(isVerified || isAdmin)} isAdmin={isAdmin} size={20} />
                             </View>
+                            {username ? <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '600', marginTop: 1 }}>@{username}</Text> : null}
                             <CategoryLabel category={category} emptyText="Add a business category (tap Edit) so customers can find you on Discover" />
 
                             {address ? (
@@ -1862,7 +1866,12 @@ export default function VendorProfileScreen({ navigation }: any) {
                     </TouchableOpacity>
                 </View>
 
+                {/* @username (saved on its own, once every 30 days) */}
                 <View style={[styles.inputGroup, { marginTop: SPACING.xl }]}>
+                    <UsernameEditor username={username} onChanged={setUsername} />
+                </View>
+
+                <View style={styles.inputGroup}>
                     <Text style={styles.label}>Name</Text>
                     <TextInput
                         style={styles.input}
