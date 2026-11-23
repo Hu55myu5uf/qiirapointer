@@ -6,7 +6,16 @@ const setName = (uid: string, username: string) =>
     api().put('/api/users/me/username').set('Authorization', bearer(uid)).send({ username });
 const notes = async (uid: string) =>
     (await api().get('/api/notifications').set('Authorization', bearer(uid))).body.notifications as any[];
-const wait = () => new Promise(r => setTimeout(r, 20)); // mention notifications are sent after the response
+// Mention notifications are sent after the response: wait until they have arrived
+async function notesWhenReady(uid: string, expected: number) {
+    for (let i = 0; i < 100; i++) {
+        const n = await notes(uid);
+        if (n.length >= expected) return n;
+        await new Promise(r => setTimeout(r, 20));
+    }
+    return notes(uid);
+}
+const settle = () => new Promise(r => setTimeout(r, 100));
 
 async function people() {
     await seedUser('ven', 'vendor', { businessName: 'Ven Shop' });
@@ -31,8 +40,8 @@ describe('@mentions', () => {
         });
         expect(res.status).toBe(201);
         expect(res.body.post.mentions.map((m: any) => m.username).sort()).toEqual(['ada.k', 'bola_']);
-        await wait();
-        const ada = await notes('ada');
+        const ada = await notesWhenReady('ada', 1);
+        await settle(); // give any (wrong) notifications to others time to arrive before checking
         expect(ada[0]).toMatchObject({ type: 'mention', actorId: 'ven', title: 'Ven Shop mentioned you in a post' });
         expect(ada[0].data.postId).toBe(res.body.post.id);
         expect(await notes('cyn')).toHaveLength(0);
@@ -44,7 +53,8 @@ describe('@mentions', () => {
         const post = (await api().post('/api/posts').set('Authorization', bearer('ven')).send({ caption: 'New bread', mediaUrls: ['https://example.com/p.jpg'] })).body.post;
         const c = await api().post(`/api/posts/${post.id}/comments`).set('Authorization', bearer('ada')).send({ text: '@bola_ you have to try this @bola_' });
         expect(c.status).toBe(201);
-        await wait();
+        await notesWhenReady('bola', 1);
+        await settle(); // a duplicate would show up here
         const bola = await notes('bola');
         expect(bola).toHaveLength(1);
         expect(bola[0].title).toBe('ada mentioned you in a comment');
