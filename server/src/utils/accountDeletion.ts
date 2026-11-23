@@ -37,6 +37,20 @@ export async function deleteAccountData(uid: string): Promise<{ deletedDocuments
 
     // Profile + private sub-collection, store, cart, their favourites
     toDelete.push(...await refsOf(userRef.collection('blocked_users')));
+    // Their own notifications, and the links the people who caused them keep (see utils/notifications)
+    for (const n of (await userRef.collection('notifications').get()).docs) {
+        toDelete.push(n.ref);
+        const actorId = n.data()?.actorId;
+        if (typeof actorId === 'string' && actorId && actorId !== uid) {
+            toDelete.push(db.collection('users').doc(actorId).collection('notification_links').doc(`${uid}__${n.id}`));
+        }
+    }
+    // Notifications other people received about this user (reviews, missed calls, mentions)
+    for (const link of (await userRef.collection('notification_links').get()).docs) {
+        const path = link.data()?.path;
+        if (typeof path === 'string' && /^users\/[^/]+\/notifications\/[^/]+$/.test(path)) toDelete.push(db.doc(path));
+        toDelete.push(link.ref);
+    }
     toDelete.push(db.collection('vendors').doc(uid), db.collection('carts').doc(uid));
     toDelete.push(...await refsOf(db.collection('favorites').where('clientId', '==', uid)));
 

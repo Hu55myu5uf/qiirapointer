@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../config/firebase';
 import { notifyNewReview } from '../utils/pushNotifications';
+import { createNotification } from '../utils/notifications';
 import { authenticateUser, requireSelfOrAdmin } from '../utils/authMiddleware';
 import { isOwnPrivateRef } from '../utils/fileStorage';
 import { getDisplayProfile } from '../utils/profiles';
@@ -90,6 +91,16 @@ router.post('/:id/reviews', authenticateUser, requireSelfOrAdmin('id'), writeLim
                     vendorRef.get(),
                     getDisplayProfile(clientId),
                 ]);
+                const stars = '★'.repeat(rating) + '☆'.repeat(5 - rating);
+                await createNotification(vendorId, {
+                    type: 'review',
+                    title: `New ${rating}-star review`,
+                    body: comment ? `${stars} "${comment}"` : `${stars} ${reviewer.name} rated your business.`,
+                    actorId: clientId,
+                    actorName: reviewer.name,
+                    actorAvatar: reviewer.avatar || null,
+                    data: { vendorId },
+                });
                 const pushToken = vendorUser.data()?.pushToken;
                 if (pushToken) {
                     await notifyNewReview(pushToken, reviewer.name, rating, vendorDoc.data()?.businessName || 'your business');

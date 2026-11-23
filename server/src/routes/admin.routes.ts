@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { auth, db } from '../config/firebase';
 import { notifyVendorApproval } from '../utils/pushNotifications';
+import { createNotification } from '../utils/notifications';
 import { authenticateUser, requireAdmin, MASTER_ADMIN_UID, SUPPORT_UID } from '../utils/authMiddleware';
 import { signedUrlFor } from '../utils/fileStorage';
 import { clearProfileCache, getDisplayProfiles, usableImage } from '../utils/profiles';
@@ -168,6 +169,29 @@ router.put('/vendors/:id/verify', async (req: Request, res: Response) => {
         }
         invalidateVendorList();
         clearProfileCache(id);
+
+        // Record the decision on the user's Notifications page
+        if (target === 'badge') {
+            await createNotification(id, approved ? {
+                type: 'verification_approved',
+                title: 'You are verified',
+                body: 'Your identity was confirmed. The verified badge now shows on your profile.',
+            } : {
+                type: 'verification_rejected',
+                title: 'Verification not approved',
+                body: rejectionReason ? `Reason: ${rejectionReason}. You can submit again from your profile.` : 'You can submit again from your profile.',
+            });
+        } else {
+            await createNotification(id, approved ? {
+                type: 'system',
+                title: 'Your store is listed',
+                body: 'Your business is visible on Discover again.',
+            } : {
+                type: 'listing_rejected',
+                title: 'Your store was taken off Discover',
+                body: rejectionReason ? `Reason: ${rejectionReason}. Contact support if you think this is a mistake.` : 'Contact support if you think this is a mistake.',
+            });
+        }
 
         if (user.pushToken) {
             const name = (vDoc.exists && vDoc.data()!.businessName) || user.fullName || 'Your account';

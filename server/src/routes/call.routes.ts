@@ -5,6 +5,7 @@ import { authenticateUser } from '../utils/authMiddleware';
 import { getDisplayProfile } from '../utils/profiles';
 import { writeLimiter } from '../utils/rateLimiter';
 import { notifyIncomingCall } from '../utils/pushNotifications';
+import { createNotification } from '../utils/notifications';
 
 const router = Router();
 
@@ -119,6 +120,19 @@ async function recordCallInChat(s: CallSession) {
         },
     });
     await batch.commit();
+
+    // A missed call also goes on the receiver's Notifications page (one per call)
+    if (s.status === 'missed') {
+        await createNotification(s.receiverId, {
+            type: 'missed_call',
+            title: `Missed ${s.callType === 'video' ? 'video' : 'voice'} call`,
+            body: `${caller.name} tried to call you.`,
+            actorId: s.callerId,
+            actorName: caller.name,
+            actorAvatar: caller.avatar || null,
+            data: { callId: s.id, callType: s.callType, otherUserId: s.callerId },
+        }, `call_${s.id}`);
+    }
 }
 
 const isActive = (s: CallSession) => s.status === 'ringing' || s.status === 'connected';
