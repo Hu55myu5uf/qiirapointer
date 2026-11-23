@@ -13,10 +13,11 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 // Cached, downscaled images (expo-image) with the same props as React Native Image
 import { Image } from '../components/CachedImage';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { WebView } from 'react-native-webview';
-import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
+import { requestRecordingPermissionsAsync } from 'expo-audio';
+import { callAudio } from '../utils/callAudio';
 import { useCallStore } from '../store/callStore';
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../context/ThemeContext';
@@ -85,6 +86,10 @@ export default function CallScreen({ route, navigation }: any) {
         currentCall?.status === 'connected' ? 'connected' : 'ringing'
     );
     const [callType, setCallType] = useState<'voice' | 'video'>(initialCallType);
+    // The media link itself (separate from the call being answered): shows "Reconnecting…"
+    const [linkState, setLinkState] = useState<'ok' | 'reconnecting' | 'lost'>('ok');
+    const insets = useSafeAreaInsets();
+    const [dockHeight, setDockHeight] = useState(96);
 
     // Visualizer Animations
     const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -169,29 +174,16 @@ export default function CallScreen({ route, navigation }: any) {
         })();
     }, []);
 
-    // Audio routing
+    // Audio routing: the phone stays in call mode for the whole call; the speaker button only
+    // moves the sound between the earpiece (or headset) and the loudspeaker.
+    const isSpeakerRef = useRef(isSpeaker);
+    isSpeakerRef.current = isSpeaker;
     useEffect(() => {
-        (async () => {
-            try {
-                await setAudioModeAsync({
-                    allowsRecording: true,
-                    playsInSilentMode: true,
-                    shouldPlayInBackground: true,
-                    shouldRouteThroughEarpiece: !isSpeaker,
-                });
-            } catch (e) {
-                console.warn('Audio setup note:', e);
-            }
-        })();
+        callAudio.start(isSpeakerRef.current);
+        return () => callAudio.stop();
     }, []);
-
     useEffect(() => {
-        setAudioModeAsync({
-            allowsRecording: true,
-            playsInSilentMode: true,
-            shouldPlayInBackground: true,
-            shouldRouteThroughEarpiece: !isSpeaker,
-        }).catch(() => {});
+        callAudio.setSpeaker(isSpeaker);
     }, [isSpeaker]);
 
     // Duration timer interval
@@ -253,6 +245,8 @@ export default function CallScreen({ route, navigation }: any) {
     const handleToggleVideo = () => {
         if (callType === 'voice') {
             setCallType('video');
+            if (!isVideoEnabled) toggleVideo();
+            if (!isSpeaker) toggleSpeaker();
         } else {
             toggleVideo();
             webViewRef.current?.postMessage(JSON.stringify({ action: 'TOGGLE_VIDEO' }));
@@ -293,6 +287,21 @@ export default function CallScreen({ route, navigation }: any) {
         return () => { cancelled = true; };
     }, [callId]);
 
+    const sendLayout = () => {
+        webViewRef.current?.postMessage(JSON.stringify({ action: 'LAYOUT', bottom: Math.round(dockHeight + insets.bottom + 12) }));
+    };
+    useEffect(() => { sendLayout(); }, [dockHeight, insets.bottom]);
+
+    const statusText = callStatus === 'ended'
+        ? 'Call Ended'
+        : linkState === 'lost'
+        ? 'Connection lost'
+        : linkState === 'reconnecting'
+        ? 'Reconnecting…'
+        : callStatus === 'connected'
+        ? formatDuration(callDuration)
+        : null;
+
     const apiOrigin = (API_URL.match(/^https?:\/\/[^/]+/) || [API_URL])[0];
     const roomUrl = roomToken
         ? `${API_URL}/calls/room/${encodeURIComponent(callId)}?type=${callType}&token=${encodeURIComponent(roomToken)}`
@@ -321,13 +330,19 @@ export default function CallScreen({ route, navigation }: any) {
                     originWhitelist={[apiOrigin]}
                     setSupportMultipleWindows={false}
                     userAgent="Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.0.0 Mobile Safari/537.36"
+                    onLoadEnd={sendLayout}
                     onMessage={(event) => {
                         try {
                             const data = JSON.parse(event.nativeEvent.data);
                             if (data.type === 'PEER_CONNECTED' || data.type === 'REMOTE_CONNECTED') {
+                                setLinkState('ok');
                                 if (callStatus !== 'connected') {
                                     setCallStatus('connected');
                                 }
+                            } else if (data.type === 'RECONNECTING') {
+                                setLinkState('reconnecting');
+                            } else if (data.type === 'CONNECTION_LOST') {
+                                setLinkState('lost');
                             }
                         } catch (_) {}
                     }}
@@ -335,7 +350,7 @@ export default function CallScreen({ route, navigation }: any) {
             ) : null}
 
             {/* Top Bar */}
-            <View style={styles.topBar}>
+            <View style={[styles.topBar, callType === 'video' && isVideoEnabled && styles.topBarOverVideo]}>
                 <TouchableOpacity
                     style={styles.minimizeBtn}
                     onPress={() => navigation.goBack()}
@@ -355,15 +370,18 @@ export default function CallScreen({ route, navigation }: any) {
 
             {/* Main Content Area */}
             {callType === 'video' && isVideoEnabled ? (
-                /* Video Call Overlay Header */
-                <View style={styles.videoOverlayHeader}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
-                        <Text style={styles.videoName}>{otherUserName}</Text>
-                        <VerificationBadgeInline isVerified={isVerified} isAdmin={isAdmin} size={18} />
+                /* Video: the picture fills the screen behind; this stage only holds the name and
+                   keeps the control bar at the bottom. Touches pass through to the video. */
+                <View style={styles.videoStage} pointerEvents="box-none">
+                    <View style={styles.videoOverlayHeader} pointerEvents="none">
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                            <Text style={styles.videoName} numberOfLines={1}>{otherUserName}</Text>
+                            <VerificationBadgeInline isVerified={isVerified} isAdmin={isAdmin} size={18} />
+                        </View>
+                        <Text style={styles.videoStatus}>
+                            {statusText ?? 'Connecting…'}
+                        </Text>
                     </View>
-                    <Text style={styles.videoStatus}>
-                        {callStatus === 'connected' ? formatDuration(callDuration) : 'Connecting HD Stream...'}
-                    </Text>
                 </View>
             ) : (
                 /* Voice Call View */
@@ -375,11 +393,7 @@ export default function CallScreen({ route, navigation }: any) {
                             <VerificationBadgeInline isVerified={isVerified} isAdmin={isAdmin} size={22} />
                         </View>
                         <Text style={styles.callStateText}>
-                            {callStatus === 'connected'
-                                ? formatDuration(callDuration)
-                                : callStatus === 'ended'
-                                ? 'Call Ended'
-                                : 'Pointer Ringing...'}
+                            {statusText ?? 'Ringing…'}
                         </Text>
                     </View>
 
@@ -418,7 +432,7 @@ export default function CallScreen({ route, navigation }: any) {
             )}
 
             {/* Bottom Floating Control Dock */}
-            <View style={styles.controlDockContainer}>
+            <View style={styles.controlDockContainer} onLayout={(e) => setDockHeight(e.nativeEvent.layout.height)}>
                 <View style={styles.controlDock}>
                     {/* Mute Toggle */}
                     <TouchableOpacity
@@ -529,15 +543,22 @@ const styles = StyleSheet.create({
         opacity: 0.02,
         zIndex: -1,
     },
+    videoStage: {
+        flex: 1,
+        zIndex: 5,
+    },
     videoOverlayHeader: {
-        position: 'absolute',
-        top: 80,
-        left: 0,
-        right: 0,
+        alignSelf: 'center',
         alignItems: 'center',
-        zIndex: 10,
-        backgroundColor: 'rgba(10, 12, 16, 0.4)',
-        paddingVertical: 10,
+        marginTop: 8,
+        maxWidth: '80%',
+        backgroundColor: 'rgba(10, 12, 16, 0.45)',
+        borderRadius: 16,
+        paddingVertical: 6,
+        paddingHorizontal: 14,
+    },
+    topBarOverVideo: {
+        paddingBottom: 6,
     },
     topBar: {
         flexDirection: 'row',

@@ -83,3 +83,30 @@ describe('call history', () => {
         expect((await api().get('/api/calls/history')).status).toBe(401);
     });
 });
+
+describe('call signalling', () => {
+    async function roomToken(callId: string, uid: string) {
+        return (await api().get(`/api/calls/${callId}/room-token`).set('Authorization', bearer(uid))).body.roomToken as string;
+    }
+    const send = (callId: string, token: string, data: any) =>
+        api().post(`/api/calls/${callId}/signal`).set('X-Call-Token', token).send({ data });
+
+    it('accepts ready / restart signals and keeps the offer when many candidates queue up', async () => {
+        await seedUser('alice'); await seedUser('bob');
+        const callId = await startCall();
+        const a = await roomToken(callId, 'alice');
+        expect((await send(callId, a, { type: 'ready' })).status).toBe(200);
+        expect((await send(callId, a, { type: 'offer', sdp: { type: 'offer', sdp: 'v=0' } })).status).toBe(200);
+        for (let i = 0; i < 120; i++) await send(callId, a, { type: 'candidate', candidate: { candidate: 'c' + i } });
+        expect((await send(callId, a, { type: 'restart' })).status).toBe(200);
+        expect((await send(callId, a, { type: 'bogus' })).status).toBe(400);
+
+        await api().post(`/api/calls/${callId}/answer`).set('Authorization', bearer('bob'));
+        const b = await roomToken(callId, 'bob');
+        const got = (await api().get(`/api/calls/${callId}/signal/bob`).set('X-Call-Token', b)).body.signals as any[];
+        expect(got.length).toBeLessThanOrEqual(100);
+        expect(got.map(s => s.type)).toContain('offer');
+        expect(got[0].type).toBe('ready');
+        expect(got[got.length - 1].type).toBe('restart');
+    });
+});

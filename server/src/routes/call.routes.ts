@@ -513,7 +513,7 @@ router.post('/:callId/signal', signalAuth, async (req: Request, res: Response): 
         return res.status(404).json({ error: 'Call session not found' });
     }
     const { data } = req.body || {};
-    if (!data || typeof data !== 'object' || !['offer', 'answer', 'candidate'].includes(data.type)) {
+    if (!data || typeof data !== 'object' || !['offer', 'answer', 'candidate', 'ready', 'restart'].includes(data.type)) {
         return res.status(400).json({ error: 'Invalid signal' });
     }
     if (JSON.stringify(data).length > 20_000) {
@@ -523,7 +523,12 @@ router.post('/:callId/signal', signalAuth, async (req: Request, res: Response): 
     const signals = callSignals.get(session.id) || [];
     // Sender and recipient are derived from the session, never from the request body
     signals.push({ from: uid, to: otherParty(session, uid), data, timestamp: Date.now() });
-    if (signals.length > 100) signals.splice(0, signals.length - 100);
+    // Keep the queue bounded by dropping the oldest ICE candidates first: losing the offer or
+    // answer (e.g. while the other person is still picking up) would make the call unconnectable.
+    while (signals.length > 100) {
+        const i = signals.findIndex(x => x.data?.type === 'candidate');
+        signals.splice(i >= 0 ? i : 0, 1);
+    }
     callSignals.set(session.id, signals);
     res.json({ success: true });
 });
@@ -603,7 +608,7 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
         }
         #localVideo {
             position: absolute;
-            top: 16px;
+            bottom: 140px;
             right: 16px;
             width: 100px;
             height: 140px;
@@ -693,6 +698,8 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
         let isMuted = false;
         let isVideoOff = !IS_VIDEO;
         let facingMode = 'user';
+        let recoveryTimer = null;
+        let recoveryAttempts = 0;
 
         const configuration = { iceServers: ROOM.iceServers };
 
@@ -731,10 +738,11 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
                 // Determine if initiator by user ID sorting
                 isInitiator = USER_ID < TARGET_ID;
 
+                // Tell the other side this page is new (e.g. reloaded when switching to video), so it
+                // starts a fresh connection with us instead of talking to the old page.
+                await sendSignal({ type: 'ready' });
                 if (isInitiator) {
-                    const offer = await peerConnection.createOffer();
-                    await peerConnection.setLocalDescription(offer);
-                    sendSignal({ type: 'offer', sdp: offer });
+                    await makeOffer(false);
                 }
 
                 startSignalPolling();
@@ -766,6 +774,8 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
                     remoteVideo.muted = true;
                     remoteVideo.srcObject = stream;
                     remoteVideo.play().catch(() => {});
+                    remoteVideo.onresize = fitRemoteVideo;
+                    remoteVideo.onloadedmetadata = fitRemoteVideo;
                 }
                 statusPill.textContent = 'Connected • Clear Audio';
                 postToNative('REMOTE_CONNECTED');
@@ -778,16 +788,67 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
                 }
             };
 
-            peerConnection.onconnectionstatechange = () => {
-                const state = peerConnection.connectionState;
+            const pc = peerConnection;
+            pc.onconnectionstatechange = () => {
+                if (pc !== peerConnection) return; // an old connection that was replaced
+                const state = pc.connectionState;
                 if (state === 'connected') {
                     statusPill.textContent = 'Connected • HD Audio';
+                    recoveryAttempts = 0;
+                    if (recoveryTimer) { clearTimeout(recoveryTimer); recoveryTimer = null; }
                     postToNative('PEER_CONNECTED');
                 } else if (state === 'disconnected' || state === 'failed') {
                     statusPill.textContent = 'Reconnecting...';
-                    if (state === 'failed' && isInitiator) restartConnection();
+                    postToNative('RECONNECTING');
+                    // 'disconnected' often heals by itself (network switch); give it a moment
+                    scheduleRecovery(state === 'failed' ? 500 : 3000);
                 }
             };
+        }
+
+        // Either side can trigger recovery: the initiator restarts ICE itself, the other side asks
+        // the initiator to. Retries while the link stays down.
+        function scheduleRecovery(delay) {
+            if (recoveryTimer || !polling) return;
+            recoveryTimer = setTimeout(() => {
+                recoveryTimer = null;
+                if (!peerConnection || !polling) return;
+                const st = peerConnection.connectionState;
+                if (st === 'connected' || st === 'closed') return;
+                recoveryAttempts++;
+                if (recoveryAttempts > 6) { statusPill.textContent = 'Connection lost'; postToNative('CONNECTION_LOST'); return; }
+                if (isInitiator) makeOffer(true); else sendSignal({ type: 'restart' });
+                scheduleRecovery(6000);
+            }, delay);
+        }
+
+        async function makeOffer(iceRestart) {
+            if (!peerConnection) return;
+            try {
+                if (peerConnection.signalingState !== 'stable' && !iceRestart) return;
+                const offer = await peerConnection.createOffer(iceRestart ? { iceRestart: true } : undefined);
+                await peerConnection.setLocalDescription(offer);
+                await sendSignal({ type: 'offer', sdp: offer });
+            } catch (e) {
+                console.warn('Offer note:', e);
+            }
+        }
+
+        // Fill the screen with the other person's video, unless the picture's shape differs a lot
+        // from the screen's (e.g. their phone is sideways): then show it whole instead of a close-up.
+        function fitRemoteVideo() {
+            if (!remoteVideo || !remoteVideo.videoWidth) return;
+            const videoPortrait = remoteVideo.videoHeight >= remoteVideo.videoWidth;
+            const screenPortrait = window.innerHeight >= window.innerWidth;
+            remoteVideo.style.objectFit = videoPortrait === screenPortrait ? 'cover' : 'contain';
+        }
+        window.addEventListener('resize', fitRemoteVideo);
+
+        // Start over with a brand-new connection (the other side's page was reloaded)
+        function resetPeerConnection() {
+            try { if (peerConnection) peerConnection.close(); } catch (_) {}
+            pendingCandidates = [];
+            createPeerConnection();
         }
 
         async function sendSignal(data) {
@@ -822,15 +883,7 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
             tick();
         }
 
-        async function restartConnection() {
-            try {
-                const offer = await peerConnection.createOffer({ iceRestart: true });
-                await peerConnection.setLocalDescription(offer);
-                sendSignal({ type: 'offer', sdp: offer });
-            } catch (e) {
-                console.warn('Restart note:', e);
-            }
-        }
+        function restartConnection() { return makeOffer(true); }
 
         let pendingCandidates = [];
         async function flushCandidates() {
@@ -844,6 +897,19 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
         async function handleSignal(sig) {
             if (!peerConnection) return;
             try {
+                if (sig.type === 'ready') {
+                    // The other page is new. If we were already talking to an older page of theirs,
+                    // drop that connection and connect to the new one.
+                    if (peerConnection.remoteDescription) {
+                        resetPeerConnection();
+                        if (isInitiator) await makeOffer(false);
+                    }
+                    return;
+                }
+                if (sig.type === 'restart') {
+                    if (isInitiator) await makeOffer(true);
+                    return;
+                }
                 if (sig.type === 'offer') {
                     await peerConnection.setRemoteDescription(new RTCSessionDescription(sig.sdp));
                     await flushCandidates();
@@ -914,6 +980,12 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
             }
             if (!data || !data.action) return;
 
+            if (data.action === 'LAYOUT') {
+                // Keep the self-view clear of the app's top bar and control bar
+                if (localVideo && typeof data.bottom === 'number') localVideo.style.bottom = Math.max(0, Math.min(600, data.bottom)) + 'px';
+                if (localVideo && typeof data.top === 'number') localVideo.style.top = 'auto';
+                return;
+            }
             if (data.action === 'TOGGLE_MUTE') {
                 if (localStream) {
                     const audioTracks = localStream.getAudioTracks();
@@ -933,7 +1005,16 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
                         video: { facingMode: facingMode, width: { ideal: 720 }, height: { ideal: 1280 } }
                     }).then(newStream => {
                         const newTrack = newStream.getVideoTracks()[0];
-                        if (localVideo) localVideo.srcObject = newStream;
+                        if (localVideo) {
+                            localVideo.srcObject = newStream;
+                            // A mirror image only makes sense for the front camera
+                            localVideo.style.transform = facingMode === 'user' ? 'scaleX(-1)' : 'none';
+                        }
+                        // keep the new camera's track in localStream so mute/video toggles reach it
+                        if (localStream) {
+                            localStream.getVideoTracks().forEach(t => localStream.removeTrack(t));
+                            localStream.addTrack(newTrack);
+                        }
                         if (peerConnection) {
                             const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
                             if (sender) sender.replaceTrack(newTrack);
@@ -941,6 +1022,7 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
                     }).catch(() => {});
                 }
             } else if (data.action === 'END_CALL') {
+                if (recoveryTimer) { clearTimeout(recoveryTimer); recoveryTimer = null; }
                 if (localStream) localStream.getTracks().forEach(t => t.stop());
                 if (peerConnection) peerConnection.close();
                 polling = false;

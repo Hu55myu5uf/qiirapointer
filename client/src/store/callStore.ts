@@ -81,7 +81,8 @@ export const useCallStore = create<CallState>((set, get) => ({
                 isInCall: true,
                 callDuration: 0,
                 isMuted: false,
-                isSpeaker: false,
+                // Video calls start on the loudspeaker, voice calls on the earpiece
+                isSpeaker: params.callType === 'video',
                 isVideoEnabled: params.callType === 'video',
                 isFrontCamera: true,
             });
@@ -104,7 +105,7 @@ export const useCallStore = create<CallState>((set, get) => ({
                 isInCall: true,
                 callDuration: 0,
                 isMuted: false,
-                isSpeaker: false,
+                isSpeaker: incomingCall.callType === 'video',
                 isVideoEnabled: incomingCall.callType === 'video',
                 isFrontCamera: true,
             });
