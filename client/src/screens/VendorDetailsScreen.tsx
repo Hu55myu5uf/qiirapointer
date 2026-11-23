@@ -60,6 +60,22 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
     const [reportModalVisible, setReportModalVisible] = useState(false);
     const [activeTab, setActiveTab] = useState<'posts' | 'catalog' | 'about' | 'services' | 'reviews' | 'docs'>(route.params?.initialTab || 'posts');
 
+    // Vendors can't review their own business: the review buttons are hidden on their own page
+    // (the server refuses it too). Tapping the rating there just opens the reviews.
+    const isOwnStore = Boolean(vendor && user?.uid && user.uid === (vendor.uid || vendor.id));
+    const openWriteReview = () => {
+        if (!vendor) return;
+        if (isOwnStore) {
+            setActiveTab('reviews');
+            return;
+        }
+        navigation.navigate('WriteReview', {
+            vendorId: vendor.id || vendor.uid,
+            businessName: vendor.businessName,
+            isVerified: Boolean(vendor.isVerified ?? vendor.is_verified),
+        });
+    };
+
     const handleMoreOptions = () => {
         if (!vendor) return;
         const vendorUid = vendor.uid || vendor.id;
@@ -443,11 +459,7 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                         <View style={styles.statsRow}>
                             <TouchableOpacity
                                 style={styles.statItem}
-                                onPress={() => navigation.navigate('WriteReview', {
-                                    vendorId: vendor.id || vendor.uid,
-                                    businessName: vendor.businessName,
-                                    isVerified: Boolean(vendor.isVerified ?? vendor.is_verified)
-                                })}
+                                onPress={() => openWriteReview()}
                                 activeOpacity={0.7}
                             >
                                 <Text style={styles.statValue}>⭐ {vendor.averageRating > 0 ? Number(vendor.averageRating).toFixed(1) : 'Rate'}</Text>
@@ -502,12 +514,8 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                             </TouchableOpacity>
 
                             <TouchableOpacity
-                                style={styles.reviewActionButton}
-                                onPress={() => navigation.navigate('WriteReview', {
-                                    vendorId: vendor.id || vendor.uid,
-                                    businessName: vendor.businessName,
-                                    isVerified: Boolean(vendor.isVerified ?? vendor.is_verified)
-                                })}
+                                style={[styles.reviewActionButton, isOwnStore && styles.hidden]}
+                                onPress={() => openWriteReview()}
                                 activeOpacity={0.8}
                             >
                                 <Ionicons name="star" size={16} color="#F59E0B" />
@@ -578,18 +586,14 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                                     ) : (
                                         <Text style={styles.noHoursText}>Business hours not available</Text>
                                     )}
-                                    <View style={styles.quickReviewCard}>
+                                    <View style={[styles.quickReviewCard, isOwnStore && styles.hidden]}>
                                         <View style={{ flex: 1 }}>
                                             <Text style={styles.quickReviewTitle}>Have you worked with this vendor?</Text>
                                             <Text style={styles.quickReviewSub}>Leave a quick rating & review</Text>
                                         </View>
                                         <TouchableOpacity
                                             style={styles.quickReviewBtn}
-                                            onPress={() => navigation.navigate('WriteReview', {
-                                                vendorId: vendor.id || vendor.uid,
-                                                businessName: vendor.businessName,
-                                                isVerified: Boolean(vendor.isVerified ?? vendor.is_verified)
-                                            })}
+                                            onPress={() => openWriteReview()}
                                             activeOpacity={0.8}
                                         >
                                             <Ionicons name="star" size={14} color="#F59E0B" />
@@ -603,18 +607,14 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                         {activeTab === 'services' && (
                             <View>
                                 <Text style={styles.bodyText}>{vendor.services || 'No services listed.'}</Text>
-                                <View style={[styles.quickReviewCard, { marginTop: SPACING.lg }]}>
+                                <View style={[styles.quickReviewCard, { marginTop: SPACING.lg }, isOwnStore && styles.hidden]}>
                                     <View style={{ flex: 1 }}>
                                         <Text style={styles.quickReviewTitle}>Satisfied with their service?</Text>
                                         <Text style={styles.quickReviewSub}>Share your review with other clients</Text>
                                     </View>
                                     <TouchableOpacity
                                         style={styles.quickReviewBtn}
-                                        onPress={() => navigation.navigate('WriteReview', {
-                                            vendorId: vendor.id || vendor.uid,
-                                            businessName: vendor.businessName,
-                                            isVerified: Boolean(vendor.isVerified ?? vendor.is_verified)
-                                        })}
+                                        onPress={() => openWriteReview()}
                                         activeOpacity={0.8}
                                     >
                                         <Ionicons name="star" size={14} color="#F59E0B" />
@@ -870,15 +870,11 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
 
                         {activeTab === 'reviews' && (
                             <View>
-                                <View style={styles.reviewCta}>
+                                <View style={[styles.reviewCta, isOwnStore && styles.hidden]}>
                                     <Text style={styles.reviewCtaText}>Have you utilized this vendor?</Text>
                                     <TouchableOpacity
                                         style={styles.writeReviewBtn}
-                                        onPress={() => navigation.navigate('WriteReview', {
-                                            vendorId: vendor.id || vendor.uid,
-                                            businessName: vendor.businessName,
-                                            isVerified: Boolean(vendor.isVerified ?? vendor.is_verified)
-                                        })}
+                                        onPress={() => openWriteReview()}
                                     >
                                         <Text style={styles.writeReviewBtnText}>Write a Review</Text>
                                     </TouchableOpacity>
@@ -1325,6 +1321,9 @@ const getStyles = (colors: any) => StyleSheet.create({
         fontSize: FONT_SIZES.sm,
         fontWeight: 'bold',
         color: colors.textInverse,
+    },
+    hidden: {
+        display: 'none',
     },
     reviewActionButton: {
         flex: 1,

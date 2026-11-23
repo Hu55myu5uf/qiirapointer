@@ -49,7 +49,8 @@ router.post('/:id/reviews', authenticateUser, requireSelfOrAdmin('id'), writeLim
         if (comment.length > MAX_REVIEW_LENGTH) {
             return res.status(400).json({ error: `Reviews can be at most ${MAX_REVIEW_LENGTH} characters` });
         }
-        if (vendorId === clientId) {
+        // Neither the account the review is for nor the person sending it may own the business
+        if (vendorId === clientId || vendorId === req.user!.uid) {
             return res.status(400).json({ error: 'You cannot review your own business' });
         }
 

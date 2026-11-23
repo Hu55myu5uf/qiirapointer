@@ -31,6 +31,10 @@ export default function WriteReviewScreen({ route, navigation }: any) {
             Alert.alert('Error', 'You must be logged in to leave a review');
             return;
         }
+        if (user.uid === vendorId) {
+            Alert.alert('Not allowed', "You can't review your own business.");
+            return;
+        }
 
         setSubmitting(true);
         try {
@@ -48,7 +52,7 @@ export default function WriteReviewScreen({ route, navigation }: any) {
             ]);
         } catch (error: any) {
             console.error('Error submitting review:', error);
-            Alert.alert('Error', error.response?.data?.message || 'Failed to submit review');
+            Alert.alert('Error', error.response?.data?.error || error.response?.data?.message || 'Failed to submit review');
         } finally {
             setSubmitting(false);
         }

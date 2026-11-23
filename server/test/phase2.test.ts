@@ -321,3 +321,24 @@ describe('admin analytics', () => {
         expect(stats.incompleteVendors).toBe(1);
     });
 });
+
+describe('reviews', () => {
+    it('a vendor cannot review their own business', async () => {
+        await approvedVendor('shop');
+        const res = await api().post('/api/clients/shop/reviews').set('Authorization', bearer('shop'))
+            .send({ vendorId: 'shop', rating: 5, comment: 'Best shop ever' });
+        expect(res.status).toBe(400);
+        expect(res.body.error).toMatch(/own business/);
+        const snap = await fakeDb.collection('reviews').where('vendorId', '==', 'shop').get();
+        expect(snap.docs.length).toBe(0);
+    });
+
+    it('an admin who owns a store cannot review it under someone else\'s account', async () => {
+        await seedUser('boss', 'admin');
+        await fakeDb.collection('vendors').doc('boss').set({ verificationStatus: 'approved', category: 'Restaurant' }, { merge: true });
+        await seedUser('alice');
+        const res = await api().post('/api/clients/alice/reviews').set('Authorization', bearer('boss'))
+            .send({ vendorId: 'boss', rating: 5 });
+        expect(res.status).toBe(400);
+    });
+});
