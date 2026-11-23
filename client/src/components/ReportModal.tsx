@@ -20,7 +20,7 @@ import { moderationAPI } from '../services/api';
 export interface ReportModalProps {
     visible: boolean;
     onClose: () => void;
-    targetType: 'post' | 'comment' | 'user' | 'vendor';
+    targetType: 'post' | 'comment' | 'user' | 'vendor' | 'listing';
     targetId: string;
     targetUserId?: string;
     targetTitle?: string;

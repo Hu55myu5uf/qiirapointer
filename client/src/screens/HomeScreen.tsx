@@ -506,6 +506,7 @@ export default function HomeScreen({ navigation }: any) {
                         ) : (
                             <View style={styles.headerCart}><CartButton size={22} onPress={() => navigation.navigate('Cart')} /></View>
                         )}
+                        <HeaderIconButton icon="home-outline" label="Homes and spaces for rent or sale" onPress={() => navigation.navigate('Listings')} />
                         <HeaderIconButton
                             icon={viewMode === 'list' ? 'map-outline' : 'list-outline'}
                             label={viewMode === 'list' ? 'Show map' : 'Show list'}

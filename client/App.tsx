@@ -45,6 +45,10 @@ import SignInRequiredScreen from './src/screens/SignInRequiredScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 import CommunitiesScreen from './src/screens/CommunitiesScreen';
 import CommunityDetailScreen from './src/screens/CommunityDetailScreen';
+import ListingsScreen from './src/screens/ListingsScreen';
+import ListingDetailScreen from './src/screens/ListingDetailScreen';
+import ListingFormScreen from './src/screens/ListingFormScreen';
+import MyListingsScreen from './src/screens/MyListingsScreen';
 import { useNotificationStore } from './src/store/notificationStore';
 import { useFonts } from 'expo-font';
 import { Montserrat_900Black } from '@expo-google-fonts/montserrat/900Black';
@@ -104,6 +108,21 @@ function HomeStack() {
         name="HomeMain"
         component={HomeScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Listings"
+        component={isGuest ? SignInRequiredScreen : ListingsScreen}
+        options={{ title: 'Homes & Spaces' }}
+      />
+      <Stack.Screen
+        name="ListingDetail"
+        component={isGuest ? SignInRequiredScreen : ListingDetailScreen}
+        options={{ title: 'Listing' }}
+      />
+      <Stack.Screen
+        name="ListingForm"
+        component={isGuest ? SignInRequiredScreen : ListingFormScreen}
+        options={{ title: 'List a place' }}
       />
       <Stack.Screen
         name="Notifications"
@@ -171,6 +190,21 @@ function ExploreStack() {
         name="ExploreMain"
         component={ExploreScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Listings"
+        component={isGuest ? SignInRequiredScreen : ListingsScreen}
+        options={{ title: 'Homes & Spaces' }}
+      />
+      <Stack.Screen
+        name="ListingDetail"
+        component={isGuest ? SignInRequiredScreen : ListingDetailScreen}
+        options={{ title: 'Listing' }}
+      />
+      <Stack.Screen
+        name="ListingForm"
+        component={isGuest ? SignInRequiredScreen : ListingFormScreen}
+        options={{ title: 'List a place' }}
       />
       <Stack.Screen
         name="Notifications"
@@ -482,6 +516,16 @@ function ClientMessagesStack() {
         options={{ title: 'Vendor Details' }}
       />
       <Stack.Screen
+        name="Listings"
+        component={isGuest ? SignInRequiredScreen : ListingsScreen}
+        options={{ title: 'Homes & Spaces' }}
+      />
+      <Stack.Screen
+        name="ListingDetail"
+        component={isGuest ? SignInRequiredScreen : ListingDetailScreen}
+        options={{ title: 'Listing' }}
+      />
+      <Stack.Screen
         name="Cart"
         component={isGuest ? SignInRequiredScreen : CartScreen}
         options={{ title: 'Saved Cart' }}
@@ -539,6 +583,16 @@ function VendorMessagesStack() {
         options={{ title: 'Vendor Details' }}
       />
       <Stack.Screen
+        name="Listings"
+        component={isGuest ? SignInRequiredScreen : ListingsScreen}
+        options={{ title: 'Homes & Spaces' }}
+      />
+      <Stack.Screen
+        name="ListingDetail"
+        component={isGuest ? SignInRequiredScreen : ListingDetailScreen}
+        options={{ title: 'Listing' }}
+      />
+      <Stack.Screen
         name="Cart"
         component={isGuest ? SignInRequiredScreen : CartScreen}
         options={{ title: 'Saved Cart' }}
@@ -572,6 +626,21 @@ function VendorProfileStack() {
         name="VendorProfileMain"
         component={VendorProfileScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="MyListings"
+        component={isGuest ? SignInRequiredScreen : MyListingsScreen}
+        options={{ title: 'My listings' }}
+      />
+      <Stack.Screen
+        name="ListingDetail"
+        component={isGuest ? SignInRequiredScreen : ListingDetailScreen}
+        options={{ title: 'Listing' }}
+      />
+      <Stack.Screen
+        name="ListingForm"
+        component={isGuest ? SignInRequiredScreen : ListingFormScreen}
+        options={{ title: 'List a place' }}
       />
       <Stack.Screen
         name="Notifications"
@@ -772,6 +841,16 @@ function AdminDashboardStack() {
         name="VendorDetails"
         component={VendorDetailsScreen}
         options={{ title: 'Vendor Details' }}
+      />
+      <Stack.Screen
+        name="Listings"
+        component={isGuest ? SignInRequiredScreen : ListingsScreen}
+        options={{ title: 'Homes & Spaces' }}
+      />
+      <Stack.Screen
+        name="ListingDetail"
+        component={isGuest ? SignInRequiredScreen : ListingDetailScreen}
+        options={{ title: 'Listing' }}
       />
     </Stack.Navigator>
   );

@@ -45,6 +45,8 @@ import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/
 import TabSwipeHandler from '../components/TabSwipeHandler';
 import BrandHeader, { HeaderIconButton } from '../components/BrandHeader';
 import UsernameEditor from '../components/UsernameEditor';
+import { LISTING_CATEGORIES } from '../constants/listings';
+import { mainCategoryOf } from '../constants/categories';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import VendorVerificationModal from '../components/VendorVerificationModal';
 import VendorAdvertModal from '../components/VendorAdvertModal';
@@ -864,6 +866,16 @@ export default function VendorProfileScreen({ navigation }: any) {
 
                         {/* Action Bar */}
                         <View style={styles.actionBar}>
+                            {LISTING_CATEGORIES.includes(mainCategoryOf(category)) ? (
+                                <TouchableOpacity
+                                    style={styles.actionButtonOutline}
+                                    onPress={() => navigation.navigate('MyListings')}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="My property listings"
+                                >
+                                    <Ionicons name="home-outline" size={17} color={colors.textPrimary} />
+                                </TouchableOpacity>
+                            ) : null}
                             <TouchableOpacity
                                 style={styles.actionButtonOutline}
                                 onPress={() => shareVendorProfile({

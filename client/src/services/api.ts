@@ -308,6 +308,19 @@ export const communityAPI = {
     verify: (id: string, status: 'verified' | 'rejected', reason?: string) => api.put(`/communities/${encodeURIComponent(id)}/verify`, { status, reason }),
 };
 
+/** Property listings (rent, short-let, sale, lease, hire) */
+export const listingAPI = {
+    list: (params?: Record<string, any>) => api.get('/listings', { params }),
+    mine: () => api.get('/listings/mine'),
+    byAgent: (uid: string) => api.get(`/listings/agent/${encodeURIComponent(uid)}`),
+    get: (id: string) => api.get(`/listings/${encodeURIComponent(id)}`),
+    create: (data: any) => api.post('/listings', data),
+    update: (id: string, data: any) => api.put(`/listings/${encodeURIComponent(id)}`, data),
+    setStatus: (id: string, status: 'available' | 'taken' | 'paused') => api.post(`/listings/${encodeURIComponent(id)}/status`, { status }),
+    renew: (id: string) => api.post(`/listings/${encodeURIComponent(id)}/renew`),
+    remove: (id: string) => api.delete(`/listings/${encodeURIComponent(id)}`),
+};
+
 /** The signed-in user's Notifications page (server keeps them; see server notification.routes) */
 export const notificationAPI = {
     list: (before?: string) => api.get('/notifications', { params: before ? { before } : {} }),
@@ -345,7 +358,7 @@ export const callAPI = {
 
 export const moderationAPI = {
     reportContent: (data: {
-        targetType: 'post' | 'comment' | 'user' | 'vendor';
+        targetType: 'post' | 'comment' | 'user' | 'vendor' | 'listing';
         targetId: string;
         targetUserId?: string;
         targetTitle?: string;

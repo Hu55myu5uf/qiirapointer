@@ -16,6 +16,9 @@ import {
 // Cached, downscaled images (expo-image) with the same props as React Native Image
 import { Image } from '../components/CachedImage';
 import { vendorAPI, clientAPI, postAPI, moderationAPI } from '../services/api';
+import { listingAPI } from '../services/api';
+import { LISTING_CATEGORIES } from '../constants/listings';
+import { mainCategoryOf } from '../constants/categories';
 import { canDeleteComment, confirmDeleteComment } from '../utils/comments';
 import { useAuthStore } from '../store/authStore';
 import { SPACING, FONT_SIZES, BORDER_RADIUS, SHADOWS, CONTENT_MAX_WIDTH } from '../constants/theme';
@@ -54,6 +57,7 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
     const { startCall } = useCallStore();
     const [selectedPostToShare, setSelectedPostToShare] = useState<any>(null);
     const [vendor, setVendor] = useState<any>(null);
+    const [agentListingCount, setAgentListingCount] = useState(0);
     const [loading, setLoading] = useState(true);
     const [isFavorite, setIsFavorite] = useState(false);
     const [callModalVisible, setCallModalVisible] = useState(false);
@@ -234,6 +238,11 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
         try {
             const response = await vendorAPI.getById(vendorId);
             setVendor(response.data.vendor);
+            // Realtors / hosts: how many places they currently list
+            const v = response.data.vendor;
+            if (LISTING_CATEGORIES.includes(mainCategoryOf(v?.category))) {
+                listingAPI.byAgent(v.id || v.uid).then(r => setAgentListingCount((r.data?.listings || []).length)).catch(() => {});
+            }
         } catch (error) {
             console.error('Error fetching vendor details:', error);
             Alert.alert('Error', 'Failed to load vendor details');
@@ -457,6 +466,17 @@ export default function VendorDetailsScreen({ route, navigation }: any) {
                             />
                         </View>
                         <CategoryLabel category={vendor.category} />
+
+                        {agentListingCount > 0 ? (
+                            <TouchableOpacity
+                                onPress={() => navigation.navigate('Listings', { agentId: vendor.id || vendor.uid, agentName: vendor.businessName })}
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 8, paddingHorizontal: 12, minHeight: 36, borderRadius: 18, borderWidth: 1, borderColor: colors.primary }}
+                                accessibilityRole="button"
+                            >
+                                <Ionicons name="home-outline" size={15} color={colors.primary} />
+                                <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 13 }}>See their listings ({agentListingCount})</Text>
+                            </TouchableOpacity>
+                        ) : null}
 
                         {/* Stats Row */}
                         <View style={styles.statsRow}>

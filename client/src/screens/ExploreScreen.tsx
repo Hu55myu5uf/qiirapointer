@@ -942,6 +942,16 @@ export default function ExploreScreen({ navigation, route }: any) {
                             Showcase 🎬
                         </Text>
                     </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={styles.switcherTab}
+                        onPress={() => navigation.navigate('Listings')}
+                        accessibilityRole="button"
+                        accessibilityLabel="Homes and spaces for rent or sale"
+                    >
+                        <Ionicons name="home-outline" size={16} color={colors.textSecondary} />
+                        <Text style={styles.switcherTabText}>Homes</Text>
+                    </TouchableOpacity>
                 </View>
 
                 {/* Category Filter Chips */}
