@@ -35,6 +35,7 @@ import { sharePost, shareVendorProfile } from '../services/shareService';
 import VerificationBadge, { VerificationBadgeInline } from '../components/VerificationBadge';
 import CartButton from '../components/CartButton';
 import BrandHeader, { HeaderIconButton, useCollapsibleHeader } from '../components/BrandHeader';
+import { MentionText, MentionSuggestions } from '../components/Mentions';
 import SharePostModal from '../components/SharePostModal';
 import ReportModal from '../components/ReportModal';
 import TabSwipeHandler from '../components/TabSwipeHandler';
@@ -168,6 +169,16 @@ export default function ExploreScreen({ navigation, route }: any) {
             setActiveTab(route.params.initialSubTab);
         }
     }, [route?.params?.subTab, route?.params?.initialSubTab]);
+
+    // Opened from a notification ("X mentioned you"): show that post's comments
+    useEffect(() => {
+        const postId = route?.params?.openPostId;
+        if (!postId) return;
+        navigation.setParams({ openPostId: undefined });
+        postAPI.getPost(postId)
+            .then(res => { if (res.data?.post) handleOpenComments(res.data.post); })
+            .catch(() => Alert.alert('Post unavailable', 'This post may have been removed.'));
+    }, [route?.params?.openPostId]);
     const [selectedCategory, setSelectedCategory] = useState<string>('All');
     const [showCategoryModal, setShowCategoryModal] = useState<boolean>(false);
     const [searchQuery, setSearchQuery] = useState<string>('');
@@ -820,10 +831,13 @@ export default function ExploreScreen({ navigation, route }: any) {
 
                 {/* Caption & Tags */}
                 <View style={styles.captionContainer}>
-                    <Text style={styles.captionText}>
-                        <Text style={styles.captionVendorName}>{item.vendorName} </Text>
-                        {item.caption}
-                    </Text>
+                    <MentionText
+                        style={styles.captionText}
+                        text={item.caption || ''}
+                        mentions={item.mentions}
+                        navigation={navigation}
+                        prefix={<Text style={styles.captionVendorName}>{item.vendorName} </Text>}
+                    />
 
                     {item.tags && item.tags.length > 0 && (
                         <View style={styles.tagsContainer}>
@@ -1129,7 +1143,7 @@ export default function ExploreScreen({ navigation, route }: any) {
                                                     size={12}
                                                 />
                                             </View>
-                                            <Text style={styles.commentBody}>{item.text}</Text>
+                                            <MentionText style={styles.commentBody} text={item.text} mentions={item.mentions} navigation={navigation} />
                                         </View>
                                         {canDeleteComment(item, activePost, currentUserId, userRole === 'admin') ? (
                                             <TouchableOpacity
@@ -1150,7 +1164,10 @@ export default function ExploreScreen({ navigation, route }: any) {
                             />
                         )}
 
-                        {/* Comment Input */}
+                        {/* Comment Input (typing "@" suggests people to mention) */}
+                        <View style={{ paddingHorizontal: SPACING.md }}>
+                            <MentionSuggestions text={newCommentText} onChangeText={setNewCommentText} max={4} />
+                        </View>
                         <View style={styles.commentInputRow}>
                             <TextInput
                                 style={styles.commentTextInput}
@@ -1294,6 +1311,7 @@ export default function ExploreScreen({ navigation, route }: any) {
                                 numberOfLines={4}
                                 textAlignVertical="top"
                             />
+                            <MentionSuggestions text={clientPostText} onChangeText={setClientPostText} max={4} />
 
                             {/* Optional Tagged Vendor Input */}
                             <View style={styles.clientTagVendorContainer}>

@@ -4,6 +4,7 @@ import { db, FieldValue } from '../config/firebase';
 import { authenticateUser, optionalAuthenticateUser } from '../utils/authMiddleware';
 import { decodeUpload, saveUpload, storagePathOf, UploadError, createVideoUploadUrl, isUploadRef, claimUploadedVideo } from '../utils/fileStorage';
 import { getDisplayProfile, getDisplayProfiles, usableImage } from '../utils/profiles';
+import { resolveMentions, notifyMentions } from '../utils/mentions';
 import { writeLimiter, uploadLimiter } from '../utils/rateLimiter';
 import { storage } from '../config/firebase';
 
@@ -351,7 +352,12 @@ router.post('/', authenticateUser, writeLimiter, async (req: Request, res: Respo
             newPost.taggedVendorName = str(b.taggedVendorName, 100) || null;
         }
 
+        // @mentions in the caption: stored with the post, and the people are notified
+        const mentions = caption ? await resolveMentions(caption, creatorId) : [];
+        newPost.mentions = mentions;
+
         await db.collection('posts').doc(postId).set(newPost);
+        if (mentions.length) notifyMentions(mentions, author, { postId, text: caption }).catch(e => console.warn('Mention note:', e?.message));
         const people = new Map([[creatorId, author]]);
         res.status(201).json({ message: 'Post created successfully', post: presentPost(newPost, callerUid, people) });
     } catch (error: any) {
@@ -410,6 +416,7 @@ router.get('/:id/comments', optionalAuthenticateUser, async (req: Request, res: 
                 userName: p?.name || 'Pointer user',
                 userAvatar: p?.avatar || '',
                 text: c.text || '',
+                mentions: Array.isArray(c.mentions) ? c.mentions : [],
                 createdAt: c.createdAt,
                 isVerified: Boolean(p?.isVerified),
                 isAdmin: Boolean(p?.isAdmin),
@@ -446,12 +453,14 @@ router.post('/:id/comments', authenticateUser, writeLimiter, async (req: Request
 
         const me = await getDisplayProfile(uid);
         const commentId = `comment_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
-        const comment = { id: commentId, postId: post.id, userId: uid, text, createdAt: new Date().toISOString() };
+        const mentions = await resolveMentions(text, uid);
+        const comment = { id: commentId, postId: post.id, userId: uid, text, mentions, createdAt: new Date().toISOString() };
 
         const batch = db.batch();
         batch.set(db.collection('comments').doc(commentId), comment);
         batch.update(postRef, { commentsCount: FieldValue.increment(1) });
         await batch.commit();
+        if (mentions.length) notifyMentions(mentions, me, { postId: post.id, commentId, text }).catch(e => console.warn('Mention note:', e?.message));
 
         res.status(201).json({
             message: 'Comment added successfully',

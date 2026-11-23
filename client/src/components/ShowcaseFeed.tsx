@@ -1,4 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { useNavigation } from '@react-navigation/native';
+import { MentionText } from './Mentions';
 import {
     View,
     Text,
@@ -171,6 +173,7 @@ function ShowcaseItemCard({
     isInCart,
 }: ShowcaseItemProps) {
     const videoRef = useRef<any>(null);
+    const navigation: any = useNavigation();
     const [isPaused, setIsPaused] = useState(false);
     const [showPauseOverlay, setShowPauseOverlay] = useState(false);
     const [expandedCaption, setExpandedCaption] = useState(false);
@@ -390,12 +393,13 @@ function ShowcaseItemCard({
                     onPress={() => setExpandedCaption((prev) => !prev)}
                     activeOpacity={0.9}
                 >
-                    <Text
+                    <MentionText
                         style={styles.captionText}
                         numberOfLines={expandedCaption ? undefined : 2}
-                    >
-                        {item.caption || 'Authentic showcase on Pointer'}
-                    </Text>
+                        text={item.caption || 'Authentic showcase on Pointer'}
+                        mentions={item.mentions}
+                        navigation={navigation}
+                    />
                 </TouchableOpacity>
 
                 {/* Audio track tag */}

@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Cached, downscaled images (expo-image) with the same props as React Native Image
 import { Image } from '../components/CachedImage';
+import { MentionSuggestions } from '../components/Mentions';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -621,6 +622,8 @@ export default function CreatePostScreen({ navigation }: any) {
                         multiline
                         numberOfLines={4}
                     />
+                    {/* Typing "@" suggests people to mention; they get a notification */}
+                    <MentionSuggestions text={caption} onChangeText={setCaption} />
                 </View>
 
                 {/* Price Input & Realtime Formatting */}
