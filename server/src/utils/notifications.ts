@@ -15,6 +15,7 @@ export type NotificationType =
     | 'verification_rejected'
     | 'listing_rejected'
     | 'mention'
+    | 'community'
     | 'system';
 
 export interface NotificationInput {

@@ -8,6 +8,7 @@
  * Reports they FILED are kept for moderation but anonymised.
  */
 import { auth, db, FieldValue } from '../config/firebase';
+import { deleteCommunity } from '../routes/community.routes';
 import { deleteUserFiles } from './fileStorage';
 import { clearProfileCache } from './profiles';
 import { invalidateVendorList } from './vendors';
@@ -34,6 +35,26 @@ async function withSubcollection(parent: Ref, sub: string): Promise<Ref[]> {
 export async function deleteAccountData(uid: string): Promise<{ deletedDocuments: number }> {
     const toDelete: Ref[] = [];
     const userRef = db.collection('users').doc(uid);
+    // Communities: the ones they run are removed; they leave the others (member, follower,
+    // invitations, join requests) and the counts are corrected
+    for (const c of (await db.collection('communities').where('ownerId', '==', uid).get()).docs) {
+        await deleteCommunity(c.id);
+    }
+    const SUB: Record<string, string> = { member: 'members', follower: 'followers', invite: 'invites', request: 'requests' };
+    for (const l of (await userRef.collection('community_links').get()).docs) {
+        const { communityId, kind } = l.data() as any;
+        if (typeof communityId === 'string' && SUB[kind]) {
+            const cRef = db.collection('communities').doc(communityId);
+            const entry = await cRef.collection(SUB[kind]).doc(uid).get();
+            if (entry.exists) {
+                toDelete.push(entry.ref);
+                if (kind === 'member') await cRef.update({ memberCount: FieldValue.increment(-1) }).catch(() => {});
+                if (kind === 'follower') await cRef.update({ followerCount: FieldValue.increment(-1) }).catch(() => {});
+            }
+        }
+        toDelete.push(l.ref);
+    }
+
     // Free their @username
     const username = (await userRef.get()).data()?.username;
     if (typeof username === 'string' && username) {
