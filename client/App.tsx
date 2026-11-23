@@ -13,7 +13,7 @@ import { auth } from './src/config/firebase';
 import { useAuthStore } from './src/store/authStore';
 import { useChatStore } from './src/store/chatStore';
 import { authAPI } from './src/services/api';
-import { registerForPushNotifications, savePushToken, addNotificationListeners } from './src/services/notifications';
+import { registerForPushNotifications, savePushToken, addNotificationListeners, onNotificationReceived } from './src/services/notifications';
 import { getCachedProfile, fetchProfileWithRetry, clearCachedProfile } from './src/services/session';
 import { subscribeToIncomingCalls } from './src/services/realtime';
 import * as SplashScreen from 'expo-splash-screen';
@@ -42,6 +42,10 @@ import CreatePostScreen from './src/screens/CreatePostScreen';
 import CartScreen from './src/screens/CartScreen';
 import CallScreen from './src/screens/CallScreen';
 import SignInRequiredScreen from './src/screens/SignInRequiredScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
+import { useNotificationStore } from './src/store/notificationStore';
+import { useFonts } from 'expo-font';
+import { Montserrat_900Black } from '@expo-google-fonts/montserrat/900Black';
 import IncomingCallModal from './src/components/IncomingCallModal';
 import ThemedAlertModal from './src/components/ThemedAlertModal';
 import AdminPreviewBanner from './src/components/AdminPreviewBanner';
@@ -98,6 +102,11 @@ function HomeStack() {
         name="HomeMain"
         component={HomeScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Notifications"
+        component={isGuest ? SignInRequiredScreen : NotificationsScreen}
+        options={{ title: 'Notifications' }}
       />
       <Stack.Screen
         name="VendorDetails"
@@ -162,6 +171,11 @@ function ExploreStack() {
         options={{ headerShown: false }}
       />
       <Stack.Screen
+        name="Notifications"
+        component={isGuest ? SignInRequiredScreen : NotificationsScreen}
+        options={{ title: 'Notifications' }}
+      />
+      <Stack.Screen
         name="CreatePost"
         component={isGuest ? SignInRequiredScreen : CreatePostScreen}
         options={{ headerShown: false }}
@@ -222,6 +236,11 @@ function ClientProfileStack() {
         options={{ headerShown: false }}
       />
       <Stack.Screen
+        name="Notifications"
+        component={isGuest ? SignInRequiredScreen : NotificationsScreen}
+        options={{ title: 'Notifications' }}
+      />
+      <Stack.Screen
         name="GetVerified"
         component={VendorVerificationScreen}
         options={{ title: 'Get Verified' }}
@@ -235,6 +254,56 @@ function ClientProfileStack() {
         name="Call"
         component={isGuest ? SignInRequiredScreen : CallScreen}
         options={{ headerShown: false }}
+      />
+    </Stack.Navigator>
+  );
+}
+
+// Favorites tab (client)
+function FavoritesStack() {
+  const isGuest = useAuthStore(s => s.isGuest);
+  const { colors } = useTheme();
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: colors.primary },
+        headerTintColor: colors.textInverse,
+      }}
+    >
+      <Stack.Screen
+        name="FavoritesMain"
+        component={FavoritesScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Notifications"
+        component={isGuest ? SignInRequiredScreen : NotificationsScreen}
+        options={{ title: 'Notifications' }}
+      />
+    </Stack.Navigator>
+  );
+}
+
+// Reviews tab (vendor)
+function VendorReviewsStack() {
+  const isGuest = useAuthStore(s => s.isGuest);
+  const { colors } = useTheme();
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: colors.primary },
+        headerTintColor: colors.textInverse,
+      }}
+    >
+      <Stack.Screen
+        name="VendorReviewsMain"
+        component={VendorReviewsScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Notifications"
+        component={isGuest ? SignInRequiredScreen : NotificationsScreen}
+        options={{ title: 'Notifications' }}
       />
     </Stack.Navigator>
   );
@@ -333,7 +402,7 @@ function ClientTabs() {
       />
       <Tab.Screen
         name="Favorites"
-        component={isGuest ? SignInRequiredScreen : FavoritesScreen}
+        component={isGuest ? SignInRequiredScreen : FavoritesStack}
         options={{
           tabBarLabel: 'Favorites',
         }}
@@ -377,6 +446,11 @@ function ClientMessagesStack() {
         name="ConversationsList"
         component={ConversationsScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Notifications"
+        component={isGuest ? SignInRequiredScreen : NotificationsScreen}
+        options={{ title: 'Notifications' }}
       />
       <Stack.Screen
         name="Chat"
@@ -431,6 +505,11 @@ function VendorMessagesStack() {
         options={{ headerShown: false }}
       />
       <Stack.Screen
+        name="Notifications"
+        component={isGuest ? SignInRequiredScreen : NotificationsScreen}
+        options={{ title: 'Notifications' }}
+      />
+      <Stack.Screen
         name="Chat"
         component={isGuest ? SignInRequiredScreen : ChatScreen}
         options={{ title: 'Chat' }}
@@ -481,6 +560,11 @@ function VendorProfileStack() {
         name="VendorProfileMain"
         component={VendorProfileScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Notifications"
+        component={isGuest ? SignInRequiredScreen : NotificationsScreen}
+        options={{ title: 'Notifications' }}
       />
       <Stack.Screen
         name="CreatePost"
@@ -611,9 +695,9 @@ function VendorTabs() {
       />
       <Tab.Screen
         name="Reviews"
-        component={VendorReviewsScreen}
+        component={VendorReviewsStack}
         options={{
-          title: 'My Reviews',
+          headerShown: false,
           tabBarLabel: 'Reviews',
         }}
       />
@@ -830,6 +914,16 @@ function MainApp() {
     if (user?.uid) startChats(user.uid);
     else stopChats();
   }, [user?.uid]);
+
+  // Notifications bell: unread count for the signed-in user
+  const startNotifications = useNotificationStore(s => s.start);
+  const stopNotifications = useNotificationStore(s => s.stop);
+  useEffect(() => {
+    if (user?.uid && !isGuest) startNotifications();
+    else stopNotifications();
+    return () => stopNotifications();
+  }, [user?.uid, isGuest]);
+  useEffect(() => onNotificationReceived(() => useNotificationStore.getState().refresh()), []);
 
   // Initialize themed alert patch safely inside component lifecycle
   useEffect(() => {
@@ -1088,6 +1182,7 @@ class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, E
 }
 
 export default function App() {
+  useFonts({ Montserrat_900Black });
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>

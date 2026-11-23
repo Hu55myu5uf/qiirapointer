@@ -30,6 +30,7 @@ import { PLACEHOLDER_AVATARS } from '../assets';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 import CartButton from '../components/CartButton';
+import BrandHeader, { HeaderIconButton, useCollapsibleHeader } from '../components/BrandHeader';
 import { useAuthStore } from '../store/authStore';
 import { confirmAction } from '../utils/alert';
 import CallOptionModal from '../components/CallOptionModal';
@@ -308,6 +309,7 @@ export default function HomeScreen({ navigation }: any) {
     const { colors } = useTheme();
     const insets = useSafeAreaInsets();
     const styles = useMemo(() => getStyles(colors, insets.top), [colors, insets.top]);
+    // The map view keeps a fixed top bar; the list lets it slide away while scrolling
     const { userRole } = useAuthStore();
 
     const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -315,6 +317,7 @@ export default function HomeScreen({ navigation }: any) {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('');
     const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+    const collapsible = useCollapsibleHeader(viewMode === 'list');
     const [userLocation, setUserLocation] = useState<any>(null);
 
     // Filter states
@@ -488,37 +491,29 @@ export default function HomeScreen({ navigation }: any) {
     return (
         <TabSwipeHandler currentTab="Home" navigation={navigation}>
             <View style={styles.container}>
-                {/* Header */}
-            <View style={styles.header}>
-                <View style={styles.headerContent}>
-                    <View style={{ flex: 1, marginRight: 8 }}>
-                        <Text style={styles.headerTitle} numberOfLines={1}>Discover</Text>
-                        <Text style={styles.headerSubtitle} numberOfLines={1}>Find the best services near you</Text>
-                    </View>
-                    <View style={styles.headerActions}>
-                        {userRole === 'admin' && (
-                            <TouchableOpacity
-                                style={styles.viewToggle}
-                                onPress={() => confirmAction('Logout', 'Are you sure you want to logout?', () => auth.signOut(), 'Logout')}
-                            >
-                                <Ionicons name="log-out-outline" size={18} color={colors.textInverse} />
-                            </TouchableOpacity>
-                        )}
-                        {userRole !== 'admin' && <CartButton onPress={() => navigation.navigate('Cart')} />}
-                        <TouchableOpacity
-                            style={styles.viewToggle}
-                            onPress={() => setViewMode(viewMode === 'list' ? 'map' : 'list')}
-                        >
-                            <Ionicons
-                                name={viewMode === 'list' ? 'map-outline' : 'list-outline'}
-                                size={18}
-                                color={colors.textInverse}
+                {/* Top area: Pointer bar + search + categories; slides away while scrolling the list */}
+            <Animated.View style={collapsible.style} onLayout={collapsible.onLayout}>
+            <BrandHeader
+                navigation={navigation}
+                actions={
+                    <>
+                        {userRole === 'admin' ? (
+                            <HeaderIconButton
+                                icon="log-out-outline"
+                                label="Log out"
+                                onPress={() => confirmAction('Log Out', 'Are you sure you want to log out?', () => auth.signOut(), 'Log Out')}
                             />
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </View>
-
+                        ) : (
+                            <View style={styles.headerCart}><CartButton size={22} onPress={() => navigation.navigate('Cart')} /></View>
+                        )}
+                        <HeaderIconButton
+                            icon={viewMode === 'list' ? 'map-outline' : 'list-outline'}
+                            label={viewMode === 'list' ? 'Show map' : 'Show list'}
+                            onPress={() => setViewMode(viewMode === 'list' ? 'map' : 'list')}
+                        />
+                    </>
+                }
+            >
             {/* Search Bar with Filter */}
             <View style={styles.searchContainer}>
                 <TextInput
@@ -568,6 +563,9 @@ export default function HomeScreen({ navigation }: any) {
                     );
                 })}
             </ScrollView>
+            </BrandHeader>
+            </Animated.View>
+            {collapsible.statusBarCover}
 
             {/* Content */}
             {loading ? (
@@ -630,7 +628,9 @@ export default function HomeScreen({ navigation }: any) {
                         data={vendors}
                         keyExtractor={(item) => item.id}
                         renderItem={renderVendorCard}
-                        contentContainerStyle={styles.listContent}
+                        contentContainerStyle={{ ...styles.listContent, paddingTop: collapsible.height + SPACING.sm }}
+                        onScroll={collapsible.onScroll}
+                        scrollEventThrottle={16}
                     />
                 </View>
             )}
@@ -798,28 +798,41 @@ const getStyles = (colors: any, topInset: number = 0) => {
             fontWeight: 'bold',
             fontSize: FONT_SIZES.sm,
         },
+        headerCart: {
+            width: 44,
+            height: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
         searchContainer: {
             paddingHorizontal: SPACING.md,
-            paddingVertical: SPACING.sm,
+            paddingTop: SPACING.xs,
+            paddingBottom: SPACING.sm,
             flexDirection: 'row',
             alignItems: 'center',
             gap: SPACING.sm,
         },
         searchInput: {
             flex: 1,
-            backgroundColor: colors.surface,
+            backgroundColor: colors.surfaceLight,
             borderRadius: BORDER_RADIUS.md,
+            borderWidth: 1,
+            borderColor: colors.border,
             paddingHorizontal: SPACING.md,
-            paddingVertical: Platform.OS === 'ios' ? SPACING.md : SPACING.sm,
+            paddingVertical: Platform.OS === 'ios' ? 10 : 6,
+            minHeight: 40,
             fontSize: FONT_SIZES.sm,
             color: colors.textPrimary,
-            ...SHADOWS.small,
         },
         filterButton: {
-            backgroundColor: colors.surface,
-            padding: SPACING.sm + 2,
+            backgroundColor: colors.surfaceLight,
+            borderWidth: 1,
+            borderColor: colors.border,
+            width: 40,
+            height: 40,
+            alignItems: 'center',
+            justifyContent: 'center',
             borderRadius: BORDER_RADIUS.md,
-            ...SHADOWS.small,
         },
         filterButtonText: {
             fontSize: FONT_SIZES.lg,
@@ -834,10 +847,10 @@ const getStyles = (colors: any, topInset: number = 0) => {
             paddingRight: SPACING.md,
         },
         categoryChip: {
-            paddingHorizontal: SPACING.md,
-            paddingVertical: 6,
+            paddingHorizontal: SPACING.sm + 4,
+            paddingVertical: 5,
             borderRadius: BORDER_RADIUS.round,
-            backgroundColor: colors.surface,
+            backgroundColor: colors.surfaceLight,
             marginRight: SPACING.xs + 2,
             borderWidth: 1,
             borderColor: colors.border,

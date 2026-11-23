@@ -31,6 +31,7 @@ import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as FileSystem from 'expo-file-system/legacy';
 import TabSwipeHandler from '../components/TabSwipeHandler';
+import BrandHeader from '../components/BrandHeader';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UpgradeToVendorModal from '../components/UpgradeToVendorModal';
 import { openChat } from '../navigation/openChat';
@@ -237,34 +238,27 @@ export default function ClientProfileScreen() {
     return (
         <TabSwipeHandler currentTab="Profile" navigation={navigation}>
             <View style={styles.container}>
-                {/* Header */}
-            <View style={styles.header}>
-                <View style={styles.headerProfile}>
-                    <Image
-                        source={profileImage ? { uri: profileImage } : PLACEHOLDER_AVATARS.client}
-                        style={styles.headerAvatar}
-                    />
-                    <View style={styles.headerTextContainer}>
+            {/* Pointer bar; your name and the Edit button underneath */}
+            <BrandHeader navigation={navigation}>
+                <View style={styles.profileBar}>
+                    <View style={{ flex: 1, minWidth: 0 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Text style={styles.headerTitle} numberOfLines={1}>
+                            <Text style={styles.profileBarName} numberOfLines={1} accessibilityRole="header">
                                 {fullName || 'My Profile'}
                             </Text>
                             <VerificationBadgeInline isVerified={Boolean(isVerified || isAdmin)} isAdmin={isAdmin} size={18} />
                         </View>
-                        <Text style={styles.headerSubtitle}>{isAdmin ? 'System Administrator' : 'Client Profile'}</Text>
+                        <Text style={styles.profileBarSub}>{isAdmin ? 'System Administrator' : 'Client Profile'}</Text>
                     </View>
+                    <TouchableOpacity
+                        onPress={() => setIsEditing(!isEditing)}
+                        style={styles.profileBarButton}
+                        accessibilityRole="button"
+                    >
+                        <Text style={styles.profileBarButtonText}>{isEditing ? 'Cancel' : 'Edit profile'}</Text>
+                    </TouchableOpacity>
                 </View>
-
-                {!isEditing ? (
-                    <TouchableOpacity onPress={() => setIsEditing(true)}>
-                        <Text style={styles.headerAction}>Edit</Text>
-                    </TouchableOpacity>
-                ) : (
-                    <TouchableOpacity onPress={() => setIsEditing(false)}>
-                        <Text style={styles.headerAction}>Cancel</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
+            </BrandHeader>
 
             <ScrollView contentContainerStyle={styles.content}>
                 {/* Profile Image with Avatar Verification Badge */}
@@ -539,6 +533,38 @@ const getStyles = (colors: any, topInset: number = 0) => {
     // Real safe-area inset (notch, punch-hole camera, landscape); fall back to the status bar height
     const statusBarHeight = topInset || (Platform.OS === 'android' ? (StatusBar.currentHeight || 24) : 0);
     return StyleSheet.create({
+        profileBar: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+            paddingHorizontal: 16,
+            paddingBottom: 10,
+        },
+        profileBarName: {
+            fontSize: 18,
+            fontWeight: '800',
+            color: colors.textPrimary,
+            flexShrink: 1,
+        },
+        profileBarSub: {
+            fontSize: 12,
+            color: colors.textSecondary,
+            marginTop: 1,
+        },
+        profileBarButton: {
+            paddingHorizontal: 14,
+            minHeight: 36,
+            justifyContent: 'center',
+            borderRadius: 18,
+            borderWidth: 1,
+            borderColor: colors.border,
+            backgroundColor: colors.surfaceLight,
+        },
+        profileBarButtonText: {
+            fontSize: 13,
+            fontWeight: '700',
+            color: colors.textPrimary,
+        },
         container: {
             flex: 1,
             backgroundColor: colors.background,

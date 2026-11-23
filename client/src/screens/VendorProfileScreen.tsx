@@ -43,6 +43,7 @@ import { confirmAction } from '../utils/alert';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 import TabSwipeHandler from '../components/TabSwipeHandler';
+import BrandHeader, { HeaderIconButton } from '../components/BrandHeader';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import VendorVerificationModal from '../components/VendorVerificationModal';
 import VendorAdvertModal from '../components/VendorAdvertModal';
@@ -817,13 +818,13 @@ export default function VendorProfileScreen({ navigation }: any) {
         return (
             <TabSwipeHandler currentTab="Profile" navigation={navigation}>
                 <View style={styles.container}>
-                {/* Custom Header */}
-                <View style={styles.customHeader}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Text style={styles.customHeaderTitle}>{businessName || 'My Business'}</Text>
-                        <VerificationBadgeInline isVerified={isVerified} isAdmin={userRole === 'admin'} size={18} />
-                    </View>
-                </View>
+                {/* Pointer bar: new post (the one ➕) and notifications */}
+                <BrandHeader
+                    navigation={navigation}
+                    actions={
+                        <HeaderIconButton icon="add" filled label="New post" onPress={() => navigation.navigate('CreatePost')} />
+                    }
+                />
                 <ScrollView contentContainerStyle={styles.viewContent} showsVerticalScrollIndicator={false}>
                     {/* Banner */}
                     <View style={styles.bannerContainer}>

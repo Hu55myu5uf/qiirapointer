@@ -16,6 +16,7 @@ import {
     useWindowDimensions,
     StatusBar,
     KeyboardAvoidingView,
+    Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Cached, downscaled images (expo-image) with the same props as React Native Image
@@ -33,6 +34,7 @@ import { canDeleteComment, confirmDeleteComment } from '../utils/comments';
 import { sharePost, shareVendorProfile } from '../services/shareService';
 import VerificationBadge, { VerificationBadgeInline } from '../components/VerificationBadge';
 import CartButton from '../components/CartButton';
+import BrandHeader, { HeaderIconButton, useCollapsibleHeader } from '../components/BrandHeader';
 import SharePostModal from '../components/SharePostModal';
 import ReportModal from '../components/ReportModal';
 import TabSwipeHandler from '../components/TabSwipeHandler';
@@ -155,6 +157,9 @@ export default function ExploreScreen({ navigation, route }: any) {
     const isScreenFocused = useIsFocused();
 
     const [activeTab, setActiveTab] = useState<'feed' | 'reels'>('feed');
+    // Collapsing top area on the feed (the Showcase player keeps a fixed bar)
+    const collapsible = useCollapsibleHeader(activeTab === 'feed');
+    useEffect(() => { collapsible.reset(); }, [activeTab]);
 
     useEffect(() => {
         if (route?.params?.subTab) {
@@ -849,32 +854,23 @@ export default function ExploreScreen({ navigation, route }: any) {
             onSubTabChange={(sub) => setActiveTab(sub)}
         >
             <View style={styles.container}>
-                {/* Header */}
-            <View style={styles.header}>
-                <View style={styles.headerTitleRow}>
-                    <Text style={styles.headerTitle}>Explore</Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACING.sm }}>
-                        <CartButton />
-                        {userRole === 'vendor' ? (
-                            <TouchableOpacity
-                                style={styles.createPostHeaderButton}
-                                onPress={() => navigation.navigate('CreatePost')}
-                            >
-                                <Ionicons name="add" size={20} color={colors.textInverse} />
-                                <Text style={styles.createPostHeaderText}>New Post</Text>
-                            </TouchableOpacity>
-                        ) : (
-                            <TouchableOpacity
-                                style={styles.createPostHeaderButton}
-                                onPress={() => setClientPostModalVisible(true)}
-                            >
-                                <Ionicons name="create-outline" size={18} color={colors.textInverse} />
-                                <Text style={styles.createPostHeaderText}>Share / Ask</Text>
-                            </TouchableOpacity>
-                        )}
-                    </View>
-                </View>
-
+                {/* Top area: Pointer bar + search + feed switch + categories. On the feed it slides away
+                    while scrolling down and comes back on scrolling up. */}
+            <Animated.View style={collapsible.style} onLayout={collapsible.onLayout}>
+            <BrandHeader
+                navigation={navigation}
+                actions={
+                    <>
+                        <View style={styles.headerCart}><CartButton size={22} /></View>
+                        <HeaderIconButton
+                            icon="add"
+                            filled
+                            label={userRole === 'vendor' ? 'New post' : 'Share or ask the community'}
+                            onPress={() => (userRole === 'vendor' ? navigation.navigate('CreatePost') : setClientPostModalVisible(true))}
+                        />
+                    </>
+                }
+            >
                 {/* Search Bar */}
                 <View style={styles.searchContainer}>
                     <Ionicons name="search-outline" size={18} color={colors.textTertiary} />
@@ -970,7 +966,9 @@ export default function ExploreScreen({ navigation, route }: any) {
                         </Text>
                     </TouchableOpacity>
                 </ScrollView>
-            </View>
+            </BrandHeader>
+            </Animated.View>
+            {collapsible.statusBarCover}
 
             <CategoryPickerModal
                 visible={showCategoryModal}
@@ -1055,9 +1053,17 @@ export default function ExploreScreen({ navigation, route }: any) {
                             )}
                         </View>
                     }
-                    contentContainerStyle={styles.listContent}
+                    contentContainerStyle={{ ...styles.listContent, paddingTop: collapsible.height + SPACING.sm }}
+                    onScroll={collapsible.onScroll}
+                    scrollEventThrottle={16}
                     refreshControl={
-                        <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={handleRefresh}
+                            progressViewOffset={collapsible.height}
+                            colors={[colors.primary]}
+                            tintColor={colors.primary}
+                        />
                     }
                     // Infinite scroll: fetch the next page when ~2 screens from the end
                     onEndReached={loadMorePosts}
@@ -1411,13 +1417,20 @@ const getStyles = (colors: any, topInset: number = 0) => {
             fontWeight: '700',
             fontSize: FONT_SIZES.xs,
         },
+        headerCart: {
+            width: 44,
+            height: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
         searchContainer: {
             flexDirection: 'row',
             alignItems: 'center',
             backgroundColor: colors.surfaceLight,
-            marginHorizontal: SPACING.lg,
+            marginHorizontal: SPACING.md,
             paddingHorizontal: SPACING.md,
-            paddingVertical: SPACING.sm,
+            paddingVertical: Platform.OS === 'ios' ? 8 : 2,
+            minHeight: 40,
             borderRadius: BORDER_RADIUS.md,
             marginBottom: SPACING.sm,
             borderWidth: 1,
@@ -1431,7 +1444,7 @@ const getStyles = (colors: any, topInset: number = 0) => {
         },
         feedTypeSwitcher: {
             flexDirection: 'row',
-            marginHorizontal: SPACING.lg,
+            marginHorizontal: SPACING.md,
             backgroundColor: colors.surfaceLight,
             borderRadius: BORDER_RADIUS.md,
             padding: 4,
@@ -1442,7 +1455,8 @@ const getStyles = (colors: any, topInset: number = 0) => {
             flexDirection: 'row',
             alignItems: 'center',
             justifyContent: 'center',
-            paddingVertical: 8,
+            paddingVertical: 6,
+            minHeight: 34,
             borderRadius: BORDER_RADIUS.sm,
             gap: 6,
         },
@@ -1458,13 +1472,13 @@ const getStyles = (colors: any, topInset: number = 0) => {
             color: colors.textInverse,
         },
         categoriesContainer: {
-            paddingHorizontal: SPACING.lg,
+            paddingHorizontal: SPACING.md,
             paddingBottom: SPACING.sm,
             gap: SPACING.xs,
         },
         categoryChip: {
-            paddingHorizontal: SPACING.md,
-            paddingVertical: 6,
+            paddingHorizontal: SPACING.sm + 4,
+            paddingVertical: 5,
             borderRadius: BORDER_RADIUS.round,
             backgroundColor: colors.surfaceLight,
             borderWidth: 1,

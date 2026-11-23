@@ -279,6 +279,14 @@ export const cartAPI = {
         api.delete(`/cart/${userId}/clear`),
 };
 
+/** The signed-in user's Notifications page (server keeps them; see server notification.routes) */
+export const notificationAPI = {
+    list: (before?: string) => api.get('/notifications', { params: before ? { before } : {} }),
+    unreadCount: () => api.get('/notifications/unread-count'),
+    markRead: (ids?: string[]) => api.post('/notifications/read', ids ? { ids } : {}),
+    remove: (id: string) => api.delete(`/notifications/${encodeURIComponent(id)}`),
+};
+
 export const callAPI = {
     initiateCall: (data: {
         callerId: string;

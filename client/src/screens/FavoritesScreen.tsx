@@ -21,6 +21,7 @@ import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 import TabSwipeHandler from '../components/TabSwipeHandler';
+import BrandHeader from '../components/BrandHeader';
 
 export default function FavoritesScreen({ navigation }: any) {
     const { colors } = useTheme();
@@ -137,9 +138,9 @@ export default function FavoritesScreen({ navigation }: any) {
     return (
         <TabSwipeHandler currentTab="Favorites" navigation={navigation}>
             <View style={styles.container}>
-                <View style={styles.header}>
-                <Text style={styles.headerTitle}>My Favorites</Text>
-            </View>
+            <BrandHeader navigation={navigation}>
+                <Text style={{ fontSize: 20, fontWeight: '800', color: colors.textPrimary, paddingHorizontal: 16, paddingBottom: 10 }} accessibilityRole="header">My Favorites</Text>
+            </BrandHeader>
 
             {favorites.length === 0 ? (
                 <View style={styles.center}>

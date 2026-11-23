@@ -28,6 +28,7 @@ import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
 import TabSwipeHandler from '../components/TabSwipeHandler';
+import BrandHeader from '../components/BrandHeader';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { openChat } from '../navigation/openChat';
 
@@ -350,11 +351,8 @@ export default function ConversationsScreen({ navigation }: any) {
     return (
         <TabSwipeHandler currentTab="Messages" navigation={navigation}>
             <View style={styles.container}>
-                <View style={styles.header}>
-                <Text style={styles.headerTitle}>Messages</Text>
-            </View>
-
-            {/* Top Category Tabs: All chats, Unread, Read, Archived */}
+            {/* Pointer bar with the chat filters underneath */}
+            <BrandHeader navigation={navigation}>
             <View style={styles.categoryBar}>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryContent}>
                     {[
@@ -387,6 +385,7 @@ export default function ConversationsScreen({ navigation }: any) {
                     })}
                 </ScrollView>
             </View>
+            </BrandHeader>
 
             {/* Pinned Official Support Tile */}
             {activeCategory === 'all' && (
@@ -512,9 +511,7 @@ const getStyles = (colors: any, topInset: number = 0) => {
         },
         categoryBar: {
             backgroundColor: colors.surface,
-            borderBottomWidth: 1,
-            borderBottomColor: colors.border,
-            paddingVertical: SPACING.sm,
+            paddingBottom: SPACING.sm,
         },
         categoryContent: {
             paddingHorizontal: SPACING.md,

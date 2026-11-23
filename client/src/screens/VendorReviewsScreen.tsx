@@ -18,6 +18,7 @@ import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { AvatarVerificationBadge, VerificationBadgeInline } from '../components/VerificationBadge';
 import TabSwipeHandler from '../components/TabSwipeHandler';
+import BrandHeader from '../components/BrandHeader';
 import { openChat } from '../navigation/openChat';
 
 interface Review {
@@ -210,6 +211,9 @@ export default function VendorReviewsScreen({ navigation }: any) {
     return (
         <TabSwipeHandler currentTab="Reviews" navigation={navigation}>
             <View style={styles.container}>
+            <BrandHeader navigation={navigation}>
+                <Text style={{ fontSize: 20, fontWeight: '800', color: colors.textPrimary, paddingHorizontal: 16, paddingBottom: 10 }} accessibilityRole="header">My Reviews</Text>
+            </BrandHeader>
             {/* Stats Header */}
             <View style={styles.statsContainer}>
                 <View style={styles.statItem}>

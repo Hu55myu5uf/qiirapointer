@@ -124,3 +124,14 @@ export function addNotificationListeners(onOpen: (target: NotificationTarget) =>
     const sub = Notifications.addNotificationResponseReceivedListener(handle);
     return () => sub.remove();
 }
+
+/** Called whenever a push notification arrives while the app is running. Returns an unsubscribe. */
+export function onNotificationReceived(cb: () => void): () => void {
+    if (Platform.OS === 'web') return () => {};
+    try {
+        const sub = Notifications.addNotificationReceivedListener(() => cb());
+        return () => sub.remove();
+    } catch {
+        return () => {};
+    }
+}
