@@ -307,7 +307,11 @@ export default function CallScreen({ route, navigation }: any) {
                 <WebView
                     ref={webViewRef}
                     source={{ uri: roomUrl }}
+                    // The WebView sits inside its own wrapper view, which otherwise takes up layout space
+                    // and pushes the call UI down; both must be taken out of the layout.
+                    containerStyle={callType === 'video' && isVideoEnabled ? styles.videoWebView : styles.hiddenWebView}
                     style={callType === 'video' && isVideoEnabled ? styles.videoWebView : styles.hiddenWebView}
+                    pointerEvents={callType === 'video' && isVideoEnabled ? 'auto' : 'none'}
                     allowsInlineMediaPlayback={true}
                     mediaPlaybackRequiresUserAction={false}
                     mediaCapturePermissionGrantType="grant"
