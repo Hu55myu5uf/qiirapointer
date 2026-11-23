@@ -90,11 +90,14 @@ export function notifyNewMessage(receiverId: string, senderName: string, preview
     }, { channelId: 'messages' });
 }
 
-/** Incoming in-app call: high priority, expires with the ring timeout */
+/**
+ * Incoming in-app call: high priority, expires with the ring timeout. "incoming_calls" is the
+ * app's ringtone channel; app builds without it show the call on their default channel.
+ */
 export function notifyIncomingCall(receiverId: string, callerName: string, callType: 'voice' | 'video', callId: string) {
     return notifyUser(receiverId, `Incoming ${callType} call`, `${callerName} is calling you on Pointer`, {
         type: 'call', callId, callType,
-    }, { priority: 'high', channelId: 'calls', ttl: 45 });
+    }, { priority: 'high', channelId: 'incoming_calls', ttl: 45 });
 }
 
 /** Verification approved / rejected */

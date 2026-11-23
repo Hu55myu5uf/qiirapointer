@@ -13,15 +13,19 @@ import { authAPI } from './api';
  */
 const PUSH_ENABLED = process.env.EXPO_PUBLIC_PUSH_ENABLED === 'true';
 
-// Show notifications while the app is open too (as a banner, without interrupting)
+// Show notifications while the app is open too (as a banner, without interrupting). An incoming
+// call is the exception: inside the app the full-screen incoming-call popup rings instead.
 try {
     Notifications.setNotificationHandler({
-        handleNotification: async () => ({
-            shouldShowBanner: true,
-            shouldShowList: true,
-            shouldPlaySound: true,
-            shouldSetBadge: false,
-        }),
+        handleNotification: async (notification) => {
+            const isCall = (notification?.request?.content?.data as any)?.type === 'call';
+            return {
+                shouldShowBanner: !isCall,
+                shouldShowList: !isCall,
+                shouldPlaySound: !isCall,
+                shouldSetBadge: false,
+            };
+        },
     });
 } catch {
     // not available on this platform (e.g. web)
@@ -37,12 +41,34 @@ async function ensureAndroidChannels() {
         name: 'Messages',
         importance: Notifications.AndroidImportance.HIGH,
     });
-    await Notifications.setNotificationChannelAsync('calls', {
+    // Rings with Pointer's ringtone (bundled into the app) and shows on the lock screen. Android
+    // never changes a channel's sound after it is created, hence a new channel id.
+    await Notifications.setNotificationChannelAsync('incoming_calls', {
         name: 'Incoming calls',
+        description: 'Rings when someone calls you on Pointer',
         importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 400, 300, 400],
+        sound: 'pointer_ring.wav',
+        audioAttributes: {
+            usage: Notifications.AndroidAudioUsage.NOTIFICATION_RINGTONE,
+            contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+        },
+        vibrationPattern: [0, 700, 900, 700, 900, 700],
+        enableVibrate: true,
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
+    // The old silent call channel is no longer used
+    await Notifications.deleteNotificationChannelAsync('calls').catch(() => {});
+}
+
+/** Remove call notifications from the tray (the call was answered, declined or ended). */
+export async function dismissCallNotifications(): Promise<void> {
+    if (Platform.OS === 'web') return;
+    try {
+        const shown = await Notifications.getPresentedNotificationsAsync();
+        await Promise.all(shown
+            .filter(n => (n.request.content.data as any)?.type === 'call')
+            .map(n => Notifications.dismissNotificationAsync(n.request.identifier)));
+    } catch {}
 }
 
 /** Ask permission and return this device's Expo push token (null if unavailable or declined). */

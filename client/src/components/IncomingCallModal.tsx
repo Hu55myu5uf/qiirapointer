@@ -15,6 +15,8 @@ import { useTheme } from '../context/ThemeContext';
 import { PLACEHOLDER_AVATARS } from '../assets';
 import { SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
 import { VerificationBadgeInline, AvatarVerificationBadge } from '../components/VerificationBadge';
+import { startRinging, stopRinging } from '../utils/ringtone';
+import { dismissCallNotifications } from '../services/notifications';
 
 
 interface IncomingCallModalProps {
@@ -28,6 +30,18 @@ export default function IncomingCallModal({ navigation, onAcceptCall }: Incoming
 
     // Pulse animation for avatar ring
     const pulseAnim = useRef(new Animated.Value(1)).current;
+
+    // Ring while the call is shown; stop (and clear the call notification) once it's answered,
+    // declined, or the caller hangs up
+    const ringingCallId = incomingCall?.id;
+    useEffect(() => {
+        if (!ringingCallId) return;
+        startRinging();
+        return () => {
+            stopRinging();
+            dismissCallNotifications();
+        };
+    }, [ringingCallId]);
 
     useEffect(() => {
         if (incomingCall) {
@@ -56,6 +70,7 @@ export default function IncomingCallModal({ navigation, onAcceptCall }: Incoming
     const isAdmin = (incomingCall as any).isAdmin || (incomingCall as any).role === 'admin';
 
     const handleAccept = async () => {
+        stopRinging();
         await answerIncomingCall();
         if (onAcceptCall) {
             onAcceptCall();
@@ -74,6 +89,7 @@ export default function IncomingCallModal({ navigation, onAcceptCall }: Incoming
     };
 
     const handleReject = async () => {
+        stopRinging();
         await rejectIncomingCall();
     };
 

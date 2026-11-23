@@ -45,6 +45,7 @@ const sessionCache = new Map<string, { at: number; value: CallSession | null }>(
 export function __resetCallState() {
     callSignals.clear();
     sessionCache.clear();
+    turnCache = null;
 }
 
 async function getCall(callId: string, fresh = false): Promise<CallSession | null> {
@@ -193,20 +194,81 @@ export function verifyRoomToken(token: unknown): { callId: string; uid: string }
 }
 
 // ─── ICE (STUN/TURN) servers ────────────────────────────────────────────────
-// ICE_SERVERS_JSON example: [{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]
-function getIceServers() {
-    const fallback = [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-    ];
-    if (!process.env.ICE_SERVERS_JSON) return fallback;
+// Two phones on different networks (Wi-Fi ↔ mobile data) usually can't reach each other
+// directly; a TURN relay carries the call between them. Sources, in order:
+//   1. Cloudflare TURN (CLOUDFLARE_TURN_KEY_ID + CLOUDFLARE_TURN_API_TOKEN): short-lived
+//      credentials generated per call, so no permanent password reaches the phone.
+//   2. ICE_SERVERS_JSON: a fixed list, e.g. [{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]
+//   3. Public STUN only (calls on the same kind of network).
+type IceServer = { urls: string | string[]; username?: string; credential?: string };
+
+const STUN_ONLY: IceServer[] = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+];
+const TURN_TTL_SECONDS = 4 * 60 * 60;
+let turnCache: { servers: IceServer[]; until: number } | null = null;
+
+function staticIceServers(): IceServer[] | null {
+    if (!process.env.ICE_SERVERS_JSON) return null;
     try {
         const parsed = JSON.parse(process.env.ICE_SERVERS_JSON);
-        return Array.isArray(parsed) && parsed.length ? parsed : fallback;
+        return Array.isArray(parsed) && parsed.length ? parsed : null;
     } catch {
-        console.warn('ICE_SERVERS_JSON is not valid JSON; using STUN only');
-        return fallback;
+        console.warn('ICE_SERVERS_JSON is not valid JSON; ignoring it');
+        return null;
     }
+}
+
+async function cloudflareIceServers(): Promise<IceServer[] | null> {
+    const keyId = process.env.CLOUDFLARE_TURN_KEY_ID;
+    const apiToken = process.env.CLOUDFLARE_TURN_API_TOKEN;
+    if (!keyId || !apiToken) return null;
+    if (turnCache && turnCache.until > Date.now()) return turnCache.servers;
+    try {
+        const res = await fetch(
+            `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials/generate-ice-servers`,
+            {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ttl: TURN_TTL_SECONDS }),
+                signal: AbortSignal.timeout(5000),
+            },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body: any = await res.json();
+        const raw: any[] = Array.isArray(body?.iceServers) ? body.iceServers : body?.iceServers ? [body.iceServers] : [];
+        // Port 53 addresses are slow or blocked in browsers/WebViews (Cloudflare's own advice)
+        const servers: { urls: string[]; username?: string; credential?: string }[] = raw
+            .map(s => ({
+                ...s,
+                urls: (Array.isArray(s.urls) ? s.urls : [s.urls]).filter((u: string) => typeof u === 'string' && !/:53(\?|$)/.test(u)),
+            }))
+            .filter(s => s.urls.length > 0);
+        if (!servers.some(s => s.urls.some((u: string) => u.startsWith('turn')))) throw new Error('no TURN servers returned');
+        // Reuse for half the credential lifetime, so a call never starts with nearly-expired ones
+        turnCache = { servers, until: Date.now() + (TURN_TTL_SECONDS * 1000) / 2 };
+        return servers;
+    } catch (e: any) {
+        console.warn('Cloudflare TURN credentials unavailable:', e?.message);
+        return null;
+    }
+}
+
+export async function getIceServers(): Promise<IceServer[]> {
+    const relay = (await cloudflareIceServers()) || staticIceServers();
+    // Keep public STUN alongside the relay: a direct path is used when one exists
+    return relay ? [...STUN_ONLY, ...relay] : STUN_ONLY;
+}
+
+export function relayConfigured(): boolean {
+    return Boolean((process.env.CLOUDFLARE_TURN_KEY_ID && process.env.CLOUDFLARE_TURN_API_TOKEN) || staticIceServers());
+}
+
+if (process.env.NODE_ENV !== 'test') {
+    console.log(relayConfigured()
+        ? 'Calls: TURN relay configured (Wi-Fi ↔ mobile data calls supported)'
+        : 'Calls: no TURN relay configured — calls between different networks may fail');
 }
 
 /**
@@ -505,7 +567,7 @@ router.get('/room/:callId', async (req: Request, res: Response): Promise<any> =>
         targetId: otherParty(session, t.uid),
         token: String(token),
         isVideo,
-        iceServers: getIceServers(),
+        iceServers: await getIceServers(),
     });
 
     const html = `<!DOCTYPE html>
