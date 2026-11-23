@@ -17,6 +17,7 @@ import moderationRoutes from './routes/moderation.routes';
 import notificationRoutes from './routes/notification.routes';
 import usersRoutes from './routes/users.routes';
 import communityRoutes from './routes/community.routes';
+import listingRoutes from './routes/listing.routes';
 
 // Express application (no network listener here — see index.ts). Importable by tests.
 const app: Application = express();
@@ -100,6 +101,7 @@ app.use('/api/moderation', moderationRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/communities', communityRoutes);
+app.use('/api/listings', listingRoutes);
 
 // Serve uploaded images statically with security flags
 app.use('/uploads', express.static(path.join(__dirname, '../uploads'), {

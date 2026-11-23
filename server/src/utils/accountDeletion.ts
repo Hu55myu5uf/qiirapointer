@@ -55,6 +55,9 @@ export async function deleteAccountData(uid: string): Promise<{ deletedDocuments
         toDelete.push(l.ref);
     }
 
+    // Their property listings
+    toDelete.push(...await refsOf(db.collection('listings').where('ownerId', '==', uid)));
+
     // Free their @username
     const username = (await userRef.get()).data()?.username;
     if (typeof username === 'string' && username) {

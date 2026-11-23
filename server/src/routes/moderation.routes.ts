@@ -27,7 +27,7 @@ export const REPORT_REASONS = [
 router.post('/report', authenticateUser, reportLimiter, async (req: Request, res: Response) => {
     try {
         const {
-            targetType,    // 'post' | 'comment' | 'user' | 'vendor'
+            targetType,    // 'post' | 'comment' | 'user' | 'vendor' | 'listing'
             targetId,      // ID of the reported entity
             targetUserId,  // User ID responsible for the content
             targetTitle,   // Optional preview or title
@@ -42,7 +42,7 @@ router.post('/report', authenticateUser, reportLimiter, async (req: Request, res
             });
         }
 
-        const validTypes = ['post', 'comment', 'user', 'vendor'];
+        const validTypes = ['post', 'comment', 'user', 'vendor', 'listing'];
         if (!validTypes.includes(targetType)) {
             return res.status(400).json({ error: `Invalid targetType. Allowed: ${validTypes.join(', ')}` });
         }
